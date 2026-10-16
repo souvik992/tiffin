@@ -1,0 +1,23 @@
+{
+  "name": "pos-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline-first QSR POS backend: GST billing core, SQLite store, print queue, local HTTP API. Zero runtime dependencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "seed": "node src/seed.ts",
+    "test": "node --test --test-concurrency=1 \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "dev": "node scripts/dev.ts",
+    "restore": "node scripts/restore.ts",
+    "receipt": "node scripts/receipt.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}

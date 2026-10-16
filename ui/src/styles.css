@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/* Fonts are bundled (src/assets/fonts) so the counter looks the same with no internet. Both are variable fonts (SIL OFL). */
+@font-face { font-family: 'Fraunces'; font-style: normal; font-weight: 400 700; font-display: swap; src: url('./assets/fonts/fraunces-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Manrope'; font-style: normal; font-weight: 400 800; font-display: swap; src: url('./assets/fonts/manrope-latin.woff2') format('woff2'); }
+
+/* Design tokens from the Lovable "Tiffin POS" prototype. */
+:root {
+  --radius: .875rem;
+  --background: oklch(96.5% .008 80);
+  --foreground: oklch(26% .03 50);
+  --card: oklch(99.8% .003 80);
+  --card-foreground: oklch(26% .03 50);
+  --primary: oklch(66% .2 45);
+  --primary-foreground: oklch(99% .01 80);
+  --secondary: oklch(95% .015 75);
+  --secondary-foreground: oklch(26% .03 50);
+  --muted: oklch(93.5% .015 75);
+  --muted-foreground: oklch(55% .03 55);
+  --accent: oklch(93% .05 60);
+  --accent-foreground: oklch(35% .08 45);
+  --destructive: oklch(57.7% .245 27.325);
+  --destructive-foreground: oklch(99% 0 0);
+  --veg: oklch(55% .15 145);
+  --nonveg: oklch(52% .19 27);
+  --success: oklch(55% .13 150);
+  --border: oklch(91.5% .015 70);
+  --input: oklch(91.5% .015 70);
+  --ring: oklch(66% .2 45);
+}
+
+@theme inline {
+  --font-sans: "Manrope", system-ui, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-veg: var(--veg);
+  --color-nonveg: var(--nonveg);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+}
+
+/* Browser printing of a receipt: only the receipt is printed, at its own paper width. */
+@media print {
+  @page { margin: 3mm; }
+  body * { visibility: hidden !important; }
+  .print-receipt, .print-receipt * { visibility: visible !important; }
+  .print-receipt { position: absolute; left: 0; top: 0; margin: 0 !important; color: #000 !important; background: #fff !important; }
+  /* Reports: print only the report copy, on A4 landscape, across as many pages as it needs. */
+  @page report { size: A4 landscape; margin: 10mm; }
+  body:has(> .print-report) > :not(.print-report) { display: none !important; }
+  .print-report { display: block !important; page: report; color: #000 !important; background: #fff !important; font-size: 10px; }
+  .print-report, .print-report * { visibility: visible !important; }
+  .print-report table { width: 100%; border-collapse: collapse; }
+  .print-report th, .print-report td { border: 1px solid #999; padding: 2px 4px !important; color: #000 !important; background: #fff !important; }
+  .print-report thead { display: table-header-group; }
+  .print-report tr { break-inside: avoid; }
+  .print-report .overflow-x-auto { overflow: visible !important; border: 0 !important; }
+}
+@media screen { .print-report { display: none; } }
+
+@layer components {
+  .chip { @apply inline-flex items-center whitespace-nowrap rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary; }
+  .chip-active { @apply border-primary bg-primary text-primary-foreground hover:bg-primary; }
+  .cat-chip { @apply inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:border-primary; }
+  .cat-chip-active { @apply border-primary bg-primary text-primary-foreground hover:bg-primary; }
+  .rail-btn { @apply flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground; }
+  .rail-btn-active { @apply bg-accent text-primary; }
+  /* Sidebar tooltip, styled like the prototype's: appears to the right after a short delay. */
+  .rail-tip {
+    @apply pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 scale-95 whitespace-nowrap rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-0 shadow-md transition duration-150;
+  }
+  .group:hover > .rail-tip, .group:focus-visible > .rail-tip { @apply scale-100 opacity-100 delay-150; }
+  .item-card { @apply rounded-2xl border border-border bg-card p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-lg active:scale-[.98]; }
+  .qty-btn { @apply flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-lg leading-none font-semibold transition-colors hover:border-primary hover:text-primary active:bg-secondary; }
+  .pay-btn { @apply flex h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background text-sm font-semibold transition-colors hover:border-primary active:bg-secondary; }
+  .pay-btn-active { @apply border-primary bg-accent text-primary; }
+  .btn-primary { @apply inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90; }
+  .btn-ghost { @apply inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold hover:bg-secondary; }
+  .field { @apply h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary; }
+  .table { @apply w-full overflow-hidden rounded-xl border border-border bg-card text-sm; }
+  .veg-mark { @apply inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border-[1.5px]; }
+}

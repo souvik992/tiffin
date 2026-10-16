@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# local POS data (databases, journals, backups, photos): never commit real or demo bills
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# build output
+ui/dist/
+desktop/dist/
+desktop/release/
+addons/dist/
+addons/*/.build/
+
+# logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# secrets: the add-on signing key lives in %USERPROFILE%\.tiffinpos, never here
+*.pem
+.env
+.env.*

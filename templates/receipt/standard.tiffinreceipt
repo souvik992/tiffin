@@ -1,0 +1,36 @@
+{
+  "format": "tiffin-receipt",
+  "version": 1,
+  "name": "Standard",
+  "description": "The POS's built-in layout, as a design file. Start here when making a design for a shop.",
+  "blocks": [
+    { "type": "text", "text": "{{outlet.name}}", "align": "center", "bold": true, "size": "big" },
+    { "type": "text", "text": "{{outlet.address}}", "align": "center" },
+    { "type": "text", "text": "Ph: {{outlet.phone}}", "align": "center" },
+    { "type": "text", "text": "GSTIN: {{outlet.gstin}}", "align": "center" },
+    { "type": "text", "text": "FSSAI: {{outlet.fssai}}", "align": "center" },
+    { "type": "rule" },
+    { "type": "doc-title" },
+    { "type": "field", "label": "No:", "value": "{{invoice.no}}" },
+    { "type": "field", "label": "Date:", "value": "{{invoice.date}}" },
+    { "type": "field", "label": "Against:", "value": "{{invoice.against}}" },
+    { "type": "field", "label": "Buyer GSTIN:", "value": "{{invoice.buyer-gstin}}" },
+    { "type": "field", "label": "Cashier:", "value": "{{cashier.name}}" },
+    { "type": "field", "label": "Token:", "value": "{{invoice.token}}", "bold": true },
+    { "type": "rule" },
+    { "type": "items", "columns": [
+      { "field": "name", "width": "*" },
+      { "field": "qty" },
+      { "field": "rate" },
+      { "field": "amount" }
+    ] },
+    { "type": "rule" },
+    { "type": "totals", "rows": ["subtotal", "discount", "taxable", "gst", "cess", "roundoff"] },
+    { "type": "rule", "char": "=" },
+    { "type": "grand-total" },
+    { "type": "rule", "char": "=" },
+    { "type": "payments" },
+    { "type": "rule" },
+    { "type": "footer" }
+  ]
+}

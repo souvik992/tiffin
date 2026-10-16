@@ -1,0 +1,30 @@
+{
+  "name": "tiffin-pos-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Windows desktop app for the offline-first POS: Electron host around the backend and the React UI.",
+  "author": "Tiffin POS",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node scripts/electron.mjs .",
+    "icon": "node scripts/electron.mjs scripts/make-icon.cjs",
+    "test": "node --test test/protocol.test.ts",
+    "typecheck": "tsc -p .",
+    "dist": "node scripts/build.mjs && electron-builder --win --config electron-builder.config.cjs",
+    "dist:dir": "node scripts/build.mjs && electron-builder --win dir --config electron-builder.config.cjs",
+    "test:e2e": "node scripts/build.mjs && node --test test/app.e2e.test.ts"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.8.3"
+  }
+}

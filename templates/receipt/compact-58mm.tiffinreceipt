@@ -1,0 +1,24 @@
+{
+  "format": "tiffin-receipt",
+  "version": 1,
+  "name": "Compact (58 mm)",
+  "description": "Short bill for narrow 58 mm paper: quantity and amount only, GST as one line per rate.",
+  "blocks": [
+    { "type": "text", "text": "{{outlet.name}}", "align": "center", "bold": true, "size": "tall" },
+    { "type": "text", "text": "GSTIN {{outlet.gstin}}", "align": "center" },
+    { "type": "doc-title" },
+    { "type": "text", "text": "{{invoice.no}}  {{invoice.date}}", "align": "center" },
+    { "type": "text", "text": "Token {{invoice.token}}", "align": "center", "bold": true, "if": "invoice.token" },
+    { "type": "rule" },
+    { "type": "items", "header": false, "modifiers": true, "notes": false, "columns": [
+      { "field": "qty" },
+      { "field": "name", "width": "*" },
+      { "field": "amount" }
+    ] },
+    { "type": "rule" },
+    { "type": "totals", "rows": ["discount", "gst", "roundoff"] },
+    { "type": "grand-total" },
+    { "type": "payments", "change": true },
+    { "type": "footer" }
+  ]
+}

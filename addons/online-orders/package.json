@@ -1,0 +1,26 @@
+{
+  "name": "tiffin-pos-addon-online-orders",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Online Orders add-on for Tiffin POS: online orders settings, serviceability (map, distance bands, fees, hours) and the ODS.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"test/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "build": "node scripts/build.mjs",
+    "installer": "node scripts/build.mjs && node scripts/installer.mjs"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.57.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/leaflet": "^1.9.22",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.3"
+  }
+}
