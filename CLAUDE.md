@@ -5,8 +5,8 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## What is where
 | Folder | What |
 |---|---|
-| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 8, `user_mobile`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
-| `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation, Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Users for the owner); with the ODS add-on also ODS, Settings > Online orders and Serviceability. |
+| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 9, `coupons`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
+| `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation, Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Coupons, Users for the owner); with the ODS add-on also ODS, Settings > Online orders and Serviceability. |
 | `desktop/` | Electron 44 Windows app. The backend runs in a utility process; the UI is on `app://pos`; `/api` is forwarded with a per-launch `X-POS-Secret`. NSIS per-user installer goes to `desktop/release/`. See `desktop/README.md`. |
 | `addons/` | Separately installed, signed modules (`docs/ADDONS.md`). `addons/ods`: Online orders settings, Serviceability (map, distance bands, fees with GST, road factor, hours), Settings > API keys (owner: Google Maps key for map + place search; OpenStreetMap without it), order hub pairing + connector (outbox, SSE) and the live ODS; own package, tests, build (`npm run build` -> `addons/dist/packages`) and installer (`npm run installer`). |
 | `hub/` | Online order hub: Node + node:sqlite, SSE to the POS, customer API, demo page `/order/<slug>`. `hub/README.md`. |
@@ -17,7 +17,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (179 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (183 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `hub/` | `npm run dev` (local hub + demo store, prints a pairing code), `npm start`, `npm run admin -- create-store|pairing-code|list|revoke-device`, `npm test`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |

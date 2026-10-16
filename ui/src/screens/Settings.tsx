@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  Banknote, Bluetooth, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Store, Trash2, Usb, Users, Wifi,
+  Banknote, Bluetooth, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Store, Ticket, Trash2, Usb, Users, Wifi,
 } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Printer, PrinterInput, ReceiptDesign, ReceiptDesignPreview, SerialPortInfo, Transport, UsbDevice, WindowsPrinter } from '../lib/api.ts';
@@ -10,6 +10,7 @@ import { Modal, PageShell } from '../components/ui.tsx';
 import { ReceiptLines } from '../components/print.tsx';
 import { StoreSettings } from './StoreSettings.tsx';
 import { UsersSettings } from './UsersSettings.tsx';
+import { CouponsSettings } from './CouponsSettings.tsx';
 import { useAddons } from '../lib/addons.ts';
 
 type Section = string; // core sections, or one an add-on registered
@@ -39,7 +40,10 @@ export function Settings() {
     ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
     ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
-    ...(user?.role === 'owner' ? [['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(user?.role === 'owner' ? [
+      ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
+      ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
+    ] : []),
   ];
   const shown: Section = items.some(([k]) => k === section) ? section : 'printers';
   const AddonSection = addonSections.find((s) => s.key === shown)?.component;
@@ -56,7 +60,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : <ReceiptSettings />}</div>
         </div>
       )}
     </PageShell>

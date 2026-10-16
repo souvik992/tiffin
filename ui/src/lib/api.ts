@@ -8,6 +8,12 @@ export interface LoginUser { id: string; name: string; role: Role; hasMobile: bo
 export type LoginWith = { mobile: string } | { userId: string };
 export interface Me { userId: string; role: Role; name: string }
 /** Settings > Users (owner only). */
+export interface Coupon {
+  id: string; code: string; description: string | null; type: 'percent' | 'amount'; value: number; maxDiscount: number | null; minBill: number;
+  validFrom: string | null; validTo: string | null; maxUses: number | null; active: boolean; uses: number;
+  status: 'active' | 'off' | 'not_started' | 'expired' | 'used_up';
+}
+export type CouponInput = Omit<Coupon, 'id' | 'uses' | 'status'>;
 export interface StaffUser { id: string; name: string; role: Role; mobile: string | null; active: boolean; locked: boolean; createdAt: number; you: boolean }
 export interface Category { id: string; name: string; sortOrder: number; kitchenStation: string | null; itemCount: number }
 export interface ImportPreview {
@@ -37,6 +43,8 @@ export interface CartLine {
 export interface Order {
   id: string; status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; channel: string; tokenNo: number; customerPhone: string | null; customerName: string | null; note: string | null;
   placeOfSupply: string; buyerGstin: string | null; shiftId: string; createdAt: number; updatedAt: number; billDiscount: Discount | null; discountApproved: boolean;
+  /** The coupon on this bill; problem = why it does not apply right now. */
+  coupon: { code: string; description: string | null; problem: string | null } | null;
 }
 export interface Cart { order: Order; lines: CartLine[]; totals: Totals }
 export interface OpenOrder {
@@ -267,6 +275,11 @@ export function createApi(o: ApiOptions) {
     removeLine: (lineId: string, override?: Override, key?: string) => change<Cart>('DELETE', `/lines/${enc(lineId)}`, override ? { override } : {}, key),
     billDiscount: (orderId: string, discount: Discount | null, override?: Override, key?: string) =>
       change<Cart>('POST', `/orders/${enc(orderId)}/discount`, override ? { discount, override } : { discount }, key),
+    applyCoupon: (orderId: string, code: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/coupon`, { code }, key),
+    removeCoupon: (orderId: string, key?: string) => change<Cart>('DELETE', `/orders/${enc(orderId)}/coupon`, {}, key),
+    coupons: () => get<Coupon[]>('/coupons'),
+    createCoupon: (c: CouponInput, key?: string) => change<Coupon>('POST', '/coupons', c, key),
+    updateCoupon: (id: string, c: CouponInput, key?: string) => change<Coupon>('PUT', `/coupons/${enc(id)}`, c, key),
     cancelOrder: (orderId: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/cancel`, {}, key),
     finalize: (orderId: string, payments: PaymentIn[], key?: string) => change<FinalizeResult>('POST', `/orders/${enc(orderId)}/finalize`, { payments }, key),
     // invoices

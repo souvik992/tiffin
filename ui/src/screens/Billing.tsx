@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { BadgePercent, Banknote, Bell, CreditCard, LogOut, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Trash2, UserRound, Wallet, X } from 'lucide-react';
+import { BadgePercent, Banknote, Bell, CircleAlert, CreditCard, LogOut, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Cart, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
 import { formatPaise, formatPrice, formatQty, formatRateBp, formatStockQty, parsePercentBp, parseRupees } from '../lib/money.ts';
@@ -164,6 +164,19 @@ export function Billing() {
           const key = newKey();
           await mutate(async () => (await withApproval('A discount above your limit', (o) => api.billDiscount(c.order.id, d, o, key))) ?? cartRef.current);
         }}
+        onCoupon={async (code) => {
+          let problem: string | null = null;
+          const key = newKey();
+          await mutate(async (c) => {
+            if (!c) return c;
+            if (code === null) return api.removeCoupon(c.order.id, key);
+            try { return await api.applyCoupon(c.order.id, code, key); } catch (e) {
+              if (e instanceof ApiError && (e.code === 'COUPON_INVALID' || e.code === 'EMPTY_CART')) { problem = e.message; return c; }
+              throw e;
+            }
+          });
+          return problem;
+        }}
         onPaid={(r) => { setCart(null); setLastBill(r); }} />}
 
       {modifierItem && catalog && <ModifierDialog item={modifierItem} catalog={catalog} onClose={() => setModifierItem(null)} onAdd={(ids) => { void addItem(modifierItem, ids); setModifierItem(null); }} />}
@@ -175,9 +188,9 @@ export function Billing() {
   );
 }
 
-function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount, onPaid, lastBill, onNewBill }: {
+function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount, onCoupon, onPaid, lastBill, onNewBill }: {
   cart: Cart | null; busy: boolean; onQty: (lineId: string, d: 1 | -1) => void; onClear: () => void; onHold: () => void; onCustomer: () => void;
-  onDiscount: (d: Discount | null) => Promise<void>; onPaid: (r: FinalizeResult) => void; lastBill: FinalizeResult | null; onNewBill: () => void;
+  onDiscount: (d: Discount | null) => Promise<void>; onCoupon: (code: string | null) => Promise<string | null>; onPaid: (r: FinalizeResult) => void; lastBill: FinalizeResult | null; onNewBill: () => void;
 }) {
   const { api, notify, fail } = useSession();
   const [mode, setMode] = useState<PayMode>('CASH');
@@ -187,6 +200,9 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
   const [discType, setDiscType] = useState<Discount['type']>('percent');
   const [discValue, setDiscValue] = useState('');
   const [discError, setDiscError] = useState('');
+  const [discMode, setDiscMode] = useState<'coupon' | 'discount'>('coupon');
+  const [couponCode, setCouponCode] = useState('');
+  const coupon = cart?.order.coupon ?? null;
   const [paying, setPaying] = useState(false);
   const [splitting, setSplitting] = useState(false);
   // One key per bill until it succeeds: a double click or a retry after a lost response returns the same invoice.
@@ -205,6 +221,14 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
     setDiscError('');
     await onDiscount({ type: discType, value });
     setDiscValue(''); setShowDiscount(false);
+  };
+  const applyCouponCode = async () => {
+    const code = couponCode.trim().toUpperCase();
+    if (code.length < 3) return setDiscError('Type the coupon code.');
+    setDiscError('');
+    const problem = await onCoupon(code);
+    if (problem) return setDiscError(problem);
+    setCouponCode(''); setShowDiscount(false);
   };
 
   const pay = async () => {
@@ -260,6 +284,20 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
 
       {showDiscount && !empty && (
         <div className="space-y-2 border-y border-border bg-secondary/60 px-4 py-2">
+          <div className="flex gap-1.5" role="tablist" aria-label="Coupon or discount">
+            {(['coupon', 'discount'] as const).map((m) => (
+              <button key={m} role="tab" aria-selected={discMode === m} className={`pay-btn h-9 flex-1 text-sm ${discMode === m ? 'pay-btn-active' : ''}`} onClick={() => { setDiscMode(m); setDiscError(''); }}>
+                {m === 'coupon' ? 'Coupon code' : 'Discount'}
+              </button>
+            ))}
+          </div>
+          {discMode === 'coupon' ? (
+            <div className="flex gap-2">
+              <input className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 font-mono text-sm uppercase outline-none focus:border-primary" aria-label="Coupon code" autoFocus
+                placeholder="e.g. SAVE10" maxLength={20} value={couponCode} onChange={(e) => setCouponCode(e.target.value.replace(/[^A-Za-z0-9-]/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') void applyCouponCode(); }} />
+              <button className="btn-primary h-11 shrink-0 px-5" onClick={() => void applyCouponCode()} disabled={busy}>Apply</button>
+            </div>
+          ) : (
           <div className="flex gap-2">
             <div className="flex shrink-0 gap-1.5" role="group" aria-label="Discount type">
               <button className={`pay-btn h-11 w-11 text-base ${discType === 'percent' ? 'pay-btn-active' : ''}`} aria-label="Percentage discount" onClick={() => setDiscType('percent')}>%</button>
@@ -269,6 +307,7 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
               inputMode="decimal" placeholder={discType === 'percent' ? 'e.g. 10' : 'e.g. 50'} value={discValue} onChange={(e) => setDiscValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void applyDiscount(); }} />
             <button className="btn-primary h-11 shrink-0 px-5" onClick={() => void applyDiscount()} disabled={busy}>Apply</button>
           </div>
+          )}
           {discError && <p className="text-xs text-destructive">{discError}</p>}
         </div>
       )}
@@ -297,7 +336,16 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
       {t && !empty && (
         <div className="space-y-0.5 border-t border-border px-4 py-1.5 text-xs tabular-nums">
           <Row label={`Subtotal (${t.itemCount} item${t.itemCount === 1 ? '' : 's'})`} value={formatPaise(t.grossTotal)} />
-          {t.discountTotal > 0 && (
+          {coupon && (
+            <div className={`flex items-center justify-between ${coupon.problem ? 'text-destructive' : 'text-primary'}`}>
+              <span className="flex min-w-0 items-center gap-1.5"><Ticket className="h-4 w-4" /><span className="truncate">Coupon {coupon.code}</span></span>
+              <span className="flex shrink-0 items-center gap-1.5">{coupon.problem ? 'not applied' : `−${formatPaise(t.discountTotal)}`}
+                <button className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-destructive" aria-label="Remove coupon" onClick={() => void onCoupon(null)}><X className="h-4 w-4" /></button>
+              </span>
+            </div>
+          )}
+          {coupon?.problem && <p role="alert" className="flex gap-1 text-[11px] text-destructive"><CircleAlert className="h-3.5 w-3.5 shrink-0" />{coupon.problem} Remove it or change the bill to pay.</p>}
+          {t.discountTotal > 0 && !coupon && (
             <div className="flex items-center justify-between text-primary">
               <span className="flex min-w-0 items-center gap-1.5"><BadgePercent className="h-4 w-4" /><span className="truncate">Discount{cart?.order.billDiscount?.type === 'percent' ? ` ${formatRateBp(cart.order.billDiscount.value)}` : ''}</span></span>
               <span className="flex shrink-0 items-center gap-1.5">−{formatPaise(t.discountTotal)}

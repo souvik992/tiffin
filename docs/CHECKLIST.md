@@ -159,7 +159,8 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Yearly archive files (not needed until a shop's database grows large)
 
 ### UI screens still missing
-- [ ] Coupon codes (the prototype had a field; the backend has no coupons)
+- [x] Coupon codes: Settings > Coupons (owner only: create, edit, switch off; managers and cashiers do not see it): % or Rs off, % cap, minimum bill, valid dates, number of uses, on/off; Billing % button > Coupon code; checked when applied and again at payment; a coupon needs no manager PIN; a manual discount replaces it; cancelling a bill frees its use
+- [ ] Coupon follow-ups: coupon code printed on the bill (receipt content: needs review), coupons in the Discounts report, one use per customer mobile, coupons for online orders
 - [ ] Line-level discounts and notes (backend done)
 - [x] Reports screen (sidebar): 16 reports in 5 groups. Sales: summary, payment modes, by hour, channels, by cashier, discounts. Items: item sales, category sales. Tax: GST by rate, HSN summary, bill register. Controls: cancellations and refunds, shifts and cash. Inventory: stock on hand, stock movement, purchases
 - [x] Reports show on screen (summary cards, table, totals row), date presets (today, yesterday, last 7 days, this month, last month, custom), Download CSV for Excel, Print / PDF (A4 landscape)

@@ -12,6 +12,8 @@ import { computeInvoice, MAX_QTY_MILLI } from '../core/tax.ts';
 import type { InvoiceComputation, TaxableLineInput } from '../core/tax.ts';
 import type { DiscountSpec } from '../core/discount.ts';
 import { istDay } from '../core/numbering.ts';
+import { mulDivRound } from '../core/money.ts';
+import { couponById, couponProblem, findCouponByCode } from './coupons.ts';
 import { camel } from './camel.ts';
 
 export interface OrderRow {
@@ -19,6 +21,7 @@ export interface OrderRow {
   status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; customer_phone: string | null; customer_name: string | null; note: string | null;
   place_of_supply: string | null; buyer_gstin: string | null; bill_discount_type: 'amount' | 'percent' | null; bill_discount_value: number | null;
   discount_approved_by: string | null; discount_approved_bp: number | null; created_by: string | null; created_at: number; updated_at: number;
+  coupon_id: string | null; coupon_code: string | null;
 }
 export interface CartLineRow {
   id: string; order_id: string; item_id: string; qty_milli: number; unit_price: number; disc_type: 'amount' | 'percent' | null; disc_value: number | null;
@@ -47,7 +50,10 @@ export function outletState(ctx: Ctx): string {
   return get<{ state_code: string }>(ctx.db, 'SELECT o.state_code FROM outlet o JOIN device d ON d.outlet_id = o.id WHERE d.id = ?', getDevice(ctx).id)!.state_code;
 }
 
-export function computeFor(ctx: Ctx, order: OrderRow, lines: CartLineRow[], settings: Settings): { calc: InvoiceComputation; placeOfSupply: string } {
+/** The coupon on a bill: its code, and why it cannot be used right now (null = it applies). */
+export interface CouponState { code: string; description: string | null; problem: string | null }
+
+export function computeFor(ctx: Ctx, order: OrderRow, lines: CartLineRow[], settings: Settings): { calc: InvoiceComputation; placeOfSupply: string; coupon: CouponState | null } {
   const home = outletState(ctx);
   const pos = order.place_of_supply ?? home;
   const inputs: TaxableLineInput[] = lines.map((l) => ({
@@ -55,12 +61,26 @@ export function computeFor(ctx: Ctx, order: OrderRow, lines: CartLineRow[], sett
     discount: l.disc_type && l.disc_value !== null ? { type: l.disc_type, value: l.disc_value } : null,
     rateBp: l.rate_bp, cessBp: l.cess_bp, priceIncludesTax: l.price_includes_tax === 1,
   }));
+  const opts = { intraState: pos === home, roundToRupee: settings.roundToRupee };
   try {
+    if (order.coupon_id) {
+      // A coupon is the bill discount. It applies only while valid (else the bill shows why and cannot be paid with it).
+      // Percent coupons are turned into an amount so a cap can apply; same rounding as a percent bill discount.
+      const base = computeInvoice(inputs, { ...opts, billDiscount: null });
+      const c = couponById(ctx, order.coupon_id);
+      const problem = !c ? 'This coupon no longer exists.' : lines.length === 0 ? null : couponProblem(ctx, c, base.grandTotal);
+      const coupon = { code: order.coupon_code ?? c?.code ?? '', description: c?.description ?? null, problem };
+      if (!c || problem || lines.length === 0) return { calc: base, placeOfSupply: pos, coupon };
+      const remaining = base.grossTotal - base.discountTotal;
+      let off = c.type === 'percent' ? mulDivRound(remaining, c.value, 10000) : c.value;
+      if (c.type === 'percent' && c.max_discount !== null) off = Math.min(off, c.max_discount);
+      off = Math.min(off, remaining);
+      return { calc: computeInvoice(inputs, { ...opts, billDiscount: off > 0 ? { type: 'amount', value: off } : null }), placeOfSupply: pos, coupon };
+    }
     const calc = computeInvoice(inputs, {
-      billDiscount: order.bill_discount_type && order.bill_discount_value !== null ? { type: order.bill_discount_type, value: order.bill_discount_value } : null,
-      intraState: pos === home, roundToRupee: settings.roundToRupee,
+      ...opts, billDiscount: order.bill_discount_type && order.bill_discount_value !== null ? { type: order.bill_discount_type, value: order.bill_discount_value } : null,
     });
-    return { calc, placeOfSupply: pos };
+    return { calc, placeOfSupply: pos, coupon: null };
   } catch (e) {
     if (e instanceof RangeError) throw new AppError('INVALID_AMOUNT', e.message, 422);
     throw e;
@@ -76,7 +96,7 @@ export function discountRatioBp(calc: InvoiceComputation): number {
 export function getCart(ctx: Ctx, orderId: string) {
   const order = getOrderRow(ctx, orderId);
   const lines = loadCartLines(ctx, orderId);
-  const { calc, placeOfSupply } = computeFor(ctx, order, lines, loadSettings(ctx));
+  const { calc, placeOfSupply, coupon } = computeFor(ctx, order, lines, loadSettings(ctx));
   const byId = new Map(calc.lines.map((l) => [l.id, l]));
   return {
     order: {
@@ -84,6 +104,7 @@ export function getCart(ctx: Ctx, orderId: string) {
       placeOfSupply, buyerGstin: order.buyer_gstin, shiftId: order.shift_id, createdAt: order.created_at, updatedAt: order.updated_at,
       billDiscount: order.bill_discount_type ? { type: order.bill_discount_type, value: order.bill_discount_value } : null,
       discountApproved: order.discount_approved_by !== null,
+      coupon,
     },
     lines: lines.map((l) => {
       const c = byId.get(l.id)!;
@@ -108,7 +129,7 @@ export function getCart(ctx: Ctx, orderId: string) {
 export function enforceDiscountPolicy(ctx: Ctx, actor: Actor, orderId: string, override?: Override | null): void {
   const order = getOrderRow(ctx, orderId);
   const settings = loadSettings(ctx);
-  const { calc } = computeFor(ctx, order, loadCartLines(ctx, orderId), settings);
+  const { calc } = computeFor(ctx, { ...order, coupon_id: null }, loadCartLines(ctx, orderId), settings); // a coupon was approved by the owner
   const ratio = discountRatioBp(calc);
   if (ratio <= settings.cashierDiscountLimitBp) {
     if (order.discount_approved_by !== null) run(ctx.db, 'UPDATE sale_order SET discount_approved_by = NULL, discount_approved_bp = NULL WHERE id = ?', orderId);
@@ -140,7 +161,7 @@ function validPhone(p: unknown): string | null {
 function validName(n: unknown): string | null {
   if (n === undefined || n === null) return null;
   if (typeof n !== 'string') throw new AppError('VALIDATION', 'Customer name must be text.');
-  const t = n.trim().replace(/s+/g, ' ');
+  const t = n.trim().replace(/\s+/g, ' ');
   if (t.length > 60) throw new AppError('VALIDATION', 'Customer name can be at most 60 characters.');
   return t || null;
 }
@@ -261,10 +282,39 @@ export function applyBillDiscount(ctx: Ctx, actor: Actor, requestId: string, inp
     assertPerm(actor, 'order.write');
     assertOpen(getOrderRow(ctx, input.orderId));
     const d = validDiscount(input.discount);
-    run(ctx.db, 'UPDATE sale_order SET bill_discount_type = ?, bill_discount_value = ?, updated_at = ? WHERE id = ?', d?.type ?? null, d?.value ?? null, ctx.clock.now(), input.orderId);
+    run(ctx.db, 'UPDATE sale_order SET bill_discount_type = ?, bill_discount_value = ?, coupon_id = CASE WHEN ? IS NULL THEN coupon_id ELSE NULL END, coupon_code = CASE WHEN ? IS NULL THEN coupon_code ELSE NULL END, updated_at = ? WHERE id = ?', d?.type ?? null, d?.value ?? null, d?.type ?? null, d?.type ?? null, ctx.clock.now(), input.orderId);
     enforceDiscountPolicy(ctx, actor, input.orderId, input.override);
     audit(ctx, actor.userId, 'order.bill_discount', 'order', input.orderId, d);
     return getCart(ctx, input.orderId);
+  });
+}
+
+/** A coupon code on the bill (replaces a manual bill discount). Refused with the reason when it cannot be used. */
+export function applyCoupon(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; code: string }) {
+  return cartCmd(ctx, requestId, 'order.coupon', actor, () => {
+    assertPerm(actor, 'order.write');
+    const o = getOrderRow(ctx, input.orderId);
+    assertOpen(o);
+    const c = findCouponByCode(ctx, input.code);
+    const lines = loadCartLines(ctx, o.id);
+    if (!lines.length) throw new AppError('EMPTY_CART', 'Add items before the coupon.', 422);
+    const base = computeFor(ctx, { ...o, coupon_id: null, bill_discount_type: null, bill_discount_value: null }, lines, loadSettings(ctx)).calc;
+    const problem = couponProblem(ctx, c, base.grandTotal);
+    if (problem) throw new AppError('COUPON_INVALID', problem, 422);
+    run(ctx.db, 'UPDATE sale_order SET coupon_id = ?, coupon_code = ?, bill_discount_type = NULL, bill_discount_value = NULL, updated_at = ? WHERE id = ?', c.id, c.code, ctx.clock.now(), o.id);
+    enforceDiscountPolicy(ctx, actor, o.id);
+    audit(ctx, actor.userId, 'order.coupon', 'order', o.id, { code: c.code });
+    return getCart(ctx, o.id);
+  });
+}
+export function removeCoupon(ctx: Ctx, actor: Actor, requestId: string, orderId: string) {
+  return cartCmd(ctx, requestId, 'order.coupon_remove', actor, () => {
+    assertPerm(actor, 'order.write');
+    const o = getOrderRow(ctx, orderId);
+    assertOpen(o);
+    run(ctx.db, 'UPDATE sale_order SET coupon_id = NULL, coupon_code = NULL, updated_at = ? WHERE id = ?', ctx.clock.now(), o.id);
+    audit(ctx, actor.userId, 'order.coupon_remove', 'order', o.id, { code: o.coupon_code });
+    return getCart(ctx, o.id);
   });
 }
 

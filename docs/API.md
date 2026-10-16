@@ -23,6 +23,8 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | POST `/api/orders/:id/lines`; PATCH/DELETE `/api/lines/:lineId` | C | discount above limit needs approval |
 | PATCH `/api/orders/:id` (customer name and phone, note, buyer GSTIN, place of supply) | C | |
 | POST `/api/orders/:id/discount`, `/hold`, `/resume`, `/cancel` | C | |
+| POST `/api/orders/:id/coupon` `{ code }`; DELETE `/api/orders/:id/coupon` | C | 422 `COUPON_INVALID` with the reason; the cart's `order.coupon` = `{ code, description, problem }`; finalize answers 409 `COUPON_INVALID` while `problem` is set |
+| GET `/api/coupons`, POST `/api/coupons`, PUT `/api/coupons/:id` | O | owner only; `{ code, description, type: percent/amount, value (bp or paise), maxDiscount, minBill, validFrom, validTo (YYYY-MM-DD, India time), maxUses, active }`; list adds `uses` and `status` |
 | PATCH `/api/orders/:id` and DELETE `/api/lines/:lineId` accept `override` | C | a change that pushes an approved discount over the limit needs the manager again |
 | POST `/api/orders/:id/finalize` | C | `payments:[{mode,amount,tendered?,reference?}]` must equal the total; returns `print: {receipts, kitchenTickets, warnings}` (`NO_RECEIPT_PRINTER`, `NO_KITCHEN_PRINTER`) |
 | POST `/api/orders/:id/payment-check` `{payments}` (no key) | C | read only: `{total, paid, remaining, changeDue, ok, message}` for a split payment |

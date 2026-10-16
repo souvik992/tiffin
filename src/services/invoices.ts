@@ -64,7 +64,8 @@ export function finalizeInvoice(ctx: Ctx, actor: Actor, requestId: string, input
     if (lines.length === 0) throw new AppError('EMPTY_CART', 'Add at least one item.', 422);
     enforceDiscountPolicy(ctx, actor, order.id, input.override);
     const fresh = getOrderRow(ctx, order.id);
-    const { calc, placeOfSupply } = computeFor(ctx, fresh, lines, settings);
+    const { calc, placeOfSupply, coupon } = computeFor(ctx, fresh, lines, settings);
+    if (coupon?.problem) throw new AppError('COUPON_INVALID', `${coupon.problem} Remove the coupon or change the bill.`, 409);
     const bad = checkInvariants(calc);
     if (bad.length) throw new AppError('INTERNAL_TOTALS', `Totals failed self-check: ${bad[0]}`, 500);
     const pays = validatePayments(input.payments, calc.grandTotal);

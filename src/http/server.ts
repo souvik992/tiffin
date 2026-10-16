@@ -8,7 +8,7 @@ import type { Actor, Ctx } from '../services/ctx.ts';
 import { assertPerm } from '../services/permissions.ts';
 import { authenticate, changePin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
-import { addLine, applyBillDiscount, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
+import { addLine, applyBillDiscount, applyCoupon, removeCoupon, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
 import { cancelInvoice, checkPayments, createCreditNote, creditNoteOptions, finalizeInvoice, getInvoice, listInvoices, previewCreditNote, reprintInvoice } from '../services/invoices.ts';
 import { closeShift, currentShift, openShift, zReport } from '../services/shifts.ts';
 import { dailySummary, invoiceRegisterCsv, itemSales, taxSummary } from '../services/reports.ts';
@@ -30,6 +30,7 @@ import { readImage, removeItemImage, setItemImage } from '../services/images.ts'
 import { adjustStock, createPurchase, createStockItem, deleteStockItem, getPurchase, getRecipe, listMovements, listPurchases, listRecipes, listStockItems, previewPurchase, setRecipe, updateStockItem, voidPurchase, UNITS } from '../services/stock.ts';
 import { istDay } from '../core/numbering.ts';
 import { arr, bool, discount, int, nullable, obj, oneOf, opt, override, payment, str } from './validate.ts';
+import { createCoupon, listCoupons, updateCoupon } from '../services/coupons.ts';
 import type { V } from './validate.ts';
 
 interface RC {
@@ -113,6 +114,13 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/orders/:id/lines', {}, (c) => addLine(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...body(c, obj({ itemId: str({ min: 1, max: 64 }), qtyMilli: opt(int({ min: 1 })), modifierIds: opt(arr(str({ max: 64 }), { max: 30 })), note: opt(nullable(str({ max: 120 }))) })) }));
   add('PATCH', '/api/lines/:lineId', {}, (c) => updateLine(c.ctx, c.actor, rid(c), { lineId: c.params.lineId!, ...body(c, obj({ qtyMilli: opt(int({ min: 1 })), discount: opt(nullable(discount)), note: opt(nullable(str({ max: 120 }))), override: opt(override) })) }));
   add('DELETE', '/api/lines/:lineId', {}, (c) => removeLine(c.ctx, c.actor, rid(c), c.params.lineId!, body(c, obj({ override: opt(override) })).override));
+  add('POST', '/api/orders/:id/coupon', {}, (c) => applyCoupon(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...body(c, obj({ code: str({ min: 1, max: 20 }) })) }));
+  add('DELETE', '/api/orders/:id/coupon', {}, (c) => removeCoupon(c.ctx, c.actor, rid(c), c.params.id!));
+  const couponShape = { code: str({ min: 1, max: 20 }), description: opt(nullable(str({ max: 80 }))), type: oneOf('amount', 'percent'), value: int({ min: 1 }), maxDiscount: opt(nullable(int({ min: 1 }))),
+    minBill: opt(nullable(int({ min: 0 }))), validFrom: opt(nullable(str({ max: 10 }))), validTo: opt(nullable(str({ max: 10 }))), maxUses: opt(nullable(int({ min: 1 }))), active: opt(bool) };
+  add('GET', '/api/coupons', {}, (c) => listCoupons(c.ctx, c.actor));
+  add('POST', '/api/coupons', {}, (c) => createCoupon(c.ctx, c.actor, rid(c), body(c, obj(couponShape))));
+  add('PUT', '/api/coupons/:id', {}, (c) => updateCoupon(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj(couponShape))));
   add('POST', '/api/orders/:id/discount', {}, (c) => applyBillDiscount(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...body(c, obj({ discount: nullable(discount), override: opt(override) })) }));
   add('POST', '/api/orders/:id/hold', {}, (c) => holdOrder(c.ctx, c.actor, rid(c), c.params.id!));
   add('POST', '/api/orders/:id/resume', {}, (c) => resumeOrder(c.ctx, c.actor, rid(c), c.params.id!));

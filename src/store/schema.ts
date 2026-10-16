@@ -366,6 +366,20 @@ ALTER TABLE sale_order ADD COLUMN customer_name TEXT;
 `;
 
 // V8: staff sign in with their mobile number and PIN. Older users have none until the owner adds it.
+// V9: coupon codes, and the coupon a bill uses (its code is kept on the bill even if the coupon changes later).
+const V9 = `
+CREATE TABLE coupon (
+  id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, description TEXT,
+  type TEXT NOT NULL CHECK (type IN ('amount','percent')), value INTEGER NOT NULL CHECK (value > 0),
+  max_discount INTEGER CHECK (max_discount IS NULL OR max_discount > 0), min_bill INTEGER NOT NULL DEFAULT 0 CHECK (min_bill >= 0),
+  valid_from TEXT, valid_to TEXT, max_uses INTEGER CHECK (max_uses IS NULL OR max_uses > 0),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+ALTER TABLE sale_order ADD COLUMN coupon_id TEXT REFERENCES coupon(id);
+ALTER TABLE sale_order ADD COLUMN coupon_code TEXT;
+CREATE INDEX sale_order_coupon ON sale_order(coupon_id) WHERE coupon_id IS NOT NULL;
+`;
+
 const V8 = `
 ALTER TABLE app_user ADD COLUMN mobile TEXT;
 CREATE UNIQUE INDEX app_user_mobile ON app_user(mobile) WHERE mobile IS NOT NULL AND deleted_at IS NULL;
@@ -380,5 +394,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 6, name: 'addon_migrations', sql: V6 },
   { version: 7, name: 'customer_name', sql: V7 },
   { version: 8, name: 'user_mobile', sql: V8 },
+  { version: 9, name: 'coupons', sql: V9 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
