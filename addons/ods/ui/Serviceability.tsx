@@ -11,17 +11,28 @@ const DAYS: Array<[keyof Hours, string]> = [['1', 'Monday'], ['2', 'Tuesday'], [
 const COLORS = ['#16a34a', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2'];
 const BENGALURU: [number, number] = [12.9716, 77.5946];
 
+/** Leaflet shows the map credit as HTML; a typed credit is shown as plain text. */
+const escapeHtml = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 let cssAdded = false;
 const addCss = () => { if (cssAdded) return; cssAdded = true; const s = document.createElement('style'); s.textContent = leafletCss; document.head.appendChild(s); };
 
 /** Amounts are typed as rupees and stored as paise (the POS's money rules: no floating point). */
 interface ZoneForm { upToKm: string; deliveryFee: string; minOrder: string; freeDeliveryAbove: string; etaMinutes: string }
-interface Form { location: ServiceabilityConfig['location']; zones: ZoneForm[]; packagingFee: string; pickupMin: string; pickupEta: string; hours: Hours }
-const toForm = (c: ServiceabilityConfig): Form => ({
+interface MapProvider { kind: 'osm' | 'custom'; url: string | null; attribution: string | null }
+type Saved = ServiceabilityConfig & { feeTaxGroupId: string | null; map: MapProvider };
+interface TaxGroup { id: string; name: string; rateBp: number }
+interface Form {
+  location: ServiceabilityConfig['location']; zones: ZoneForm[]; packagingFee: string; pickupMin: string; pickupEta: string; hours: Hours;
+  roadFactor: string; feeTaxGroupId: string; mapKind: 'osm' | 'custom'; mapUrl: string; mapCredit: string;
+}
+const toForm = (c: Saved): Form => ({
   location: c.location,
   zones: c.zones.map((z) => ({ upToKm: String(z.upToKm), deliveryFee: money.paiseToInput(z.deliveryFee), minOrder: money.paiseToInput(z.minOrder), freeDeliveryAbove: z.freeDeliveryAbove === null ? '' : money.paiseToInput(z.freeDeliveryAbove), etaMinutes: String(z.etaMinutes) })),
   packagingFee: money.paiseToInput(c.packagingFee), pickupMin: money.paiseToInput(c.pickup.minOrder), pickupEta: String(c.pickup.etaMinutes),
   hours: structuredClone(c.hours),
+  roadFactor: (c.roadFactor ?? 1.3).toFixed(2), feeTaxGroupId: c.feeTaxGroupId ?? '',
+  mapKind: c.map.kind, mapUrl: c.map.url ?? '', mapCredit: c.map.attribution ?? '',
 });
 /** The form as the backend expects it; a typo becomes NaN/-1 so the backend names the field. */
 const fromForm = (f: Form): unknown => {
@@ -30,6 +41,8 @@ const fromForm = (f: Form): unknown => {
     location: f.location,
     zones: f.zones.map((z): Zone => ({ upToKm: Number(z.upToKm), deliveryFee: rupees(z.deliveryFee), minOrder: rupees(z.minOrder), freeDeliveryAbove: z.freeDeliveryAbove.trim() ? rupees(z.freeDeliveryAbove) : null, etaMinutes: Number(z.etaMinutes) })),
     packagingFee: rupees(f.packagingFee), pickup: { minOrder: rupees(f.pickupMin), etaMinutes: Number(f.pickupEta) }, hours: f.hours,
+    roadFactor: Number(f.roadFactor), feeTaxGroupId: f.feeTaxGroupId || null,
+    map: f.mapKind === 'osm' ? { kind: 'osm', url: null, attribution: null } : { kind: 'custom', url: f.mapUrl.trim(), attribution: f.mapCredit.trim() || null },
   };
 };
 
@@ -43,8 +56,13 @@ export function Serviceability() {
   const [saved, setSaved] = useState<string>('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [taxGroups, setTaxGroups] = useState<TaxGroup[]>([]);
+  const [mapView, setMapView] = useState<MapProvider | null>(null); // what the map shows: the saved provider
 
-  useEffect(() => { api.request<ServiceabilityConfig>('GET', `${BASE}/serviceability`).then((c) => { const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); }).catch((e) => notify('error', messageOf(e))); }, [api, notify]);
+  useEffect(() => {
+    api.request<Saved>('GET', `${BASE}/serviceability`).then((c) => { const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMapView(c.map); }).catch((e) => notify('error', messageOf(e)));
+    api.request<TaxGroup[]>('GET', `${BASE}/tax-groups`).then(setTaxGroups).catch(() => setTaxGroups([]));
+  }, [api, notify]);
   if (!form) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   const set = (patch: Partial<Form>) => { setForm({ ...form, ...patch }); setErrors({}); };
@@ -55,9 +73,9 @@ export function Serviceability() {
   const save = async () => {
     setBusy(true); setErrors({});
     try {
-      const c = await api.request<ServiceabilityConfig>('PUT', `${BASE}/serviceability`, fromForm(form), key.current);
+      const c = await api.request<Saved>('PUT', `${BASE}/serviceability`, fromForm(form), key.current);
       key.current = newKey();
-      const f = toForm(c); setForm(f); setSaved(JSON.stringify(f));
+      const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMapView(c.map);
       notify('success', 'Serviceability saved. It is sent to the online order hub when that is connected.');
     } catch (e) {
       key.current = newKey();
@@ -70,9 +88,12 @@ export function Serviceability() {
   return (
     <>
       <h2 className="mb-1 font-display text-2xl">Serviceability</h2>
-      <p className="mb-4 text-sm text-muted-foreground">Where this store delivers, what it charges, and when it takes online orders. Distances are straight-line from the store; roads can be about 30% longer.</p>
+      <p className="mb-4 text-sm text-muted-foreground">Where this store delivers, what it charges, and when it takes online orders. Distances are road distances: measured on the road map when the order hub has it, otherwise the straight line times the road factor below.</p>
       <div className="grid gap-4 2xl:grid-cols-2">
-        <LocationCard form={form} online={online?.enabled === true} readOnly={ro} onChange={(location) => set({ location })} error={errors.location} />
+        <div className="space-y-4">
+          <LocationCard key={JSON.stringify(mapView)} form={form} online={online?.enabled === true} readOnly={ro} credit={mapView?.kind === 'custom' ? escapeHtml(mapView.attribution ?? '') : '&copy; OpenStreetMap contributors'} onChange={(location) => set({ location })} error={errors.location} />
+          <MapProviderCard form={form} readOnly={ro} errors={errors} onChange={set} />
+        </div>
         <div className="space-y-4">
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Delivery areas">
             <div className="mb-2 flex items-center gap-2">
@@ -121,7 +142,18 @@ export function Serviceability() {
               <input className="field mt-1 w-full" inputMode="numeric" disabled={ro} value={form.pickupEta} onChange={(e) => set({ pickupEta: e.target.value })} aria-label="Pickup ready time" />
             </label>
             {err('pickup')}
-            <p className="text-xs text-muted-foreground sm:col-span-3">GST on delivery and packaging charges will be added to the bill when online orders are billed. Your CA should confirm the rate.</p>
+            <label className="text-sm font-medium sm:col-span-2">GST on delivery and packaging charges
+              <select className="field mt-1 w-full" disabled={ro} value={form.feeTaxGroupId} onChange={(e) => set({ feeTaxGroupId: e.target.value })} aria-label="GST on fees">
+                <option value="">Not chosen (delivery and packaging fees cannot be charged)</option>
+                {taxGroups.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.rateBp / 100}%)</option>)}
+              </select>
+              {err('feeTaxGroupId')}
+            </label>
+            <label className="text-sm font-medium">Road factor
+              <input className="field mt-1 w-full" inputMode="decimal" disabled={ro} value={form.roadFactor} onChange={(e) => set({ roadFactor: e.target.value })} aria-label="Road factor" />
+              {err('roadFactor')}
+            </label>
+            <p className="text-xs text-muted-foreground sm:col-span-3">The fees are billed as lines with this GST rate, so the bill and the online price match. Your CA should confirm the rate. Road factor: road distance is about this many times the straight line (1.30 = 30% longer); used when the hub has no road map.</p>
           </section>
 
           <HoursCard hours={form.hours} readOnly={ro} errors={errors} onChange={(hours) => set({ hours })} />
@@ -137,7 +169,7 @@ export function Serviceability() {
   );
 }
 
-function LocationCard({ form, online, readOnly, onChange, error }: { form: Form; online: boolean; readOnly: boolean; onChange: (l: Form['location']) => void; error?: string }) {
+function LocationCard({ form, online, readOnly, credit, onChange, error }: { form: Form; online: boolean; readOnly: boolean; credit: string; onChange: (l: Form['location']) => void; error?: string }) {
   const { api } = useSession();
   const div = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -155,7 +187,7 @@ function LocationCard({ form, online, readOnly, onChange, error }: { form: Form;
     if (!online || !div.current || map.current) return;
     addCss();
     const m = L.map(div.current, { center: loc ? [loc.lat, loc.lng] : BENGALURU, zoom: loc ? 13 : 11 });
-    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png`, { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(m);
+    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png`, { maxZoom: 19, attribution: credit }).addTo(m);
     if (!readOnly) m.on('click', (e: L.LeafletMouseEvent) => changeRef.current({ lat: round(e.latlng.lat), lng: round(e.latlng.lng), label: '' }));
     map.current = m;
     return () => { m.remove(); map.current = null; marker.current = null; circles.current = []; };
@@ -261,3 +293,29 @@ function HoursCard({ hours, readOnly, errors, onChange }: { hours: Hours; readOn
 }
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** Which map pictures to use. OpenStreetMap's free server is fine for setting up one shop; a paid provider (MapTiler, Mapbox...) for many shops or heavy use. */
+function MapProviderCard({ form, readOnly, errors, onChange }: { form: Form; readOnly: boolean; errors: Record<string, string>; onChange: (p: Partial<Form>) => void }) {
+  const err = errors.map ?? errors['map.url'];
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Map provider">
+      <h3 className="mb-1 font-semibold">Map provider</h3>
+      <p className="mb-3 text-xs text-muted-foreground">Where the map pictures come from. The free OpenStreetMap server is enough for one shop setting up its area. With many shops, use a paid provider and paste its map address (with {'{z}'}, {'{x}'} and {'{y}'}) and the credit line it asks you to show.</p>
+      <div className="space-y-2" role="radiogroup" aria-label="Map provider">
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name="mapKind" disabled={readOnly} checked={form.mapKind === 'osm'} onChange={() => onChange({ mapKind: 'osm' })} />OpenStreetMap (free)</label>
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name="mapKind" disabled={readOnly} checked={form.mapKind === 'custom'} onChange={() => onChange({ mapKind: 'custom' })} />Paid provider</label>
+      </div>
+      {form.mapKind === 'custom' && (
+        <div className="mt-3 space-y-2">
+          <label className="block text-sm font-medium">Map address
+            <input className="field mt-1 w-full font-mono text-xs" disabled={readOnly} placeholder="https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=YOUR_KEY" value={form.mapUrl} onChange={(e) => onChange({ mapUrl: e.target.value })} aria-label="Map address" />
+          </label>
+          <label className="block text-sm font-medium">Credit line
+            <input className="field mt-1 w-full" disabled={readOnly} maxLength={200} placeholder="© MapTiler © OpenStreetMap contributors" value={form.mapCredit} onChange={(e) => onChange({ mapCredit: e.target.value })} aria-label="Map credit" />
+          </label>
+        </div>
+      )}
+      {err && <span role="alert" className="mt-1 block text-xs text-destructive">{err}</span>}
+    </section>
+  );
+}

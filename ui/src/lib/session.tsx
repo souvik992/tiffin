@@ -7,6 +7,8 @@ import type { Api, LoginUser, Me, Override } from './api.ts';
 // Storage can be unavailable (private mode, locked-down kiosk); the app then simply asks for the PIN again.
 const TOKEN_KEY = 'pos.session';
 const readToken = (): string | null => { try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; } };
+/** The signed-in session token (for live streams opened with fetch). */
+export const currentToken = readToken;
 const writeToken = (t: string | null) => { try { if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ } };
 
 export interface Notice { id: number; kind: 'error' | 'success' | 'info'; text: string }

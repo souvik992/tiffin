@@ -6,9 +6,10 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 | Folder | What |
 |---|---|
 | `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 5, `outlet_version`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
-| `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation, Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Users for the owner); with the Online Orders add-on also ODS, Settings > Online orders and Serviceability. |
+| `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation, Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Users for the owner); with the ODS add-on also ODS, Settings > Online orders and Serviceability. |
 | `desktop/` | Electron 44 Windows app. The backend runs in a utility process; the UI is on `app://pos`; `/api` is forwarded with a per-launch `X-POS-Secret`. NSIS per-user installer goes to `desktop/release/`. See `desktop/README.md`. |
-| `addons/` | Separately installed, signed modules (`docs/ADDONS.md`). `addons/online-orders`: Online orders settings, Serviceability (map, distance bands, fees, hours) and ODS; own package, tests, build (`npm run build` -> `addons/dist/packages`) and installer (`npm run installer`). |
+| `addons/` | Separately installed, signed modules (`docs/ADDONS.md`). `addons/ods`: Online orders settings, Serviceability (map, distance bands, fees with GST, road factor, map provider, hours), order hub pairing + connector (outbox, SSE) and the live ODS; own package, tests, build (`npm run build` -> `addons/dist/packages`) and installer (`npm run installer`). |
+| `hub/` | Online order hub: Node + node:sqlite, SSE to the POS, customer API, demo page `/order/<slug>`. `hub/README.md`. |
 | `contract/` | Online order contract v1 (life cycle `src/order.ts`, shapes, checks, `openapi.yaml`). Hub, POS connector and apps must follow it; see `docs/ONLINE_ORDERS_PLAN.md`. |
 | `templates/receipt/` | Bill designs (`.tiffinreceipt`, JSON). `classic` is the default bill and must equal `src/services/printing/defaultTemplate.ts` (a test checks this). |
 | `docs/` | API.md, DECISIONS.md, CHECKLIST.md, HARDWARE_TEST_PLAN.md, RECEIPT_TEMPLATES.md (bill design format and the shop workflow), ONLINE_ORDERS_PLAN.md (online orders: contract, failure cases, phases; follow it). |
@@ -16,9 +17,10 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (168 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data: Owner/1234, Manager/2345, Cashier/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (174 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data: Owner/1234, Manager/2345, Cashier/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
-| `addons/online-orders/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
+| `hub/` | `npm run dev` (local hub + demo store, prints a pairing code), `npm start`, `npm run admin -- create-store|pairing-code|list|revoke-device`, `npm test`. |
+| `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
 | `desktop/` | `npm start`, `npm test`, `npm run test:e2e`, `npm run typecheck`, `npm run dist` (installer; raise `version` in `desktop/package.json` for each release). |
 
 ## Working style
@@ -41,7 +43,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
   - `[QR code]` and `[LOGO]` mark where those print; `ReceiptLines` in the UI draws the real logo.
 - **Every receipt build passes `...designOptions(ctx)`**: the active design, the UPI id and the logo.
 - **Bills show the store details valid at issue time** (`storeAt`, `outlet_version` is append-only). Never read the live outlet row for a bill.
-- **Offline mode is the default.** Online orders live in the add-on; anything there that connects out must check `isOnlineMode(host)` (addons/online-orders/backend/onlineConfig.ts) first.
+- **Offline mode is the default.** Online orders live in the add-on; anything there that connects out must check `isOnlineMode(host)` (addons/ods/backend/onlineConfig.ts) first.
 - **Add-ons:** backend code may import only `contract/` and *types* from `src/` (everything else via `HostApi`); screens use `window.__POS__`; each add-on ships its own Tailwind CSS (the POS CSS only has classes the POS uses). Signing key: `%USERPROFILE%\.tiffinpos\addon-signing\private.pem`, never in the repo.
 - **This PC has a real POS install (0.1.1) with real bills.** Never install, upgrade or uninstall the POS here, and never touch `%LOCALAPPDATA%\TiffinPOS`; test with `POS_HOME` temp folders and installers with `/D=<temp>`.
 - **Never print test jobs** to the dev PC's personal Windows printers.
@@ -51,6 +53,6 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 2. Code-signing certificate, update server, licensing (needs the owner's decisions; installer and auto-update are built).
 3. Encryption at rest (SQLCipher native module or BitLocker: undecided).
 4. Raster text for ₹ and Hindi.
-5. Swiggy/Zomato relay client.
+5. Online orders phase 2+ (docs/ONLINE_ORDERS_PLAN.md): customer web app, SMS OTP, payment gateway, hosting the hub; human review of the add-on loader. Then Swiggy/Zomato relay.
 6. LAN multi-device.
 7. Opt-in cloud sync (the outbox table is already written).

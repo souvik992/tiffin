@@ -17,8 +17,9 @@ test('placing an order: delivery needs an address with a PIN code; bad mobiles, 
   assert.match(errors({ ...BASE, fulfilment: 'DELIVERY' }).address!, /delivery address/);
   const e = errors({ ...BASE, fulfilment: 'DELIVERY', address: { line1: '12 MG Road', city: 'Bengaluru', pincode: '56001' } });
   assert.match(e['address.pincode']!, /6-digit/);
-  const ok = checkPlaceOrder({ ...BASE, fulfilment: 'DELIVERY', address: { line1: '12 MG Road', city: 'Bengaluru', pincode: '560001', landmark: ' near park ' } });
+  const ok = checkPlaceOrder({ ...BASE, fulfilment: 'DELIVERY', location: { lat: 13.02, lng: 77.64 }, address: { line1: '12 MG Road', city: 'Bengaluru', pincode: '560001', landmark: ' near park ' } });
   assert.ok(ok.ok && ok.value.address!.landmark === 'near park');
+  assert.match(errors({ ...BASE, fulfilment: 'DELIVERY', address: { line1: 'x', city: 'y', pincode: '560001' } }).location!, /map/);
   assert.match(errors({ ...BASE, customer: { mobile: '1234567890' } }).mobile!, /10-digit/); // Indian mobiles start 6-9
   assert.match(errors({ ...BASE, lines: [] }).lines!, /empty/);
   assert.ok(errors({ ...BASE, lines: [{ itemId: 'x', qtyMilli: 0.5 }] })['lines.0']);

@@ -4,7 +4,7 @@ import { DEFAULT_SERVICEABILITY, checkServiceability, distanceKm, isOpen, quote 
 import type { ServiceabilityConfig } from '../contract/src/serviceability.ts';
 
 const STORE = { lat: 13.0213, lng: 77.6460, label: 'Kalyan Nagar, Bengaluru' };
-const CFG: ServiceabilityConfig = { ...DEFAULT_SERVICEABILITY, location: STORE, packagingFee: 1000 };
+const CFG: ServiceabilityConfig = { ...DEFAULT_SERVICEABILITY, location: STORE, packagingFee: 1000, roadFactor: 1 }; // straight line for exact numbers
 const errs = (c: unknown) => { const r = checkServiceability(c); assert.equal(r.ok, false); return (r as { errors: Record<string, string> }).errors; };
 /** IST wall time on a known date: 2026-10-12 is a Monday. */
 const ist = (day: number, hhmm: string) => Date.parse(`2026-10-${String(11 + day).padStart(2, '0')}T${hhmm}:00+05:30`);
@@ -34,6 +34,19 @@ test('serviceability: opening hours in IST, two slots a day, and slots past midn
   assert.equal(isOpen(hours, ist(2, '00:30')), true); // Monday's late slot runs into Tuesday, which is otherwise closed
   assert.equal(isOpen(hours, ist(2, '01:00')), false);
   assert.equal(isOpen(hours, ist(2, '12:00')), false);
+});
+
+test('serviceability: road distance = straight line x road factor, or a measured road distance', () => {
+  const to = { lat: 13.0400, lng: 77.6460 }; // about 2.1 km straight
+  const straight = distanceKm(STORE, to);
+  const q = quote({ ...CFG, roadFactor: 1.3 }, { fulfilment: 'DELIVERY', to, itemsTotal: 30000 });
+  assert.ok(q.ok && q.distanceKm === Math.round(straight * 1.3 * 10) / 10 && q.zone === 0);
+  const far = quote({ ...CFG, roadFactor: 1.6 }, { fulfilment: 'DELIVERY', to, itemsTotal: 30000 }); // 3.3 km by road: second band
+  assert.ok(far.ok && far.zone === 1);
+  const measured = quote({ ...CFG, roadFactor: 1.6 }, { fulfilment: 'DELIVERY', to, itemsTotal: 30000, measuredRoadKm: 2.4 });
+  assert.ok(measured.ok && measured.distanceKm === 2.4 && measured.zone === 0);
+  assert.ok(errs({ ...CFG, roadFactor: 2.5 }).roadFactor);
+  assert.equal((checkServiceability({ ...CFG, roadFactor: undefined }) as { value: ServiceabilityConfig }).value.roadFactor, 1.3);
 });
 
 test('serviceability: the configuration is checked in plain words', () => {

@@ -45,6 +45,14 @@ export function checkPlaceOrder(input: unknown): Checked<PlaceOrderRequest> {
     }
   }
 
+  let location: { lat: number; lng: number } | null = null;
+  if (fulfilment === 'DELIVERY') {
+    const l = input.location as { lat?: unknown; lng?: unknown } | null | undefined;
+    if (!l || typeof l.lat !== 'number' || typeof l.lng !== 'number' || l.lat < 6 || l.lat > 38 || l.lng < 68 || l.lng > 98) e.location = 'Mark the delivery location on the map.';
+    else location = { lat: l.lat, lng: l.lng };
+  }
+  if (input.channel !== undefined && input.channel !== 'app' && input.channel !== 'website') e.channel = 'Unknown sales channel.';
+
   const lines = Array.isArray(input.lines) ? input.lines : [];
   if (lines.length === 0) e.lines = 'The cart is empty.';
   else if (lines.length > MAX_LINES) e.lines = `At most ${MAX_LINES} different items per order.`;
@@ -63,7 +71,7 @@ export function checkPlaceOrder(input: unknown): Checked<PlaceOrderRequest> {
     ok: true,
     value: {
       fulfilment: fulfilment as PlaceOrderRequest['fulfilment'], payment: payment as PlaceOrderRequest['payment'],
-      customer: { name, mobile }, otpToken: typeof input.otpToken === 'string' ? input.otpToken : null, address,
+      customer: { name, mobile }, otpToken: typeof input.otpToken === 'string' ? input.otpToken : null, address, location, channel: (input.channel as 'app' | 'website' | undefined) ?? 'website',
       lines: lines.map((l) => { const x = l as Record<string, unknown>; return { itemId: x.itemId as string, qtyMilli: x.qtyMilli as number, modifierIds: (x.modifierIds as string[] | undefined) ?? [], note: (x.note as string | null | undefined) ?? null }; }),
       note: (input.note as string | null | undefined) ?? null, menuVersion: input.menuVersion as number, expectedTotal: input.expectedTotal as number,
     },

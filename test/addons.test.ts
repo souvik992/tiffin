@@ -15,13 +15,13 @@ const TRUSTED = keyPair(), STRANGER = keyPair();
 const BACKEND = `
 exports.register = (host) => {
   host.migrations([
-    { version: 1, name: 'notes', sql: 'CREATE TABLE fx_note (id INTEGER PRIMARY KEY, text TEXT NOT NULL)' },
-    { version: 2, name: 'notes_by', sql: 'ALTER TABLE fx_note ADD COLUMN by_user TEXT' },
+    { version: 1, name: 'notes', sql: 'CREATE TABLE fixture_note (id INTEGER PRIMARY KEY, text TEXT NOT NULL)' },
+    { version: 2, name: 'notes_by', sql: 'ALTER TABLE fixture_note ADD COLUMN by_user TEXT' },
   ]);
-  host.route('GET', '/notes', {}, () => host.db.all('SELECT text, by_user AS by FROM fx_note ORDER BY id'));
+  host.route('GET', '/notes', {}, () => host.db.all('SELECT text, by_user AS by FROM fixture_note ORDER BY id'));
   host.route('POST', '/notes', {}, (c) => host.runCommand(host.ctx, c.requestId, 'fx.note', c.actor, () => {
     host.assertPerm(c.actor, 'settings.write');
-    host.db.run('INSERT INTO fx_note (text, by_user) VALUES (?, ?)', String(c.body.text), c.actor.name);
+    host.db.run('INSERT INTO fixture_note (text, by_user) VALUES (?, ?)', String(c.body.text), c.actor.name);
     return { ok: true };
   }));
   host.route('GET', '/crash', {}, () => { throw new host.AppError('FX_DOWN', 'Fixture says no.', 418); });
@@ -92,7 +92,7 @@ test('add-ons: changed files, unknown publishers, a too-old POS, crashing code a
   writeAddon(addons, { id: 'crashes', backend: "exports.register = () => { throw new Error('boom'); };" });
   writeAddon(addons, { id: 'bad-step', backend: "exports.register = (h) => { h.migrations([{ version: 1, name: 'x', sql: 'CREATE TABLE broken (' }]); h.route('GET', '/x', {}, () => 1); };" });
   writeAddon(addons, { id: 'escapes', backend: "require('leaflet'); exports.register = () => {};" });
-  writeAddon(addons, { id: 'fine', ui: null });
+  writeAddon(addons, { id: 'fine', ui: null, backend: 'exports.register = () => {};' });
   mkdirSync(join(addons, 'empty-folder'));
   const b = await boot(addons, join(dir, 'data'));
   try {
@@ -111,6 +111,34 @@ test('add-ons: changed files, unknown publishers, a too-old POS, crashing code a
     assert.equal((await b.call('GET', '/api/addons/bad-step/x', { token: t })).status, 404); // routes of a switched-off add-on do not exist
     assert.equal((await b.call('GET', '/api/addons/changed/ui.js')).status, 404);
     assert.equal((await b.call('GET', '/api/ping')).status, 200);
+  } finally { await b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('add-ons security: an older signed version cannot replace a newer one; folder must match the id; database steps may only touch the add-on own tables', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pos-addons-'));
+  const addons = join(dir, 'addons'), data = join(dir, 'data');
+  writeAddon(addons, { version: '1.1.0' });
+  await (await boot(addons, data)).shutdown('test');
+  rmSync(join(addons, 'fixture'), { recursive: true });
+  writeAddon(addons, { version: '1.0.0' }); // a genuinely signed, but older, package put back
+  writeAddon(addons, { id: 'posing' });
+  const { renameSync } = await import('node:fs');
+  renameSync(join(addons, 'posing'), join(addons, 'not-its-name'));
+  writeAddon(addons, { id: 'grabby', backend: "exports.register = (h) => { h.migrations([{ version: 1, name: 'steal', sql: 'CREATE TABLE grabby_x (id INTEGER); UPDATE invoice SET grand_total = 0' }]); };" });
+  writeAddon(addons, { id: 'trigger', backend: "exports.register = (h) => { h.migrations([{ version: 1, name: 'watch', sql: 'CREATE TABLE trigger_log (x TEXT); CREATE TRIGGER trigger_t AFTER INSERT ON invoice BEGIN INSERT INTO trigger_log VALUES (1); END;' }]); };" });
+  writeAddon(addons, { id: 'attach', backend: "exports.register = (h) => { h.migrations([{ version: 1, name: 'a', sql: \"ATTACH DATABASE 'x.db' AS x\" }]); };" });
+  const b = await boot(addons, data);
+  try {
+    const list = (await b.call('GET', '/api/addons', { token: await b.token() })).json as Array<{ id: string; status: string; reason: string | null }>;
+    const r = (id: string) => list.find((a) => a.id === id)!;
+    assert.match(r('fixture').reason!, /older version \(1\.0\.0\) than the one installed before \(1\.1\.0\)/);
+    assert.match(r('posing').reason!, /folder/);
+    assert.match(r('grabby').reason!, /invoice.*own tables/);
+    assert.match(r('trigger').reason!, /invoice.*own tables/);
+    assert.match(r('attach').reason!, /not allowed/);
+    const t2 = await b.token();
+    assert.equal((await b.call('GET', '/api/ping')).status, 200);
+    void t2;
   } finally { await b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
 });
 

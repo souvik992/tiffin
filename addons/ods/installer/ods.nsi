@@ -1,6 +1,6 @@
-; Installer for the Online Orders add-on. Built by scripts/installer.mjs (makensis from electron-builder's cache).
+; Installer for the ODS add-on. Built by scripts/installer.mjs (makensis from electron-builder's cache).
 ; Installs for the current Windows user (no administrator), next to an installed Tiffin POS:
-;   %LOCALAPPDATA%\TiffinPOS\addons\online-orders\  (signed package: the POS checks it before loading it)
+;   %LOCALAPPDATA%\TiffinPOS\addons\ods\  (signed package: the POS checks it before loading it)
 ; Defines passed in: VERSION, SRC (built package folder), OUTFILE, ICON.
 Unicode true
 SetCompressor /SOLID lzma
@@ -9,19 +9,19 @@ RequestExecutionLevel user
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-!define NAME "Tiffin POS - Online Orders"
-!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TiffinPOS-OnlineOrders"
+!define NAME "Tiffin POS - ODS"
+!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TiffinPOS-ODS"
 
 Name "${NAME}"
 OutFile "${OUTFILE}"
-InstallDir "$LOCALAPPDATA\TiffinPOS\addons\online-orders"
+InstallDir "$LOCALAPPDATA\TiffinPOS\addons\ods"
 BrandingText "Tiffin POS"
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "Online Orders for Tiffin POS"
+!define MUI_WELCOMEPAGE_TITLE "ODS (online orders) for Tiffin POS"
 !define MUI_WELCOMEPAGE_TEXT "This adds online orders to Tiffin POS on this PC:$\r$\n$\r$\n- Settings > Online orders (sales channels, payments, accepting)$\r$\n- Settings > Serviceability (delivery areas on a map, fees, minimum order, opening hours)$\r$\n- ODS, the online order display screen$\r$\n$\r$\nTiffin POS must already be installed. Your bills and data are not changed."
-!define MUI_FINISHPAGE_TITLE "Online Orders is installed"
+!define MUI_FINISHPAGE_TITLE "ODS is installed"
 !define MUI_FINISHPAGE_TEXT "Restart Tiffin POS to use it. If the POS is open, it will ask you to restart."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
@@ -45,7 +45,7 @@ Function .onInit
   ${EndIf}
 FunctionEnd
 
-Section "Online Orders"
+Section "ODS"
   SetOutPath "$INSTDIR"
   ; remove the old signature first and write the new one last: the POS never sees a half-copied package as valid
   Delete "$INSTDIR\manifest.json"

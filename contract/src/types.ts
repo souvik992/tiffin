@@ -16,6 +16,10 @@ export interface PlaceOrderRequest {
   /** Proof that the mobile was verified by OTP (from POST /v1/otp/verify). Required for COD. */
   otpToken?: string | null;
   address?: Address | null;
+  /** Delivery: the customer's map point (from the app's map or the phone's location). Distance and fees are measured to it. */
+  location?: { lat: number; lng: number } | null;
+  /** Which sales channel the order comes from (default website). */
+  channel?: 'app' | 'website';
   lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }>;
   note?: string | null;
   /** The menu version the customer ordered from (see F5: price changes). */
@@ -43,7 +47,14 @@ export interface Order {
   note: string | null;
   itemsTotal: number;
   deliveryFee: number;
+  packagingFee: number;
   total: number;
+  /** Delivery: distance used for the fee (km, road estimate), and the customer's map point. */
+  distanceKm: number | null;
+  location: { lat: number; lng: number } | null;
+  /** Set when the store accepts: preparation minutes and the promised time. */
+  prepMinutes: number | null;
+  etaAt: number | null;
   menuVersion: number;
   placedAt: number;
   /** Manual mode: the hub auto-rejects at this time unless the store answers. Null in auto-accept mode. */

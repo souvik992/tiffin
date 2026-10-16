@@ -1,0 +1,173 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Server } from 'node:http';
+import { get } from '../../../src/store/db.ts';
+import { applyAddonMigrations, makeHost } from '../../../src/addons/host.ts';
+import type { AddonRoute } from '../../../src/addons/host.ts';
+import { makeEnv, rid, startShift } from '../../../test/helpers.ts';
+import { Hub } from '../../../hub/src/hub.ts';
+import { createHubServer } from '../../../hub/src/http.ts';
+import { register } from '../backend/index.ts';
+import { saveOnlineConfig } from '../backend/onlineConfig.ts';
+import { saveServiceability } from '../backend/serviceability.ts';
+import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup } from '../backend/store.ts';
+import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
+import type { Hours } from '../../../contract/src/serviceability.ts';
+
+const allDay = Object.fromEntries(['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ open: '00:00', close: '23:59' }]])) as Hours;
+const until = async (fn: () => boolean | Promise<boolean>, what: string, ms = 5000) => {
+  const end = Date.now() + ms;
+  while (!(await fn())) { if (Date.now() > end) throw new Error(`timed out waiting for: ${what}`); await new Promise((r) => setTimeout(r, 25)); }
+};
+
+async function setup() {
+  const dir = mkdtempSync(join(tmpdir(), 'ods-conn-'));
+  const hub = new Hub({ dbPath: join(dir, 'hub.db'), devOtp: true });
+  const server: Server = createHubServer(hub, { adminKey: 'k', heartbeatMs: 100 });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const env = makeEnv();
+  const sink = { routes: [] as AddonRoute[], migrations: [], stops: [] as Array<() => void | Promise<void>> };
+  const host = makeHost(env.ctx, 'ods', '0.3.0', sink);
+  applyAddonMigrations(env.ctx, 'ods', MIGRATIONS);
+  const conn = register(host, { connector: { retryMs: [50, 100, 200], tickMs: 200 } });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const r = await fetch(base + path, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, json: await r.json().catch(() => null) as any };
+  };
+  // the store on the hub, and the POS settings an owner would make
+  const store = hub.createStore('demo', 'Demo');
+  const five = get<{ id: string }>(env.ctx.db, 'SELECT id FROM tax_group WHERE rate_bp = 500 LIMIT 1')!.id;
+  saveFeeTaxGroup(host, five);
+  saveServiceability(host, env.owner, rid(), { ...DEFAULT_SERVICEABILITY, location: { lat: 13.0213, lng: 77.646, label: 'Store' }, hours: allDay, roadFactor: 1 });
+  saveOnlineConfig(host, env.owner, rid(), { enabled: true, channels: { app: false, website: true, swiggy: false, zomato: false }, acceptMode: 'manual', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } });
+  await conn.pair(env.owner, base, store.pairingCode);
+  startShift(env, 50000);
+  const burger = get<{ id: string }>(env.ctx.db, "SELECT id FROM item WHERE name = 'Cheese Burger'")!.id;
+  const order = async (mobile: string, o: { fulfilment?: 'PICKUP' | 'DELIVERY'; qty?: number } = {}) => {
+    const code = (await call('POST', '/v1/otp/send', { mobile })).json.devCode;
+    const { otpToken } = (await call('POST', '/v1/otp/verify', { mobile, otp: code })).json;
+    const fulfilment = o.fulfilment ?? 'PICKUP';
+    const lines = [{ itemId: burger, qtyMilli: (o.qty ?? 2) * 1000 }];
+    const location = fulfilment === 'DELIVERY' ? { lat: 13.03, lng: 77.646 } : null;
+    const q = (await call('POST', '/v1/stores/demo/quote', { fulfilment, location, lines })).json;
+    const r = await call('POST', '/v1/stores/demo/orders', { fulfilment, payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, location, menuVersion: 1, expectedTotal: q.total,
+      address: fulfilment === 'DELIVERY' ? { line1: '12, 4th Cross', city: 'Bengaluru', pincode: '560043' } : null }, { 'idempotency-key': rid() });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    return r.json as { order: { id: string; number: string; total: number }; accessToken: string };
+  };
+  const hubState = (id: string) => (hub.db.prepare('SELECT state FROM orders WHERE id = ?').get(id) as { state: string }).state;
+  const close = async () => { await conn.stop(); for (const s of sink.stops) await s(); await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); }); hub.close(); env.cleanup(); rmSync(dir, { recursive: true, force: true }); };
+  return { env, host, conn, hub, call, order, hubState, close, burger, sink };
+}
+
+test('ODS connector: pairs, publishes, receives orders live, bills on accept (GST bill + KOT), and moves them through to collected', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const page = (await s.call('GET', '/v1/stores/demo')).json;
+    assert.deepEqual([page.open, page.name], [true, 'Demo Burger Hub']); // published menu, store name from the POS, accepting (shift open)
+    const placed = await s.order('9000000101');
+    await until(() => getOrder(s.host, placed.order.id) !== null, 'order arrives');
+    await until(() => s.hubState(placed.order.id) === 'RECEIVED', 'received confirmed');
+    const acc = s.conn.accept(s.env.cashier, placed.order.id, 12, rid());
+    assert.equal(acc.billTotal, placed.order.total, 'POS bill = what the customer was charged');
+    const inv = get<{ channel: string; external_id: string }>(s.env.ctx.db, 'SELECT o.channel, o.external_id FROM invoice i JOIN sale_order o ON o.id = i.order_id WHERE i.id = ?', acc.billInvoiceId!)!;
+    assert.deepEqual({ ...inv }, { channel: 'WEBSITE', external_id: placed.order.number });
+    assert.ok(get(s.env.ctx.db, "SELECT 1 FROM print_job WHERE ref_id = ? AND kind = 'KOT'", acc.billInvoiceId!), 'kitchen ticket queued');
+    await until(() => s.hubState(placed.order.id) === 'ACCEPTED', 'hub knows it is accepted');
+    for (const to of ['PREPARING', 'READY', 'PICKED_UP'] as const) s.conn.step(s.env.cashier, placed.order.id, to);
+    await until(() => s.hubState(placed.order.id) === 'PICKED_UP', 'collected');
+    const seen = (await s.call('GET', `/v1/orders/${placed.order.id}`, undefined, { 'x-order-token': placed.accessToken })).json;
+    assert.equal(seen.posBillNo, acc.billNo);
+  } finally { await s.close(); }
+});
+
+test('ODS connector: automatic accepting bills on arrival; orders placed while the POS was disconnected arrive when it reconnects', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    saveOnlineConfig(s.host, s.env.owner, rid(), { enabled: true, channels: { app: false, website: true, swiggy: false, zomato: false }, acceptMode: 'auto', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } });
+    await s.conn.publish();
+    const auto = await s.order('9000000201', { fulfilment: 'DELIVERY', qty: 1 });
+    await until(() => getOrder(s.host, auto.order.id)?.billInvoiceId != null, 'auto-billed');
+    await until(() => s.hubState(auto.order.id) === 'ACCEPTED', 'auto-accepted at the hub');
+    const lines = s.env.ctx.db.prepare('SELECT name FROM invoice_line WHERE invoice_id = ? ORDER BY line_no').all(getOrder(s.host, auto.order.id)!.billInvoiceId!) as Array<{ name: string }>;
+    assert.deepEqual(lines.map((l) => l.name), ['Cheese Burger', 'Delivery charge']); // delivery fee on the bill, with GST
+
+    await s.conn.stop(); // the internet drops
+    await until(() => s.conn.link().state !== 'connected', 'disconnected');
+    const missed = await s.order('9000000202'); // the hub keeps the store online for 60 s
+    assert.equal(getOrder(s.host, missed.order.id), null);
+    s.conn.refresh();
+    await until(() => getOrder(s.host, missed.order.id) !== null, 'missed order arrives after reconnecting');
+  } finally { await s.close(); }
+});
+
+test('ODS connector: a customer cancel that beats the accept (F11) and a price change since ordering (F5) are flagged, not billed silently', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    // F11: the cancel reaches the hub while this POS is offline, then the POS accepts
+    const o1 = await s.order('9000000301');
+    await until(() => getOrder(s.host, o1.order.id) !== null, 'arrives');
+    await s.conn.stop();
+    await until(() => s.conn.link().state !== 'connected', 'disconnected');
+    assert.equal((await s.call('POST', `/v1/orders/${o1.order.id}/cancel`, {}, { 'x-order-token': o1.accessToken })).json.state, 'CANCELLED');
+    const acc = s.conn.accept(s.env.cashier, o1.order.id, 10, rid()); // the POS did not hear yet
+    assert.ok(acc.billInvoiceId);
+    s.conn.refresh();
+    await until(() => /Cancel bill/.test(getOrder(s.host, o1.order.id)?.alert ?? ''), 'alert to cancel the bill');
+    assert.equal(getOrder(s.host, o1.order.id)!.state, 'CANCELLED');
+
+    // F5: the price changed in the POS after the customer ordered
+    const o2 = await s.order('9000000302');
+    await until(() => getOrder(s.host, o2.order.id) !== null, 'arrives');
+    s.env.ctx.db.prepare('UPDATE item SET price = 13900 WHERE id = ?').run(s.burger);
+    assert.throws(() => s.conn.accept(s.env.cashier, o2.order.id, 10, rid()), /POS price is now Rs 278\.00; the customer was charged Rs 258\.00/);
+    const billed = s.conn.accept(s.env.cashier, o2.order.id, 10, rid(), true);
+    assert.equal(billed.billTotal, 27800);
+    assert.match(billed.alert!, /Billed at the POS price/);
+  } finally { await s.close(); }
+});
+
+test('ODS connector: pairing needs a secure (https) hub address, except a hub on this PC', async () => {
+  const t = await setup();
+  try {
+    await assert.rejects(t.conn.pair(t.env.owner, 'http://orders.example.in', 'ABCD-EFGH'), /https:\/\//);
+    await assert.rejects(t.conn.pair(t.env.owner, 'ftp://orders.example.in', 'ABCD-EFGH'), /hub address/);
+    assert.equal(t.conn.link().paired, true); // the earlier pairing is untouched
+  } finally { await t.close(); }
+});
+
+test('ODS connector: a POS that stops right after billing sends the accept on restart (F3); replayed events change nothing (F4); online orders cannot be switched off while orders are open (F15)', async () => {
+  const s = await setup();
+  let second: Awaited<ReturnType<typeof register>> | null = null;
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const o = await s.order('9000000401');
+    await until(() => getOrder(s.host, o.order.id) !== null, 'arrives');
+    await s.conn.stop(); // the POS "crashes" before the hub hears about the accept
+    const acc = s.conn.accept(s.env.cashier, o.order.id, 10, rid());
+    assert.ok(acc.billInvoiceId);
+    assert.ok(pendingOutbox(s.host).some((x) => x.order_id === o.order.id && x.action === 'accept'), 'accept kept in the outbox');
+    assert.equal(s.hubState(o.order.id), 'RECEIVED');
+
+    // F15: refused while the order is open
+    const config = s.sink.routes.find((r) => r.method === 'PUT' && r.path.endsWith('/config'))!;
+    assert.throws(() => config.handler({ actor: s.env.owner, requestId: rid(), body: { enabled: false } } as never), /1 online order is still open \(W-\d+\)/);
+
+    // restart: a new connector on the same database, made to replay every event from the start
+    s.host.setSetting('ods_last_seq', '0');
+    const sink2 = { routes: [] as AddonRoute[], migrations: [], stops: [] as Array<() => void | Promise<void>> };
+    second = register(makeHost(s.env.ctx, 'ods', '0.3.0', sink2), { connector: { retryMs: [50, 100, 200], tickMs: 200 } });
+    second.refresh();
+    await until(() => s.hubState(o.order.id) === 'ACCEPTED', 'the accept reaches the hub after the restart');
+    await until(() => Number(s.host.getSetting('ods_last_seq')) > 0, 'events replayed');
+    assert.equal(getOrder(s.host, o.order.id)!.billInvoiceId, acc.billInvoiceId, 'same bill');
+    assert.equal((s.env.ctx.db.prepare("SELECT COUNT(*) AS n FROM sale_order WHERE external_id = ?").get(o.order.number) as { n: number }).n, 1, 'billed once');
+  } finally { await second?.stop(); await s.close(); }
+});

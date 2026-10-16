@@ -14,7 +14,7 @@ const PRODUCT = 'Tiffin POS';
 const home = process.env.POS_HOME ?? join(process.env.LOCALAPPDATA ?? app.getPath('appData'), 'TiffinPOS'); // POS_HOME: tests use a temporary folder
 app.setPath('userData', join(home, 'electron'));
 const dataDir = process.env.POS_DATA_DIR ?? join(home, 'data');
-/** Signed add-ons (e.g. Online Orders), installed by their own installer next to the POS. */
+/** Signed add-ons (e.g. ODS), installed by their own installer next to the POS. */
 const addonsDir = join(home, 'addons');
 const logDir = join(home, 'logs');
 mkdirSync(dataDir, { recursive: true });

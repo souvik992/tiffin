@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostApi } from '../../../src/addons/host.ts';
+import { createHash } from 'node:crypto';
 import { isOnlineMode } from './onlineConfig.ts';
+import { readMapProvider } from './store.ts';
 
 /**
  * Map tiles and address search for Settings > Serviceability, fetched by the POS (never by the page) so the window's
@@ -11,27 +13,35 @@ import { isOnlineMode } from './onlineConfig.ts';
  * switch to a paid tile provider (TILE_URL below).
  */
 
-const TILE_URL = (z: number, x: number, y: number) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const TIMEOUT_MS = 8000;
 
 export interface Fetcher { (url: string, init: { headers: Record<string, string>; signal: AbortSignal }): Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer>; json(): Promise<unknown> }> }
 
 export function makeMaps(host: HostApi, fetcher: Fetcher = fetch as unknown as Fetcher) {
-  const ua = `TiffinPOS-OnlineOrders/1.0 (POS ${host.posVersion}; store settings map)`;
-  const tileDir = join(host.dataDir, 'tiles');
+  const ua = `TiffinPOS-ODS/1.0 (POS ${host.posVersion}; store settings map)`;
   const searchCache = new Map<string, unknown>();
   let lastSearch = 0;
 
+  /** The tile address for the chosen provider (Settings > Serviceability > Map), and its own cache folder. */
+  function provider() {
+    const p = readMapProvider(host);
+    const url = p.kind === 'custom' && p.url ? p.url : OSM;
+    return { url, dir: join(host.dataDir, 'tiles', p.kind === 'custom' ? createHash('sha256').update(url).digest('hex').slice(0, 12) : 'osm') };
+  }
+
   async function tile(z: number, x: number, y: number): Promise<Buffer> {
+    const { url, dir: tileDir } = provider();
     if (![z, x, y].every(Number.isInteger) || z < 0 || z > 19 || x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z) throw new host.AppError('NOT_FOUND', 'No such map tile.', 404);
     const file = join(tileDir, String(z), String(x), `${y}.png`);
     if (existsSync(file)) return readFileSync(file);
     if (!isOnlineMode(host)) throw new host.AppError('OFFLINE_MODE', 'Turn on online orders to load the map.', 409);
-    const r = await fetcher(TILE_URL(z, x, y), { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
+    const r = await fetcher(url.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)), { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
     if (!r || !r.ok) throw new host.AppError('MAP_UNAVAILABLE', 'The map could not be loaded. Check the internet connection.', 503);
     const png = Buffer.from(await r.arrayBuffer());
-    if (png.length < 8 || png.readUInt32BE(0) !== 0x89504e47) throw new host.AppError('MAP_UNAVAILABLE', 'The map service sent something unexpected.', 503);
+    const isPng = png.length > 8 && png.readUInt32BE(0) === 0x89504e47, isJpeg = png.length > 3 && png[0] === 0xff && png[1] === 0xd8;
+    if (!isPng && !isJpeg) throw new host.AppError('MAP_UNAVAILABLE', 'The map service sent something unexpected.', 503);
     mkdirSync(join(tileDir, String(z), String(x)), { recursive: true });
     writeFileSync(file, png);
     return png;

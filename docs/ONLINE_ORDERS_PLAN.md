@@ -1,6 +1,6 @@
 # Online orders: build plan
 
-Status (2026-10-16): **approved by the owner.** Phase 1 so far: online orders ship as a separate signed add-on (`addons/online-orders`, own installer) with Settings > Online orders, Settings > Serviceability (map, distance bands, fees, minimum order, hours; rules in `contract/src/serviceability.ts`) and the ODS screen. Next in Phase 1: the order hub, the POS connector and a live ODS. Phase 0 (contract) is written in `contract/` and waits for the owner's sign-off. Built so far: Settings > Online orders (off = offline mode; channels, order types, payments, accept mode) and an ODS screen that does not receive orders yet.
+Status (2026-10-16): **approved by the owner. Phase 1 built and tested on one PC.** The order hub (`hub/`), the POS connection and the live ODS are in the ODS add-on (`addons/ods`, own installer), with Serviceability, GST on fees, road distance and a map provider switch. Tests cover F1-F5, F7, F8 and F11-F13 (hub and connector tests) and F15 (switch-off refused while orders are open). Still open in phase 1: F6 partial accept (v1 rejects the whole order), F14 (times come from the hub; no clock test yet), and trying it on a shop PC with a printer (docs/HARDWARE_TEST_PLAN.md). Phase 0 (contract in `contract/`) still waits for the owner's sign-off. Next: phase 2 (customer web app), SMS for OTP, hosting.
 
 How the plan avoids gaps: agree the contract and every failure case **before** writing code, build in thin working slices, and close each phase with tests that inject failures, never only the happy path.
 

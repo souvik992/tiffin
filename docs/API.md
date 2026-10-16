@@ -39,9 +39,16 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | POST `/api/users/:id/deactivate`, `/api/users/:id/reactivate` | O | deactivate signs them out and hides them from sign-in; not yourself (`SELF`), not the last owner. Reactivate keeps their old PIN |
 | GET `/api/addons` | C | installed add-ons: `id, name, version, status (active/off), reason, ui` (docs/ADDONS.md) |
 | GET `/api/addons/:id/ui.js` | none | an active add-on's screens (checked bytes from its signed package) |
-| `/api/addons/online-orders/config` GET (C) / PUT (O) | | Online Orders add-on: online mode, channels, order types, payments, accept mode |
-| `/api/addons/online-orders/serviceability` GET (M) / PUT (O) | | location, delivery areas, packaging fee, pickup, hours (contract/src/serviceability.ts); errors in `details.fields` |
-| GET `/api/addons/online-orders/tiles/:z/:x/:y.png` (none), `/geocode?q=` (O) | | map tiles and address search through the POS; only in online mode (cached tiles work offline) |
+| `/api/addons/ods/config` GET (C) / PUT (O) | | ODS add-on: online mode, channels, order types, payments, accept mode |
+| `/api/addons/ods/serviceability` GET (M) / PUT (O) | | location, delivery areas, packaging fee, pickup, hours (contract/src/serviceability.ts); errors in `details.fields` |
+| GET `/api/addons/ods/tiles/:z/:x/:y.png` (none), `/geocode?q=` (O) | | map tiles and address search through the POS; only in online mode (cached tiles work offline) |
+| Serviceability also carries `roadFactor` (1.00-2.00), `feeTaxGroupId` (GST group for fees) and `map` `{ kind: osm or custom, url, attribution }` | | |
+| GET `/api/addons/ods/tax-groups` | C | GST groups to choose for delivery/packaging fees |
+| GET `/api/addons/ods/hub` (C); POST `/hub/pair` `{ hubUrl, code }` (O); DELETE `/hub` (O) | | order hub link: `paired, hubUrl, store, state, lastError, accepting`; https only (http only for a hub on this PC) |
+| GET `/api/addons/ods/orders` (C); GET `/events` (C, SSE `event: ods`, data `{ link, orders }`) | | online orders kept on this POS, with `posPrice` for new ones; the ODS screen's live feed |
+| POST `/api/addons/ods/orders/:id/accept` `{ prepMinutes, acceptPriceChange? }` | C | GST bill + KOT, then the hub is told (outbox) |
+| POST `/api/addons/ods/orders/:id/reject` `{ reason, reasonText? }`; `/step` `{ to, rider?, reasonText?, override? }` | C (cancel: M approval) | PREPARING, READY, OUT_FOR_DELIVERY, DELIVERED, PICKED_UP, CANCELLED (cancels the bill) |
+| PUT `/api/addons/ods/config` with `enabled: false` | O | 409 `ONLINE_ORDERS_OPEN` while an online order is open (F15) |
 | GET `/api/store` | M | store details printed on bills (name, address, phone, GSTIN, FSSAI, state code) and the logo size |
 | PUT `/api/store` `{ name, address, phone, gstin, fssaiNo }` | O | for bills issued from now on (earlier bills keep theirs: `outlet_version`). GSTIN check digit and state are checked; errors in `details.fields` |
 | PUT `/api/store/logo` `{ width, height, bitsBase64 }`; DELETE `/api/store/logo` | O | bill logo: 1 bit per dot, 1 = black, rows of width/8 bytes, width 8..384 in steps of 8, height 8..240 |

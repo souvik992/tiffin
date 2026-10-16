@@ -26,7 +26,7 @@ export interface CartLineRow {
   rate_bp: number; cess_bp: number; price_includes_tax: number;
 }
 
-export const CHANNELS = ['COUNTER', 'SWIGGY', 'ZOMATO', 'ONDC', 'OTHER'];
+export const CHANNELS = ['COUNTER', 'APP', 'WEBSITE', 'SWIGGY', 'ZOMATO', 'ONDC', 'OTHER'];
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
 export function getOrderRow(ctx: Ctx, id: string): OrderRow {
@@ -296,6 +296,40 @@ export function resumeOrder(ctx: Ctx, actor: Actor, requestId: string, orderId: 
     return getCart(ctx, orderId);
   });
 }
+/** Hidden menu items that carry the online order fees on a bill (never sold at the counter, never on the menu). */
+export const FEE_ITEMS = { delivery: { sku: 'SYS-DELIVERY', name: 'Delivery charge' }, packaging: { sku: 'SYS-PACKAGING', name: 'Packaging charge' } } as const;
+
+/**
+ * Adds a delivery or packaging charge to an order. The amount comes from the POS's own serviceability settings (never from
+ * a customer app); the GST rate is the tax group the owner chose for fees. The fee is a line on a hidden system item, so
+ * the bill, GST, reports and credit notes treat it like any other line.
+ */
+export function addFeeLine(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; kind: keyof typeof FEE_ITEMS; amount: number; taxGroupId: string }) {
+  return cartCmd(ctx, requestId, 'order.add_fee', actor, () => {
+    assertPerm(actor, 'order.write');
+    const order = getOrderRow(ctx, input.orderId);
+    assertOpen(order);
+    if (!Number.isSafeInteger(input.amount) || input.amount <= 0 || input.amount > 10_000_00) throw new AppError('VALIDATION', 'A fee must be Rs 0.01 to Rs 10,000.');
+    const fee = FEE_ITEMS[input.kind];
+    if (!fee) throw new AppError('VALIDATION', 'Unknown fee.');
+    if (!get(ctx.db, 'SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', input.taxGroupId)) throw new AppError('VALIDATION', 'Choose the GST rate for delivery and packaging charges.');
+    const now = ctx.clock.now();
+    let item = get<{ id: string; tax_group_id: string }>(ctx.db, 'SELECT id, tax_group_id FROM item WHERE sku = ? AND deleted_at IS NULL', fee.sku);
+    if (!item) {
+      const id = ctx.ids.next();
+      run(ctx.db, 'INSERT INTO item(id, category_id, name, sku, tax_group_id, price, unit, is_veg, active, updated_at) VALUES (?,NULL,?,?,?,0,?,NULL,0,?)', id, fee.name, fee.sku, input.taxGroupId, 'pcs', now);
+      item = { id, tax_group_id: input.taxGroupId };
+    } else if (item.tax_group_id !== input.taxGroupId) {
+      run(ctx.db, 'UPDATE item SET tax_group_id = ?, version = version + 1, updated_at = ? WHERE id = ?', input.taxGroupId, now, item.id);
+    }
+    const count = get<{ m: number | null }>(ctx.db, 'SELECT max(sort_no) m FROM sale_order_line WHERE order_id = ?', order.id)!;
+    run(ctx.db, 'INSERT INTO sale_order_line(id, order_id, item_id, qty_milli, unit_price, modifiers_json, note, sort_no) VALUES (?,?,?,?,?,?,?,?)',
+      ctx.ids.next(), order.id, item.id, 1000, input.amount, '[]', null, (count.m ?? 0) + 1);
+    touch(ctx, order.id);
+    return getCart(ctx, order.id);
+  });
+}
+
 export function cancelOrder(ctx: Ctx, actor: Actor, requestId: string, orderId: string) {
   return runCommand(ctx, requestId, 'order.cancel', actor, () => {
     assertPerm(actor, 'order.write');

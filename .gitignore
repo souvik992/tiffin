@@ -23,3 +23,6 @@ Thumbs.db
 *.pem
 .env
 .env.*
+
+# order hub local data
+hub-data/

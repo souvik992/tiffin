@@ -94,7 +94,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | CSV download (save dialog) and Print / PDF (Windows print dialog) from the installed app | |
 | Windows sign-out and shutdown with the app open: closing backup taken | |
 
-## Online Orders add-on
+## ODS add-on
 
 | Check | Result |
 |---|---|
@@ -102,8 +102,15 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Add-on installer when the POS is not installed: clear message, nothing installed | |
 | Map and address search on a shop internet connection (slow 4G, proxy), and cached tiles with the internet off | |
 | POS update (0.2.x) with the add-on installed: add-on keeps working | |
+| Live online orders on a shop PC: pair with a real hub over https, order from a phone, sound plays, Accept prints the bill and KOT on the shop printer | |
+| Internet drop for 2-10 minutes during service: orders placed meanwhile arrive once after it returns; accepts made offline reach the customer | |
+| PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
+| Paid map provider (MapTiler or similar) with a real key: tiles show with the provider's credit | |
+| Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
 
-Done on the dev PC (2026-10-16): packaged POS 0.2.0 loads the signed add-on and refuses an altered one; add-on installer installed into a temp folder silently and uninstalled cleanly (the real POS install was not touched).
+Done on the dev PC (2026-10-16, ODS 1.0.0): the built signed package in a POS backend (temp folder) with a hub on the same PC: pair, website order, live on the ODS in under 0.2 s, accept = GST bill with 5% GST fee lines, customer sees accepted + bill number, through to delivered; online orders could not be switched off while the order was open. The ODS installer installed into a temp folder, its copy loaded in a POS 0.3.0 and was switched off on POS 0.2.0, and it uninstalled cleanly. No printer was used; the ODS screen itself was not opened in Electron.
+
+Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; add-on installer installed into a temp folder silently and uninstalled cleanly (the real POS install was not touched).
 
 ## Bill designs
 

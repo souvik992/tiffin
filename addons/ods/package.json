@@ -1,9 +1,9 @@
 {
-  "name": "tiffin-pos-addon-online-orders",
+  "name": "tiffin-pos-addon-ods",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Online Orders add-on for Tiffin POS: online orders settings, serviceability (map, distance bands, fees, hours) and the ODS.",
+  "description": "ODS add-on for Tiffin POS: online orders settings, serviceability (map, distance bands, fees, hours) and the ODS.",
   "scripts": {
     "test": "node --test --test-concurrency=1 \"test/*.test.ts\"",
     "typecheck": "tsc -p .",

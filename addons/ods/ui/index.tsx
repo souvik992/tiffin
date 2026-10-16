@@ -1,4 +1,4 @@
-// Online Orders add-on: registers its screens with the POS (window.__POS__.register).
+// ODS add-on: registers its screens with the POS (window.__POS__.register).
 import { Globe, MapPinned, MonitorPlay } from 'lucide-react';
 import { host } from './host.ts';
 import { onlineEnabled, useOnlineConfig } from './online.ts';
@@ -8,7 +8,7 @@ import { Serviceability } from './Serviceability.tsx';
 
 declare const __ADDON_CSS__: string; // this add-on's own style sheet, built with the POS's theme (scripts/build.mjs)
 const style = document.createElement('style');
-style.dataset.addon = 'online-orders';
+style.dataset.addon = 'ods';
 style.textContent = __ADDON_CSS__;
 document.head.appendChild(style);
 
@@ -25,7 +25,7 @@ function StatusDot() {
 }
 
 host.register({
-  id: 'online-orders',
+  id: 'ods',
   nav: [{ route: 'ods', label: 'ODS (online orders)', icon: MonitorPlay, visible: onlineEnabled }],
   routes: { ods: () => (onlineEnabled() ? <Ods /> : null) },
   settings: [

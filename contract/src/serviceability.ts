@@ -1,6 +1,6 @@
 // Online order contract v1: serviceability. Where a store delivers, what it charges, and when it is open.
 // Pure (no I/O): the POS add-on checks and stores it, the hub uses it to quote and accept orders, the apps to show it.
-// Money is integer paise. Distances are straight-line km from the store (road distance can be about 30% longer).
+// Money is integer paise. Distances are road estimates: straight line x roadFactor (default 1.3), or a measured road distance.
 
 export interface Zone {
   /** This band covers distances above the previous band's upToKm, up to and including this one. */
@@ -22,6 +22,8 @@ export interface ServiceabilityConfig {
   packagingFee: number;
   pickup: { minOrder: number; etaMinutes: number };
   hours: Hours;
+  /** Straight-line distance x this = the road distance used for delivery bands (1.0 to 2.0; default 1.3). Ignored when the hub has a road-distance service. */
+  roadFactor?: number;
 }
 
 export const MAX_KM = 25;
@@ -39,6 +41,7 @@ export const DEFAULT_SERVICEABILITY: ServiceabilityConfig = {
   packagingFee: 0,
   pickup: { minOrder: 0, etaMinutes: 20 },
   hours: Object.fromEntries(DAYS.map((d) => [d, [{ open: '10:00', close: '22:00' }]])) as Hours,
+  roadFactor: 1.3,
 };
 
 const minutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
@@ -66,6 +69,7 @@ export function checkServiceability(c: unknown): { ok: true; value: Serviceabili
     if (z.freeDeliveryAbove !== null && !paise(z.freeDeliveryAbove)) e[`${k}.freeDeliveryAbove`] = 'Enter an amount, or leave free delivery empty.';
     if (!Number.isInteger(z.etaMinutes) || z.etaMinutes < 5 || z.etaMinutes > 240) e[`${k}.etaMinutes`] = 'Delivery time must be 5 to 240 minutes.';
   });
+  if (x.roadFactor !== undefined && !(typeof x.roadFactor === 'number' && x.roadFactor >= 1 && x.roadFactor <= 2 && Math.round(x.roadFactor * 100) === x.roadFactor * 100)) e.roadFactor = 'Road factor must be 1.00 to 2.00.';
   if (!paise(x.packagingFee, 500_00)) e.packagingFee = 'Packaging fee must be Rs 0 to Rs 500.';
   if (!x.pickup || !paise(x.pickup.minOrder) || !Number.isInteger(x.pickup.etaMinutes) || x.pickup.etaMinutes < 5 || x.pickup.etaMinutes > 240) e.pickup = 'Pickup needs a minimum order (Rs 0 or more) and a ready time of 5 to 240 minutes.';
   const hours = (x.hours ?? {}) as Partial<Hours>;
@@ -82,7 +86,7 @@ export function checkServiceability(c: unknown): { ok: true; value: Serviceabili
     }
   }
   if (Object.keys(e).length) return { ok: false, errors: e };
-  return { ok: true, value: { location: x.location ?? null, zones: zones.map((z) => ({ ...z })), packagingFee: x.packagingFee!, pickup: { ...x.pickup! }, hours: Object.fromEntries(DAYS.map((d) => [d, hours[d]!.map((s) => ({ open: s.open, close: s.close }))])) as Hours } };
+  return { ok: true, value: { location: x.location ?? null, zones: zones.map((z) => ({ ...z })), packagingFee: x.packagingFee!, pickup: { ...x.pickup! }, hours: Object.fromEntries(DAYS.map((d) => [d, hours[d]!.map((s) => ({ open: s.open, close: s.close }))])) as Hours, roadFactor: x.roadFactor ?? 1.3 } };
 }
 
 /** Straight-line distance in km (haversine), rounded to 0.1 km. */
@@ -97,7 +101,13 @@ export type Quote =
   | { ok: false; reason: 'NO_LOCATION' | 'OUT_OF_AREA' | 'BELOW_MINIMUM' | 'NO_DELIVERY'; minOrder?: number; shortBy?: number; maxKm?: number };
 
 /** What an order costs to fulfil and whether it can be taken. itemsTotal = what the customer pays for food (paise). */
-export function quote(c: ServiceabilityConfig, o: { fulfilment: 'DELIVERY' | 'PICKUP'; to?: { lat: number; lng: number }; itemsTotal: number }): Quote {
+/** Road distance estimate: a measured road distance when given (km), otherwise straight line x roadFactor. */
+export function roadKm(c: ServiceabilityConfig, to: { lat: number; lng: number }, measuredRoadKm?: number | null): number {
+  if (typeof measuredRoadKm === 'number' && Number.isFinite(measuredRoadKm) && measuredRoadKm >= 0) return Math.round(measuredRoadKm * 10) / 10;
+  return Math.round(distanceKm(c.location!, to) * (c.roadFactor ?? 1.3) * 10) / 10;
+}
+
+export function quote(c: ServiceabilityConfig, o: { fulfilment: 'DELIVERY' | 'PICKUP'; to?: { lat: number; lng: number }; itemsTotal: number; measuredRoadKm?: number | null }): Quote {
   if (o.fulfilment === 'PICKUP') {
     if (o.itemsTotal < c.pickup.minOrder) return { ok: false, reason: 'BELOW_MINIMUM', minOrder: c.pickup.minOrder, shortBy: c.pickup.minOrder - o.itemsTotal };
     return { ok: true, fulfilment: 'PICKUP', distanceKm: null, zone: null, deliveryFee: 0, packagingFee: c.packagingFee, minOrder: c.pickup.minOrder, etaMinutes: c.pickup.etaMinutes };
@@ -105,7 +115,7 @@ export function quote(c: ServiceabilityConfig, o: { fulfilment: 'DELIVERY' | 'PI
   if (!c.location) return { ok: false, reason: 'NO_LOCATION' };
   if (c.zones.length === 0) return { ok: false, reason: 'NO_DELIVERY' };
   if (!o.to) return { ok: false, reason: 'OUT_OF_AREA', maxKm: c.zones.at(-1)!.upToKm };
-  const km = distanceKm(c.location, o.to);
+  const km = roadKm(c, o.to, o.measuredRoadKm);
   const zone = c.zones.findIndex((z) => km <= z.upToKm);
   if (zone < 0) return { ok: false, reason: 'OUT_OF_AREA', maxKm: c.zones.at(-1)!.upToKm };
   const z = c.zones[zone]!;

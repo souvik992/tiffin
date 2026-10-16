@@ -1,6 +1,6 @@
 # Build checklist
 
-Last updated: 2026-10-16 (add-ons, Online Orders add-on, serviceability). Keep this file current when a feature lands or a gap is found.
+Last updated: 2026-10-16 (order hub, live ODS, fee GST, road distance, map provider, add-on loader hardening). Keep this file current when a feature lands or a gap is found.
 
 Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cannot do (see `HARDWARE_TEST_PLAN.md`). `[ ]` not built.
 
@@ -165,11 +165,21 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Reports follow-ups: GSTR-1 B2B/B2CS JSON export, XLSX download, profit report (needs recipe costing), scheduled email of the daily report, reports for a single shift (X-report)
 - [ ] Settings screen for backups (store, users, printers, receipt footer and bill design done)
 - [x] Settings > Online orders: master switch (off = offline mode, the default) and sales channels App, Website, Swiggy, Zomato; ODS appears in the side menu only when on; online/offline dot at the bottom of the side menu
-- [x] Add-ons: POS 0.2.0 loads signed add-ons (Ed25519, file fingerprints, minimum POS version, own database steps, own routes, failures switch the add-on off with a reason); screens plug into the side menu, routes and Settings; desktop offers a restart when an add-on is installed
-- [x] Online Orders add-on (separate installer TiffinPOS-OnlineOrders-Setup): online orders settings and ODS moved out of the POS core; Serviceability: store location on a map (search, draggable pin), up to 6 distance bands with delivery fee / minimum order / free above / delivery time, packaging fee, pickup minimum and time, opening hours (2 a day, past midnight)
+- [x] Add-ons: POS 0.2.0+ loads signed add-ons (Ed25519, file fingerprints, minimum POS version, own database steps, own routes, failures switch the add-on off with a reason); screens plug into the side menu, routes and Settings; desktop offers a restart when an add-on is installed
+- [x] ODS add-on (separate installer TiffinPOS-ODS-Setup): online orders settings and ODS moved out of the POS core; Serviceability: store location on a map (search, draggable pin), up to 6 distance bands with delivery fee / minimum order / free above / delivery time, packaging fee, pickup minimum and time, opening hours (2 a day, past midnight)
 - [x] Online orders settings: order types (pickup, delivery with own riders), payments (online, COD), accepting (manual with 2-15 min limit, or automatic)
 - [x] Phase 0 contract written: contract/ (order life cycle, data shapes, order checks, OpenAPI v1, event catalogue); waiting for owner sign-off
-- [ ] ODS receives no orders yet: build per docs/ONLINE_ORDERS_PLAN.md (phases 0-6, failure cases F1-F17), waiting for the owner's approval and decisions
+- [x] Order hub (hub/): stores, POS pairing (one-use code, device key kept as a hash, revoke), menu and status from the POS, customer quote / OTP / place / track / cancel, live POS event stream (SSE, resumes after a drop), auto-reject when not accepted in time, idempotent orders, demo ordering page; see hub/README.md
+- [x] POS connection (ODS add-on): pairs with the hub, publishes menu, serviceability and "accepting" (= a shift is open), receives orders live, sends answers through an outbox that survives restarts and internet drops
+- [x] Live ODS screen: New / Preparing / Ready / On the way, sound on new orders, accept countdown, accept with preparation time (bill + KOT print at once), reject with reason, rider name and phone, delivered / collected, cancel with manager approval (cancels the bill)
+- [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
+- [x] GST on delivery and packaging fees: billed as fee lines with the GST rate chosen in Serviceability; the hub's price equals the POS bill (same GST code). **Needs CA confirmation of the rate**
+- [x] Road distance: measured by a road-routing server on the hub (HUB_ROUTING_URL, OSRM) or straight line x road factor (default 1.30, set per store)
+- [x] Map provider switch: OpenStreetMap (free) or a paid provider (tile address with key + credit line); tiles cached per provider
+- [x] Add-on loader hardening: folder must equal the id, no going back to an older version, add-on database steps limited to their own tables (no ATTACH/PRAGMA/VACUUM); review notes in docs/ADDONS.md
+- [ ] Human security review of the add-on loader and online billing (docs/ADDONS.md "Security review")
+- [ ] Online orders, still to build: SMS for OTP, payment gateway (online payment, refunds), hosting the hub, store apps (Android/iOS/website; the demo page stands in), Swiggy/Zomato relay, customer notifications (SMS/WhatsApp)
+- [ ] Online orders: not yet tried on a real Windows install with a real printer (docs/HARDWARE_TEST_PLAN.md)
 - [x] PINs are exactly 4 digits in the UI (sign-in and approval keypads, setup, users); the backend still accepts 4 to 6 so an older longer PIN keeps working until the owner resets it
 - [x] Settings > Users (owner only): add a user with name, role and PIN (typed twice); edit name and role; reset a PIN (also unlocks); change own PIN with the current one; deactivate and reactivate. Unique names among active users; no self-deactivation or own role change; the last owner is protected
 - [x] Settings > Store: name, address (multi-line), phone, GSTIN (check digit and state checked), FSSAI; owner edits, manager views. Every change is versioned: a bill and its reprints keep the details valid when it was issued

@@ -29,7 +29,7 @@ const BILL = "i.doc_type = 'TAX_INVOICE' AND i.status = 'ISSUED'";
 const REFUND = "i.doc_type = 'CREDIT_NOTE' AND i.status = 'ISSUED'";
 const SIGNED = (c: string) => `CASE WHEN i.doc_type = 'TAX_INVOICE' THEN ${c} ELSE -${c} END`;
 const MODE: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', WALLET: 'Wallet', CREDIT: 'Credit (pay later)', OTHER: 'Other' };
-const CHANNEL: Record<string, string> = { COUNTER: 'Counter', SWIGGY: 'Swiggy', ZOMATO: 'Zomato', ONDC: 'ONDC', OTHER: 'Other' };
+const CHANNEL: Record<string, string> = { COUNTER: 'Counter', APP: 'App', WEBSITE: 'Website', SWIGGY: 'Swiggy', ZOMATO: 'Zomato', ONDC: 'ONDC', OTHER: 'Other' };
 const UNIT: Record<string, string> = { kg: 'kg', g: 'g', l: 'L', ml: 'ml', pcs: 'pcs' };
 
 const rateText = (bp: number) => { const w = Math.trunc(bp / 100), f = bp % 100; return f === 0 ? `${w}%` : `${w}.${String(f).padStart(2, '0').replace(/0$/, '')}%`; };

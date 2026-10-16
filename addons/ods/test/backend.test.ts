@@ -11,6 +11,7 @@ import { readOnlineConfig, saveOnlineConfig } from '../backend/onlineConfig.ts';
 import type { OnlineInput } from '../backend/onlineConfig.ts';
 import { readServiceability, saveServiceability } from '../backend/serviceability.ts';
 import { makeMaps } from '../backend/maps.ts';
+import { saveMapProvider } from '../backend/store.ts';
 import type { Fetcher } from '../backend/maps.ts';
 import { register } from '../backend/index.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
@@ -19,7 +20,7 @@ const code = async (fn: () => unknown): Promise<string> => { try { await fn(); }
 const OFF = { app: false, website: false, swiggy: false, zomato: false };
 const DEFAULTS = { acceptMode: 'manual', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: true, cod: true } } as const;
 const input = (o: Partial<OnlineInput> = {}): OnlineInput => ({ enabled: true, channels: { ...OFF, app: true }, ...DEFAULTS, ...o });
-const hostFor = (env: Env) => { const sink = { routes: [] as AddonRoute[], migrations: [], stops: [] }; return { host: makeHost(env.ctx, 'online-orders', '0.2.0', sink), sink }; };
+const hostFor = (env: Env) => { const sink = { routes: [] as AddonRoute[], migrations: [], stops: [] as Array<() => void | Promise<void>> }; return { host: makeHost(env.ctx, 'ods', '0.3.0', sink), sink }; };
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
 const fakeNet = () => {
   const calls: string[] = [];
@@ -69,7 +70,7 @@ test('map tiles and address search: only in online mode, cached on disk, polite 
     assert.equal(net.calls.length, 0);
     saveOnlineConfig(host, env.owner, rid(), input());
     assert.deepEqual(await maps.tile(12, 2925, 1880), PNG);
-    assert.ok(existsSync(join(host.dataDir, 'tiles', '12', '2925', '1880.png')));
+    assert.ok(existsSync(join(host.dataDir, 'tiles', 'osm', '12', '2925', '1880.png')));
     saveOnlineConfig(host, env.owner, rid(), input({ enabled: false }));
     assert.deepEqual(await maps.tile(12, 2925, 1880), PNG, 'a cached tile still shows offline');
     assert.equal(net.calls.length, 1);
@@ -81,17 +82,26 @@ test('map tiles and address search: only in online mode, cached on disk, polite 
     assert.equal(net.calls.filter((u) => u.includes('nominatim')).length, 1);
     assert.match(net.calls.find((u) => u.includes('nominatim'))!, /countrycodes=in/);
     assert.equal(await code(() => maps.search('ab')), 'VALIDATION');
+    // a paid provider: its own address and its own cache folder
+    assert.throws(() => saveMapProvider(host, { kind: 'custom', url: 'http://tiles.example/{z}/{x}/{y}.png', attribution: 'X' }), /https/);
+    assert.throws(() => saveMapProvider(host, { kind: 'custom', url: 'https://tiles.example/{z}/{x}/{y}.png', attribution: ' ' }), /credit/);
+    saveMapProvider(host, { kind: 'custom', url: 'https://tiles.example/{z}/{x}/{y}.png?key=K', attribution: '(c) Example' });
+    assert.deepEqual(await maps.tile(12, 2925, 1880), PNG);
+    assert.equal(net.calls.at(-1), 'https://tiles.example/12/2925/1880.png?key=K');
   } finally { env.cleanup(); }
 });
 
-test('the add-on registers its routes under /api/addons/online-orders', () => {
-  const env = makeEnv(); try {
+test('the add-on registers its routes under /api/addons/ods', async () => {
+  const env = makeEnv(); const stops: Array<() => void | Promise<void>> = []; try {
     const { host, sink } = hostFor(env);
     register(host);
+    stops.push(...sink.stops);
     assert.deepEqual(sink.routes.map((r) => `${r.method} ${r.path}`).sort(), [
-      'GET /api/addons/online-orders/config', 'GET /api/addons/online-orders/geocode', 'GET /api/addons/online-orders/serviceability',
-      'GET /api/addons/online-orders/tiles/:z/:x/:y', 'PUT /api/addons/online-orders/config', 'PUT /api/addons/online-orders/serviceability',
+      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/hub',
+      'GET /api/addons/ods/orders', 'GET /api/addons/ods/serviceability', 'GET /api/addons/ods/tax-groups', 'GET /api/addons/ods/tiles/:z/:x/:y',
+      'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
+      'PUT /api/addons/ods/config', 'PUT /api/addons/ods/serviceability',
     ]);
     assert.equal(sink.routes.find((r) => r.path.endsWith('/tiles/:z/:x/:y'))!.opts.auth, false);
-  } finally { env.cleanup(); }
+  } finally { for (const s of stops) await s(); env.cleanup(); }
 });

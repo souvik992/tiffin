@@ -1,4 +1,4 @@
-// Builds and signs the Online Orders add-on package into addons/dist/online-orders/:
+// Builds and signs the ODS add-on package into addons/dist/ods/:
 //   backend.cjs  (routes; bundled with the contract)     ui.js  (screens; React comes from the POS, Leaflet is bundled)
 //   manifest.json (file fingerprints + Ed25519 signature)
 // Signing key: POS_ADDON_SIGNING_KEY (path), default %USERPROFILE%\.tiffinpos\addon-signing\private.pem (never in the repo).
@@ -11,7 +11,7 @@ import { sha256hex, signManifest } from '../../../src/addons/manifest.ts';
 
 const here = join(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'));
-const out = join(here, '..', 'dist', 'packages', 'online-orders'); // packages/ only: the POS loads every folder in it
+const out = join(here, '..', 'dist', 'packages', 'ods'); // packages/ only: the POS loads every folder in it
 const keyPath = process.env.POS_ADDON_SIGNING_KEY ?? join(homedir(), '.tiffinpos', 'addon-signing', 'private.pem');
 if (!existsSync(keyPath)) { console.error(`Signing key not found: ${keyPath}`); process.exit(1); }
 
@@ -60,10 +60,10 @@ const files = {};
 rmSync(cssOut);
 for (const f of ['backend.cjs', 'ui.js']) files[f] = sha256hex(readFileSync(join(out, f)));
 const manifest = signManifest({
-  id: 'online-orders', name: 'Online Orders', version: pkg.version, minPosVersion: '0.2.0',
+  id: 'ods', name: 'ODS', version: pkg.version, minPosVersion: '0.3.0',
   description: 'Online orders settings, serviceability (delivery areas, fees, hours) and the ODS.',
   backend: 'backend.cjs', ui: 'ui.js', files,
 }, readFileSync(keyPath, 'utf8'));
 writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
 const kb = (f) => `${Math.round(readFileSync(join(out, f)).length / 1024)} KB`;
-console.log(`Online Orders ${pkg.version} built and signed: ${out} (backend ${kb('backend.cjs')}, ui ${kb('ui.js')})`);
+console.log(`ODS ${pkg.version} built and signed: ${out} (backend ${kb('backend.cjs')}, ui ${kb('ui.js')})`);

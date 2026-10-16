@@ -2,4 +2,4 @@
 import type { PosHost } from '../../../ui/src/addonHost.ts';
 
 export const host: PosHost = (window as unknown as { __POS__: PosHost }).__POS__;
-export const BASE = '/addons/online-orders';
+export const BASE = '/addons/ods';

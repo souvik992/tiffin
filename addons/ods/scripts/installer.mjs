@@ -1,4 +1,4 @@
-// Builds the Online Orders installer: addons/dist/installers/TiffinPOS-OnlineOrders-Setup-<version>.exe
+// Builds the ODS installer: addons/dist/installers/TiffinPOS-ODS-Setup-<version>.exe
 // Run `npm run build` first (or `npm run installer`, which does both). Uses makensis from electron-builder's cache
 // (it is downloaded when the POS installer is built in desktop/).
 import { execFileSync } from 'node:child_process';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 const here = join(import.meta.dirname, '..');
 const version = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).version;
-const src = join(here, '..', 'dist', 'packages', 'online-orders');
+const src = join(here, '..', 'dist', 'packages', 'ods');
 const outDir = join(here, '..', 'dist', 'installers');
 const icon = join(here, '..', '..', 'desktop', 'release', '.icon-ico', 'icon.ico');
 if (!existsSync(join(src, 'manifest.json'))) { console.error('Build the add-on first: npm run build'); process.exit(1); }
@@ -27,6 +27,6 @@ const makensis = process.env.MAKENSIS ?? find(cache);
 if (!makensis) { console.error('makensis.exe not found. Build the POS installer once (desktop: npm run dist), or set MAKENSIS.'); process.exit(1); }
 
 mkdirSync(outDir, { recursive: true });
-const outFile = join(outDir, `TiffinPOS-OnlineOrders-Setup-${version}.exe`);
-execFileSync(makensis, ['-V2', `-DVERSION=${version}`, `-DSRC=${src}`, `-DOUTFILE=${outFile}`, `-DICON=${icon}`, join(here, 'installer', 'online-orders.nsi')], { stdio: 'inherit' });
+const outFile = join(outDir, `TiffinPOS-ODS-Setup-${version}.exe`);
+execFileSync(makensis, ['-V2', `-DVERSION=${version}`, `-DSRC=${src}`, `-DOUTFILE=${outFile}`, `-DICON=${icon}`, join(here, 'installer', 'ods.nsi')], { stdio: 'inherit' });
 console.log(`Installer: ${outFile}`);

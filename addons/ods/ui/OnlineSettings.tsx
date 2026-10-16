@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Globe, WifiOff } from 'lucide-react';
+import { Globe, Link2, WifiOff } from 'lucide-react';
 import { BASE, host } from './host.ts';
 import { CHANNEL_LABELS, setOnlineConfig, useOnlineConfig } from './online.ts';
 import type { OnlineConfig, OnlineSettingsInput } from './online.ts';
@@ -147,8 +147,9 @@ export function OnlineSettings() {
           </>
         )}
 
+        {saved.enabled && <HubCard isOwner={isOwner} />}
         <p className="rounded-xl border border-border bg-background p-3 text-xs text-muted-foreground">
-          Orders start arriving once the online order hub is connected (coming next). Swiggy and Zomato also need this store to be onboarded with them as an integration partner.
+          App and website orders arrive through the order hub. Swiggy and Zomato also need this store to be onboarded with them as an integration partner (not built yet).
         </p>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {isOwner ? (
@@ -159,5 +160,57 @@ export function OnlineSettings() {
         ) : <p className="text-sm text-muted-foreground">Only the owner can change online orders.</p>}
       </div>
     </>
+  );
+}
+
+interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: 'off' | 'not-paired' | 'connecting' | 'connected' | 'retrying'; lastError: string | null; accepting: boolean }
+
+/** The order hub: the internet service that takes orders from the app and website and passes them to this POS. */
+function HubCard({ isOwner }: { isOwner: boolean }) {
+  const { api, notify, fail } = useSession();
+  const [link, setLink] = useState<HubLink | null>(null);
+  const [hubUrl, setHubUrl] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    const load = () => api.request<HubLink>('GET', `${BASE}/hub`).then(setLink).catch(() => undefined);
+    void load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [api]);
+  const pair = async () => {
+    setBusy(true);
+    try { const l = await api.request<HubLink>('POST', `${BASE}/hub/pair`, { hubUrl: hubUrl.trim(), code: code.trim().toUpperCase() }, newKey()); setLink(l); setCode(''); notify('success', `Connected to the order hub as ${l.store?.name ?? 'this store'}.`); }
+    catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  const unpair = async () => {
+    setBusy(true);
+    try { setLink(await api.request<HubLink>('DELETE', `${BASE}/hub`, undefined, newKey())); setConfirm(false); notify('success', 'Disconnected from the order hub. No more online orders arrive.'); }
+    catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  const status = !link ? 'Loading…' : link.state === 'connected' ? 'Connected: orders arrive live.' : link.state === 'retrying' ? `Cannot reach the hub, trying again. ${link.lastError ?? ''}` : link.state === 'connecting' ? 'Connecting…' : 'Not connected.';
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Order hub">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold"><Link2 className="h-4 w-4 text-primary" />Order hub</h3>
+      <p className="mb-3 text-sm text-muted-foreground">The internet service that takes orders from your app and website and sends them to this POS straight away.</p>
+      {link?.paired ? (
+        <>
+          <p className="text-sm"><b>{link.store?.name}</b> on {link.hubUrl}</p>
+          <p className={`text-sm ${link.state === 'connected' ? 'text-veg' : 'text-destructive'}`}>{status}</p>
+          {!link.accepting && <p className="mt-1 text-xs text-muted-foreground">Customers can order only while a shift is open.</p>}
+          {isOwner && (confirm
+            ? <div className="mt-3 flex gap-2"><button className="btn-primary bg-destructive" disabled={busy} onClick={() => void unpair()}>Yes, disconnect</button><button className="btn-ghost" onClick={() => setConfirm(false)}>Back</button></div>
+            : <button className="btn-ghost mt-3" onClick={() => setConfirm(true)}>Disconnect</button>)}
+        </>
+      ) : isOwner ? (
+        <div className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
+          <input className="field" placeholder="Hub address, e.g. https://orders.example.in" value={hubUrl} onChange={(e) => setHubUrl(e.target.value)} aria-label="Hub address" />
+          <input className="field font-mono uppercase" placeholder="Pairing code" maxLength={9} value={code} onChange={(e) => setCode(e.target.value)} aria-label="Pairing code" />
+          <button className="btn-primary" disabled={busy || !hubUrl.trim() || code.trim().length < 8} onClick={() => void pair()}>{busy ? 'Connecting…' : 'Connect'}</button>
+          <p className="text-xs text-muted-foreground sm:col-span-3">Get the address and a pairing code from whoever runs your order hub. The code works once, for 30 minutes.</p>
+        </div>
+      ) : <p className="text-sm text-muted-foreground">Not connected. The owner connects the hub.</p>}
+    </section>
   );
 }
