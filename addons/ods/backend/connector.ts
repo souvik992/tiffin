@@ -313,7 +313,7 @@ export class Connector {
     const who = o.customer.name ? `${o.customer.name} ` : '';
     const addr = o.address ? ` | ${o.address.line1}${o.address.landmark ? `, ${o.address.landmark}` : ''}, ${o.address.pincode}` : '';
     const bill = this.host.billing.bill(this.host.ctx, actor, `ods-${requestId}`.slice(0, 120), {
-      channel: CHANNEL[o.channel], externalId: o.number, customerPhone: o.customer.mobile,
+      channel: CHANNEL[o.channel], externalId: o.number, customerPhone: o.customer.mobile, customerName: o.customer.name?.slice(0, 60) ?? null,
       note: `${o.number} ${o.fulfilment === 'DELIVERY' ? 'DELIVERY' : 'PICKUP'} ${who}${o.customer.mobile}${addr}${o.note ? ` | ${o.note}` : ''}`.slice(0, 300),
       lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note })),
       fees: { delivery: price.deliveryFee, packaging: price.packagingFee, taxGroupId: readFeeTaxGroup(this.host) },

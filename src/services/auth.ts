@@ -12,6 +12,20 @@ import { validDevicePrefix } from '../core/numbering.ts';
 
 export function validPinFormat(pin: string): boolean { return /^\d{4,6}$/.test(pin); }
 
+/** Indian mobile number, 10 digits starting 6-9. Staff sign in with it. */
+export function validMobileFormat(m: string): boolean { return /^[6-9]\d{9}$/.test(m); }
+function checkMobile(m: string | null | undefined): string | null {
+  if (m === undefined || m === null || m === '') return null;
+  if (!validMobileFormat(m)) throw new AppError('VALIDATION', 'Mobile number must be 10 digits, starting with 6, 7, 8 or 9.');
+  return m;
+}
+/** Numbers stay taken by deactivated users too, so reactivating them never clashes. */
+function assertMobileFree(ctx: Ctx, mobile: string | null, exceptId: string | null) {
+  if (!mobile) return;
+  const clash = get<{ name: string }>(ctx.db, 'SELECT name FROM app_user WHERE mobile = ? AND deleted_at IS NULL AND id <> ?', mobile, exceptId ?? '');
+  if (clash) throw new AppError('MOBILE_TAKEN', `This mobile number is already used by ${clash.name}.`, 409);
+}
+
 export function hashPin(pin: string, cost: number): string {
   const salt = randomBytes(16);
   const h = scryptSync(pin, salt, 32, { N: cost, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
@@ -25,7 +39,7 @@ export function verifyPinHash(pin: string, stored: string): boolean {
   return h.length === expected.length && timingSafeEqual(h, expected);
 }
 
-interface UserRow { id: string; name: string; role: Role; pin_hash: string; failed_attempts: number; locked_until: number | null; active: number; deleted_at: number | null }
+interface UserRow { id: string; name: string; role: Role; mobile: string | null; pin_hash: string; failed_attempts: number; locked_until: number | null; active: number; deleted_at: number | null }
 
 const MAX_FAILS = 5;
 function recordFailure(ctx: Ctx, u: UserRow): void {
@@ -73,6 +87,15 @@ export function login(ctx: Ctx, userId: string, pin: string): { token: string; u
   audit(ctx, u.id, 'auth.login', 'user', u.id);
   return { token, user: actor };
 }
+/** Sign-in with mobile number and PIN. An unknown number gets the same answer as a wrong PIN. */
+export function loginByMobile(ctx: Ctx, mobile: string, pin: string): { token: string; user: Actor } {
+  const u = validMobileFormat(mobile) ? get<UserRow>(ctx.db, 'SELECT * FROM app_user WHERE mobile = ? AND deleted_at IS NULL', mobile) : undefined;
+  if (!u) throw new AppError('BAD_PIN', 'Incorrect mobile number or PIN.', 401);
+  try { return login(ctx, u.id, pin); } catch (e) {
+    if (e instanceof AppError && e.code === 'BAD_PIN') throw new AppError('BAD_PIN', 'Incorrect mobile number or PIN.', 401);
+    throw e;
+  }
+}
 export function logout(ctx: Ctx, token: string): void { ctx.sessions.delete(token); }
 
 export function authenticate(ctx: Ctx, token: string | undefined): Actor {
@@ -90,8 +113,10 @@ export function authenticate(ctx: Ctx, token: string | undefined): Actor {
   return { userId: s.userId, role: u.role, name: u.name };
 }
 
+/** Before sign-in: names for the approval dialog and for staff who have no mobile number yet. Numbers themselves are not shown. */
 export function listLoginUsers(ctx: Ctx) {
-  return all<{ id: string; name: string; role: Role }>(ctx.db, 'SELECT id, name, role FROM app_user WHERE active = 1 AND deleted_at IS NULL ORDER BY name');
+  return all<{ id: string; name: string; role: Role; has_mobile: number }>(ctx.db, 'SELECT id, name, role, mobile IS NOT NULL AS has_mobile FROM app_user WHERE active = 1 AND deleted_at IS NULL ORDER BY name')
+    .map((u) => ({ id: u.id, name: u.name, role: u.role, hasMobile: u.has_mobile === 1 }));
 }
 
 /** The login screen picks people by name, so two active users may not share one (case-insensitive). */
@@ -104,21 +129,23 @@ function assertNameFree(ctx: Ctx, name: string, exceptId: string | null) {
 export function listUsers(ctx: Ctx, actor: Actor) {
   assertPerm(actor, 'user.manage');
   const now = ctx.clock.now();
-  return all<{ id: string; name: string; role: Role; active: number; locked_until: number | null; created_at: number }>(ctx.db,
-    'SELECT id, name, role, active, locked_until, created_at FROM app_user WHERE deleted_at IS NULL ORDER BY active DESC, lower(name)')
-    .map((u) => ({ id: u.id, name: u.name, role: u.role, active: u.active === 1, locked: u.locked_until !== null && u.locked_until > now, createdAt: u.created_at, you: u.id === actor.userId }));
+  return all<{ id: string; name: string; role: Role; mobile: string | null; active: number; locked_until: number | null; created_at: number }>(ctx.db,
+    'SELECT id, name, role, mobile, active, locked_until, created_at FROM app_user WHERE deleted_at IS NULL ORDER BY active DESC, lower(name)')
+    .map((u) => ({ id: u.id, name: u.name, role: u.role, mobile: u.mobile, active: u.active === 1, locked: u.locked_until !== null && u.locked_until > now, createdAt: u.created_at, you: u.id === actor.userId }));
 }
 
-export function createUser(ctx: Ctx, actor: Actor, requestId: string, input: { name: string; role: Role; pin: string }) {
+export function createUser(ctx: Ctx, actor: Actor, requestId: string, input: { name: string; role: Role; pin: string; mobile?: string | null }) {
   return runCommand(ctx, requestId, 'user.create', actor, () => {
     assertPerm(actor, 'user.manage');
     if (!input.name.trim() || input.name.length > 60) throw new AppError('VALIDATION', 'Name must be 1-60 characters.');
     if (!['owner', 'manager', 'cashier'].includes(input.role)) throw new AppError('VALIDATION', 'Invalid role.');
     if (!validPinFormat(input.pin)) throw new AppError('VALIDATION', 'PIN must be 4-6 digits.');
+    const mobile = checkMobile(input.mobile);
     assertNameFree(ctx, input.name.trim(), null);
+    assertMobileFree(ctx, mobile, null);
     const id = ctx.ids.next();
     const now = ctx.clock.now();
-    run(ctx.db, 'INSERT INTO app_user(id, name, role, pin_hash, created_at, updated_at) VALUES (?,?,?,?,?,?)', id, input.name.trim(), input.role, hashPin(input.pin, ctx.scryptCost), now, now);
+    run(ctx.db, 'INSERT INTO app_user(id, name, role, mobile, pin_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?)', id, input.name.trim(), input.role, mobile, hashPin(input.pin, ctx.scryptCost), now, now);
     audit(ctx, actor.userId, 'user.create', 'user', id, { role: input.role });
     emit(ctx, 'user', id, 'upsert', { id, name: input.name.trim(), role: input.role });
     return { id, name: input.name.trim(), role: input.role };
@@ -139,7 +166,7 @@ export function changePin(ctx: Ctx, actor: Actor, requestId: string, input: { us
 }
 
 /** Changes a person's name or role (owner only). Takes effect on their next action (roles are read on every request). */
-export function updateUser(ctx: Ctx, actor: Actor, requestId: string, input: { userId: string; name: string; role: Role }) {
+export function updateUser(ctx: Ctx, actor: Actor, requestId: string, input: { userId: string; name: string; role: Role; mobile?: string | null }) {
   return runCommand(ctx, requestId, 'user.update', actor, () => {
     assertPerm(actor, 'user.manage');
     const u = userRow(ctx, input.userId);
@@ -152,10 +179,12 @@ export function updateUser(ctx: Ctx, actor: Actor, requestId: string, input: { u
       const owners = get<{ n: number }>(ctx.db, "SELECT count(*) n FROM app_user WHERE role='owner' AND active=1 AND deleted_at IS NULL")!.n;
       if (owners <= 1) throw new AppError('LAST_OWNER', 'The shop needs at least one owner.', 409);
     }
+    const mobile = input.mobile === undefined ? u.mobile : checkMobile(input.mobile);
     if (u.active) assertNameFree(ctx, name, u.id);
-    if (name === u.name && input.role === u.role) return { id: u.id, name, role: u.role };
-    run(ctx.db, 'UPDATE app_user SET name = ?, role = ?, version = version + 1, updated_at = ? WHERE id = ?', name, input.role, ctx.clock.now(), u.id);
-    audit(ctx, actor.userId, 'user.update', 'user', u.id, { before: { name: u.name, role: u.role }, after: { name, role: input.role } });
+    assertMobileFree(ctx, mobile, u.id);
+    if (name === u.name && input.role === u.role && mobile === u.mobile) return { id: u.id, name, role: u.role };
+    run(ctx.db, 'UPDATE app_user SET name = ?, role = ?, mobile = ?, version = version + 1, updated_at = ? WHERE id = ?', name, input.role, mobile, ctx.clock.now(), u.id);
+    audit(ctx, actor.userId, 'user.update', 'user', u.id, { before: { name: u.name, role: u.role, mobileSet: u.mobile !== null }, after: { name, role: input.role, mobileSet: mobile !== null, mobileChanged: mobile !== u.mobile } });
     emit(ctx, 'user', u.id, 'upsert', { id: u.id, name, role: input.role });
     return { id: u.id, name, role: input.role };
   });
@@ -195,7 +224,7 @@ export function deactivateUser(ctx: Ctx, actor: Actor, requestId: string, userId
 export interface SetupInput {
   outlet: { name: string; gstin?: string | null; fssaiNo?: string | null; stateCode: string; address?: string | null; phone?: string | null };
   device: { name: string; seriesPrefix: string };
-  owner: { name: string; pin: string };
+  owner: { name: string; pin: string; mobile?: string | null };
 }
 
 /** First-run setup. Only allowed while no user exists. Creates outlet, device, owner and starter GST groups. */
@@ -207,6 +236,7 @@ export function setupFirstRun(ctx: Ctx, requestId: string, input: SetupInput) {
     if (input.outlet.gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(input.outlet.gstin)) throw new AppError('VALIDATION', 'GSTIN format is invalid.');
     if (!validDevicePrefix(input.device.seriesPrefix)) throw new AppError('VALIDATION', 'Series prefix must be 1-2 capital letters or digits.');
     if (!validPinFormat(input.owner.pin)) throw new AppError('VALIDATION', 'PIN must be 4-6 digits.');
+    const ownerMobile = checkMobile(input.owner.mobile);
     const now = ctx.clock.now();
     const outletId = ctx.ids.next();
     const deviceId = ctx.ids.next();
@@ -214,7 +244,7 @@ export function setupFirstRun(ctx: Ctx, requestId: string, input: SetupInput) {
     run(ctx.db, 'INSERT INTO outlet(id, name, gstin, fssai_no, state_code, address, phone, created_at) VALUES (?,?,?,?,?,?,?,?)',
       outletId, input.outlet.name.trim(), input.outlet.gstin ?? null, input.outlet.fssaiNo ?? null, input.outlet.stateCode, input.outlet.address ?? null, input.outlet.phone ?? null, now);
     run(ctx.db, 'INSERT INTO device(id, outlet_id, name, series_prefix, created_at) VALUES (?,?,?,?,?)', deviceId, outletId, input.device.name, input.device.seriesPrefix, now);
-    run(ctx.db, 'INSERT INTO app_user(id, name, role, pin_hash, created_at, updated_at) VALUES (?,?,?,?,?,?)', ownerId, input.owner.name.trim(), 'owner', hashPin(input.owner.pin, ctx.scryptCost), now, now);
+    run(ctx.db, 'INSERT INTO app_user(id, name, role, mobile, pin_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?)', ownerId, input.owner.name.trim(), 'owner', ownerMobile, hashPin(input.owner.pin, ctx.scryptCost), now, now);
     for (const [name, bp] of [['GST 0%', 0], ['GST 5%', 500], ['GST 12%', 1200], ['GST 18%', 1800]] as const) {
       run(ctx.db, 'INSERT INTO tax_group(id, name, rate_bp, cess_bp, price_includes_tax, updated_at) VALUES (?,?,?,?,1,?)', ctx.ids.next(), name, bp, 0, now);
     }

@@ -16,7 +16,7 @@ import { camel } from './camel.ts';
 
 export interface OrderRow {
   id: string; device_id: string; shift_id: string | null; channel: string; external_id: string | null; token_no: number | null;
-  status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; customer_phone: string | null; note: string | null;
+  status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; customer_phone: string | null; customer_name: string | null; note: string | null;
   place_of_supply: string | null; buyer_gstin: string | null; bill_discount_type: 'amount' | 'percent' | null; bill_discount_value: number | null;
   discount_approved_by: string | null; discount_approved_bp: number | null; created_by: string | null; created_at: number; updated_at: number;
 }
@@ -80,7 +80,7 @@ export function getCart(ctx: Ctx, orderId: string) {
   const byId = new Map(calc.lines.map((l) => [l.id, l]));
   return {
     order: {
-      id: order.id, status: order.status, channel: order.channel, tokenNo: order.token_no, customerPhone: order.customer_phone, note: order.note,
+      id: order.id, status: order.status, channel: order.channel, tokenNo: order.token_no, customerPhone: order.customer_phone, customerName: order.customer_name, note: order.note,
       placeOfSupply, buyerGstin: order.buyer_gstin, shiftId: order.shift_id, createdAt: order.created_at, updatedAt: order.updated_at,
       billDiscount: order.bill_discount_type ? { type: order.bill_discount_type, value: order.bill_discount_value } : null,
       discountApproved: order.discount_approved_by !== null,
@@ -137,6 +137,13 @@ function validPhone(p: unknown): string | null {
   if (typeof p !== 'string' || !/^\d{10}$/.test(p)) throw new AppError('VALIDATION', 'Phone number must be 10 digits.');
   return p;
 }
+function validName(n: unknown): string | null {
+  if (n === undefined || n === null) return null;
+  if (typeof n !== 'string') throw new AppError('VALIDATION', 'Customer name must be text.');
+  const t = n.trim().replace(/s+/g, ' ');
+  if (t.length > 60) throw new AppError('VALIDATION', 'Customer name can be at most 60 characters.');
+  return t || null;
+}
 function validDiscount(d: DiscountSpec | null | undefined): DiscountSpec | null {
   if (d === null || d === undefined) return null;
   if ((d.type !== 'amount' && d.type !== 'percent') || !Number.isSafeInteger(d.value) || d.value < 0) throw new AppError('VALIDATION', 'Invalid discount.');
@@ -148,7 +155,7 @@ export function openShiftRow(ctx: Ctx) {
   return get<{ id: string; user_id: string; opened_at: number; opening_cash: number }>(ctx.db, 'SELECT id, user_id, opened_at, opening_cash FROM shift WHERE device_id = ? AND closed_at IS NULL', getDevice(ctx).id);
 }
 
-export function createOrder(ctx: Ctx, actor: Actor, requestId: string, input: { channel?: string; customerPhone?: string | null; note?: string | null } = {}) {
+export function createOrder(ctx: Ctx, actor: Actor, requestId: string, input: { channel?: string; customerPhone?: string | null; customerName?: string | null; note?: string | null } = {}) {
   return cartCmd(ctx, requestId, 'order.create', actor, () => {
     assertPerm(actor, 'order.write');
     const channel = input.channel ?? 'COUNTER';
@@ -158,8 +165,8 @@ export function createOrder(ctx: Ctx, actor: Actor, requestId: string, input: { 
     const id = ctx.ids.next();
     const tok = get<{ last_no: number }>(ctx.db,
       'INSERT INTO token_counter(device_id, day, last_no) VALUES (?,?,1) ON CONFLICT(device_id, day) DO UPDATE SET last_no = last_no + 1 RETURNING last_no', device.id, istDay(now))!.last_no;
-    run(ctx.db, `INSERT INTO sale_order(id, device_id, shift_id, channel, token_no, status, customer_phone, note, created_by, created_at, updated_at)
-                 VALUES (?,?,?,?,?,'DRAFT',?,?,?,?,?)`, id, device.id, openShiftRow(ctx)?.id ?? null, channel, tok, validPhone(input.customerPhone), input.note ?? null, actor.userId, now, now);
+    run(ctx.db, `INSERT INTO sale_order(id, device_id, shift_id, channel, token_no, status, customer_phone, customer_name, note, created_by, created_at, updated_at)
+                 VALUES (?,?,?,?,?,'DRAFT',?,?,?,?,?,?)`, id, device.id, openShiftRow(ctx)?.id ?? null, channel, tok, validPhone(input.customerPhone), validName(input.customerName), input.note ?? null, actor.userId, now, now);
     audit(ctx, actor.userId, 'order.create', 'order', id, { token: tok });
     return getCart(ctx, id);
   });
@@ -261,7 +268,7 @@ export function applyBillDiscount(ctx: Ctx, actor: Actor, requestId: string, inp
   });
 }
 
-export function updateOrder(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; customerPhone?: string | null; note?: string | null; buyerGstin?: string | null; placeOfSupply?: string | null }, override?: Override) {
+export function updateOrder(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; customerPhone?: string | null; customerName?: string | null; note?: string | null; buyerGstin?: string | null; placeOfSupply?: string | null }, override?: Override) {
   return cartCmd(ctx, requestId, 'order.update', actor, () => {
     assertPerm(actor, 'order.write');
     const o = getOrderRow(ctx, input.orderId);
@@ -271,8 +278,8 @@ export function updateOrder(ctx: Ctx, actor: Actor, requestId: string, input: { 
     let pos = input.placeOfSupply === undefined ? o.place_of_supply : input.placeOfSupply;
     if (pos && !/^\d{2}$/.test(pos)) throw new AppError('VALIDATION', 'Place of supply must be a 2-digit state code.');
     if (input.buyerGstin && input.placeOfSupply === undefined) pos = input.buyerGstin.slice(0, 2);
-    run(ctx.db, 'UPDATE sale_order SET customer_phone = ?, note = ?, buyer_gstin = ?, place_of_supply = ?, updated_at = ? WHERE id = ?',
-      input.customerPhone === undefined ? o.customer_phone : validPhone(input.customerPhone), input.note === undefined ? o.note : input.note, gstin ?? null, pos ?? null, ctx.clock.now(), o.id);
+    run(ctx.db, 'UPDATE sale_order SET customer_phone = ?, customer_name = ?, note = ?, buyer_gstin = ?, place_of_supply = ?, updated_at = ? WHERE id = ?',
+      input.customerPhone === undefined ? o.customer_phone : validPhone(input.customerPhone), input.customerName === undefined ? o.customer_name : validName(input.customerName), input.note === undefined ? o.note : input.note, gstin ?? null, pos ?? null, ctx.clock.now(), o.id);
     enforceDiscountPolicy(ctx, actor, o.id, override);
     return getCart(ctx, o.id);
   });
@@ -344,19 +351,19 @@ export function cancelOrder(ctx: Ctx, actor: Actor, requestId: string, orderId: 
 /** Open (DRAFT/HELD) orders. Used to restore the screen after a crash or restart: the server is the source of truth. */
 export interface OpenOrderSummary {
   id: string; status: 'DRAFT' | 'HELD'; tokenNo: number; channel: string; updatedAt: number; createdAt: number; lineCount: number;
-  customerPhone: string | null; note: string | null; createdByName: string | null; grandTotal: number;
+  customerPhone: string | null; customerName: string | null; note: string | null; createdByName: string | null; grandTotal: number;
 }
 /** Open bills (drafts and held bills) with their totals from the tax engine, for the "held bills" list. */
 export function listOpenOrders(ctx: Ctx, o: { status?: 'DRAFT' | 'HELD' } = {}): OpenOrderSummary[] {
   const statuses = o.status ? [o.status] : ['DRAFT', 'HELD'];
-  const rows = all<{ id: string; status: 'DRAFT' | 'HELD'; token_no: number; channel: string; updated_at: number; created_at: number; customer_phone: string | null; note: string | null; created_by_name: string | null; line_count: number }>(ctx.db,
-    `SELECT o.id, o.status, o.token_no, o.channel, o.updated_at, o.created_at, o.customer_phone, o.note, u.name AS created_by_name,
+  const rows = all<{ id: string; status: 'DRAFT' | 'HELD'; token_no: number; channel: string; updated_at: number; created_at: number; customer_phone: string | null; customer_name: string | null; note: string | null; created_by_name: string | null; line_count: number }>(ctx.db,
+    `SELECT o.id, o.status, o.token_no, o.channel, o.updated_at, o.created_at, o.customer_phone, o.customer_name, o.note, u.name AS created_by_name,
       (SELECT count(*) FROM sale_order_line l WHERE l.order_id = o.id) AS line_count
       FROM sale_order o LEFT JOIN app_user u ON u.id = o.created_by
      WHERE o.status IN (SELECT value FROM json_each(?)) ORDER BY o.updated_at DESC LIMIT 200`, JSON.stringify(statuses));
   return rows.map((r) => ({
     id: r.id, status: r.status, tokenNo: r.token_no, channel: r.channel, updatedAt: r.updated_at, createdAt: r.created_at, lineCount: r.line_count,
-    customerPhone: r.customer_phone, note: r.note, createdByName: r.created_by_name,
+    customerPhone: r.customer_phone, customerName: r.customer_name, note: r.note, createdByName: r.created_by_name,
     grandTotal: r.line_count === 0 ? 0 : getCart(ctx, r.id).totals.grandTotal,
   }));
 }

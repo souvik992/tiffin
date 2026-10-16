@@ -11,20 +11,18 @@ const DAYS: Array<[keyof Hours, string]> = [['1', 'Monday'], ['2', 'Tuesday'], [
 const COLORS = ['#16a34a', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2'];
 const BENGALURU: [number, number] = [12.9716, 77.5946];
 
-/** Leaflet shows the map credit as HTML; a typed credit is shown as plain text. */
-const escapeHtml = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
 let cssAdded = false;
 const addCss = () => { if (cssAdded) return; cssAdded = true; const s = document.createElement('style'); s.textContent = leafletCss; document.head.appendChild(s); };
 
 /** Amounts are typed as rupees and stored as paise (the POS's money rules: no floating point). */
 interface ZoneForm { upToKm: string; deliveryFee: string; minOrder: string; freeDeliveryAbove: string; etaMinutes: string }
-interface MapProvider { kind: 'osm' | 'custom'; url: string | null; attribution: string | null }
-type Saved = ServiceabilityConfig & { feeTaxGroupId: string | null; map: MapProvider };
+/** Which map the POS uses: Google when the owner saved a key in Settings > API keys, else OpenStreetMap. */
+interface MapsInfo { provider: 'google' | 'osm'; attribution: string }
+type Saved = ServiceabilityConfig & { feeTaxGroupId: string | null; maps: MapsInfo };
 interface TaxGroup { id: string; name: string; rateBp: number }
 interface Form {
   location: ServiceabilityConfig['location']; zones: ZoneForm[]; packagingFee: string; pickupMin: string; pickupEta: string; hours: Hours;
-  roadFactor: string; feeTaxGroupId: string; mapKind: 'osm' | 'custom'; mapUrl: string; mapCredit: string;
+  roadFactor: string; feeTaxGroupId: string;
 }
 const toForm = (c: Saved): Form => ({
   location: c.location,
@@ -32,7 +30,6 @@ const toForm = (c: Saved): Form => ({
   packagingFee: money.paiseToInput(c.packagingFee), pickupMin: money.paiseToInput(c.pickup.minOrder), pickupEta: String(c.pickup.etaMinutes),
   hours: structuredClone(c.hours),
   roadFactor: (c.roadFactor ?? 1.3).toFixed(2), feeTaxGroupId: c.feeTaxGroupId ?? '',
-  mapKind: c.map.kind, mapUrl: c.map.url ?? '', mapCredit: c.map.attribution ?? '',
 });
 /** The form as the backend expects it; a typo becomes NaN/-1 so the backend names the field. */
 const fromForm = (f: Form): unknown => {
@@ -42,7 +39,6 @@ const fromForm = (f: Form): unknown => {
     zones: f.zones.map((z): Zone => ({ upToKm: Number(z.upToKm), deliveryFee: rupees(z.deliveryFee), minOrder: rupees(z.minOrder), freeDeliveryAbove: z.freeDeliveryAbove.trim() ? rupees(z.freeDeliveryAbove) : null, etaMinutes: Number(z.etaMinutes) })),
     packagingFee: rupees(f.packagingFee), pickup: { minOrder: rupees(f.pickupMin), etaMinutes: Number(f.pickupEta) }, hours: f.hours,
     roadFactor: Number(f.roadFactor), feeTaxGroupId: f.feeTaxGroupId || null,
-    map: f.mapKind === 'osm' ? { kind: 'osm', url: null, attribution: null } : { kind: 'custom', url: f.mapUrl.trim(), attribution: f.mapCredit.trim() || null },
   };
 };
 
@@ -57,10 +53,10 @@ export function Serviceability() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [taxGroups, setTaxGroups] = useState<TaxGroup[]>([]);
-  const [mapView, setMapView] = useState<MapProvider | null>(null); // what the map shows: the saved provider
+  const [maps, setMaps] = useState<MapsInfo | null>(null);
 
   useEffect(() => {
-    api.request<Saved>('GET', `${BASE}/serviceability`).then((c) => { const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMapView(c.map); }).catch((e) => notify('error', messageOf(e)));
+    api.request<Saved>('GET', `${BASE}/serviceability`).then((c) => { const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMaps(c.maps); }).catch((e) => notify('error', messageOf(e)));
     api.request<TaxGroup[]>('GET', `${BASE}/tax-groups`).then(setTaxGroups).catch(() => setTaxGroups([]));
   }, [api, notify]);
   if (!form) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -75,7 +71,7 @@ export function Serviceability() {
     try {
       const c = await api.request<Saved>('PUT', `${BASE}/serviceability`, fromForm(form), key.current);
       key.current = newKey();
-      const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMapView(c.map);
+      const f = toForm(c); setForm(f); setSaved(JSON.stringify(f)); setMaps(c.maps);
       notify('success', 'Serviceability saved. It is sent to the online order hub when that is connected.');
     } catch (e) {
       key.current = newKey();
@@ -91,8 +87,7 @@ export function Serviceability() {
       <p className="mb-4 text-sm text-muted-foreground">Where this store delivers, what it charges, and when it takes online orders. Distances are road distances: measured on the road map when the order hub has it, otherwise the straight line times the road factor below.</p>
       <div className="grid gap-4 2xl:grid-cols-2">
         <div className="space-y-4">
-          <LocationCard key={JSON.stringify(mapView)} form={form} online={online?.enabled === true} readOnly={ro} credit={mapView?.kind === 'custom' ? escapeHtml(mapView.attribution ?? '') : '&copy; OpenStreetMap contributors'} onChange={(location) => set({ location })} error={errors.location} />
-          <MapProviderCard form={form} readOnly={ro} errors={errors} onChange={set} />
+          <LocationCard key={maps?.provider ?? 'none'} form={form} online={online?.enabled === true} readOnly={ro} maps={maps} onChange={(location) => set({ location })} error={errors.location} />
         </div>
         <div className="space-y-4">
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Delivery areas">
@@ -169,7 +164,7 @@ export function Serviceability() {
   );
 }
 
-function LocationCard({ form, online, readOnly, credit, onChange, error }: { form: Form; online: boolean; readOnly: boolean; credit: string; onChange: (l: Form['location']) => void; error?: string }) {
+function LocationCard({ form, online, readOnly, maps, onChange, error }: { form: Form; online: boolean; readOnly: boolean; maps: MapsInfo | null; onChange: (l: Form['location']) => void; error?: string }) {
   const { api } = useSession();
   const div = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -177,9 +172,6 @@ function LocationCard({ form, online, readOnly, credit, onChange, error }: { for
   const circles = useRef<L.Circle[]>([]);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<Array<{ label: string; lat: number; lng: number }> | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const loc = form.location;
 
   // the map itself (only in online mode: tiles come from the internet through the POS)
@@ -187,7 +179,7 @@ function LocationCard({ form, online, readOnly, credit, onChange, error }: { for
     if (!online || !div.current || map.current) return;
     addCss();
     const m = L.map(div.current, { center: loc ? [loc.lat, loc.lng] : BENGALURU, zoom: loc ? 13 : 11 });
-    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png`, { maxZoom: 19, attribution: credit }).addTo(m);
+    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png?p=${maps?.provider ?? 'osm'}`, { maxZoom: 19, attribution: maps?.attribution ?? '' }).addTo(m);
     if (!readOnly) m.on('click', (e: L.LeafletMouseEvent) => changeRef.current({ lat: round(e.latlng.lat), lng: round(e.latlng.lng), label: '' }));
     map.current = m;
     return () => { m.remove(); map.current = null; marker.current = null; circles.current = []; };
@@ -213,32 +205,16 @@ function LocationCard({ form, online, readOnly, credit, onChange, error }: { for
     if (outer) m.fitBounds(outer.getBounds(), { padding: [12, 12] }); else m.setView([loc.lat, loc.lng], 14);
   }, [loc?.lat, loc?.lng, JSON.stringify(form.zones.map((z) => z.upToKm)), online]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const search = async () => {
-    setSearchError(null); setResults(null);
-    try { setResults(await api.request('GET', `${BASE}/geocode?q=${encodeURIComponent(q)}`)); } catch (e) { setSearchError(messageOf(e)); }
-  };
-
   return (
     <section className="rounded-2xl border border-border bg-card p-4" aria-label="Store location">
-      <h3 className="mb-1 flex items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-primary" />Store location</h3>
-      <p className="mb-3 text-xs text-muted-foreground">Search the address, then drag the pin to the exact door (or click the map). Delivery distances are measured from here.</p>
+      <h3 className="mb-1 flex items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-primary" />Store location
+        {maps && <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">{maps.provider === 'google' ? 'Google Maps' : 'OpenStreetMap (free)'}</span>}
+      </h3>
+      {maps?.provider === 'osm' && <p className="mb-2 rounded-lg bg-accent/50 p-2 text-xs">Using the free map. For Google Maps search and map, the owner adds a Google key in <b>Settings &gt; API keys</b>.</p>}
+      <p className="mb-3 text-xs text-muted-foreground">Type the shop name, area or road and pick a suggestion, then drag the pin to the exact door (or click the map). Not found? In Google Maps, right-click your shop, click the numbers at the top to copy them, and paste them here. Delivery distances are measured from here.</p>
       {online ? (
         <>
-          {!readOnly && (
-            <div className="mb-2 flex gap-2">
-              <input className="field flex-1" placeholder="Shop address, area or landmark" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void search(); }} aria-label="Search address" />
-              <button className="btn-ghost" onClick={() => void search()}><Search className="h-4 w-4" />Search</button>
-            </div>
-          )}
-          {searchError && <p role="alert" className="mb-2 text-sm text-destructive">{searchError}</p>}
-          {results && (
-            <ul className="mb-2 divide-y divide-border rounded-xl border border-border" aria-label="Search results">
-              {results.length === 0 && <li className="p-2 text-sm text-muted-foreground">Nothing found. Try a nearby landmark, or click the map.</li>}
-              {results.map((r) => (
-                <li key={`${r.lat},${r.lng}`}><button className="w-full p-2 text-left text-sm hover:bg-secondary" onClick={() => { onChange({ lat: round(r.lat), lng: round(r.lng), label: r.label }); setResults(null); }}>{r.label}</button></li>
-              ))}
-            </ul>
-          )}
+          {!readOnly && <PlaceSearch near={() => { if (loc) return loc; const c = map.current?.getCenter(); return c ? { lat: c.lat, lng: c.lng } : null; }} onPick={(p) => onChange({ lat: round(p.lat), lng: round(p.lng), label: p.label })} />}
           <div ref={div} className="h-[380px] w-full overflow-hidden rounded-xl border border-border" aria-label="Map" />
         </>
       ) : (
@@ -294,28 +270,96 @@ function HoursCard({ hours, readOnly, errors, onChange }: { hours: Hours; readOn
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
-/** Which map pictures to use. OpenStreetMap's free server is fine for setting up one shop; a paid provider (MapTiler, Mapbox...) for many shops or heavy use. */
-function MapProviderCard({ form, readOnly, errors, onChange }: { form: Form; readOnly: boolean; errors: Record<string, string>; onChange: (p: Partial<Form>) => void }) {
-  const err = errors.map ?? errors['map.url'];
+interface Suggestion { label: string; detail: string; lat: number | null; lng: number | null; placeId: string | null }
+/** "12.9661, 77.7175" (Google Maps right-click) or a Google Maps link with @12.96,77.71 or ?q=12.96,77.71. */
+function pastedPoint(t: string): { lat: number; lng: number } | null {
+  const m = /^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/.exec(t) ?? /[@=](-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(t) ?? /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(t);
+  if (!m) return null;
+  const lat = Number(m[1]), lng = Number(m[2]);
+  return lat >= 6 && lat <= 37 && lng >= 68 && lng <= 98 ? { lat, lng } : null; // inside India
+}
+
+/** Suggestions while typing (no need to press Search); arrow keys + Enter, or click. */
+function PlaceSearch({ near: nearOf, onPick }: { near: () => { lat: number; lng: number } | null; onPick: (p: { lat: number; lng: number; label: string }) => void }) {
+  const { api } = useSession();
+  const [q, setQ] = useState('');
+  const [list, setList] = useState<Suggestion[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const seq = useRef(0);
+  const session = useRef(newKey());
+  const point = pastedPoint(q);
+
+  const run = async (text: string, full: boolean) => {
+    const id = ++seq.current;
+    setBusy(true); setError(null);
+    const near = nearOf();
+    const nearQ = near ? `&near=${near.lat.toFixed(4)},${near.lng.toFixed(4)}` : '';
+    try {
+      const out = await api.request<Suggestion[]>('GET', `${BASE}/geocode?q=${encodeURIComponent(text)}${nearQ}${full ? '&full=1' : ''}&session=${session.current}`);
+      if (id === seq.current) { setList(out); setActive(0); }
+    } catch (e) { if (id === seq.current) { setList(null); setError(messageOf(e)); } }
+    finally { if (id === seq.current) setBusy(false); }
+  };
+  // type-as-you-go: wait until typing pauses
+  useEffect(() => {
+    const text = q.trim();
+    if (text.length < 3 || pastedPoint(text)) { seq.current++; setList(null); setBusy(false); return; }
+    const t = setTimeout(() => void run(text, false), 350);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = async (s: Suggestion) => {
+    setError(null);
+    try {
+      let p = s.lat !== null && s.lng !== null ? { lat: s.lat, lng: s.lng, label: [s.label, s.detail].filter(Boolean).join(', ') } : null;
+      if (!p && s.placeId) {
+        const d = await api.request<{ lat: number; lng: number; label: string }>('GET', `${BASE}/geocode/place?id=${encodeURIComponent(s.placeId)}&session=${session.current}`);
+        p = { ...d, label: d.label.startsWith(s.label) ? d.label : [s.label, d.label].filter(Boolean).join(', ') };
+      }
+      if (!p) return;
+      onPick(p);
+      setQ(''); setList(null);
+      session.current = newKey(); // a new search session (Google bills per session)
+    } catch (e) { setError(messageOf(e)); }
+  };
+  const usePoint = () => { if (point) { onPick({ ...point, label: '' }); setQ(''); setList(null); } };
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' && list?.length) { e.preventDefault(); setActive((a) => (a + 1) % list.length); }
+    else if (e.key === 'ArrowUp' && list?.length) { e.preventDefault(); setActive((a) => (a - 1 + list.length) % list.length); }
+    else if (e.key === 'Escape') setList(null);
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (point) usePoint();
+      else if (list?.length) void pick(list[active]!);
+      else if (q.trim().length >= 3) void run(q.trim(), true);
+    }
+  };
+
   return (
-    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Map provider">
-      <h3 className="mb-1 font-semibold">Map provider</h3>
-      <p className="mb-3 text-xs text-muted-foreground">Where the map pictures come from. The free OpenStreetMap server is enough for one shop setting up its area. With many shops, use a paid provider and paste its map address (with {'{z}'}, {'{x}'} and {'{y}'}) and the credit line it asks you to show.</p>
-      <div className="space-y-2" role="radiogroup" aria-label="Map provider">
-        <label className="flex items-center gap-2 text-sm"><input type="radio" name="mapKind" disabled={readOnly} checked={form.mapKind === 'osm'} onChange={() => onChange({ mapKind: 'osm' })} />OpenStreetMap (free)</label>
-        <label className="flex items-center gap-2 text-sm"><input type="radio" name="mapKind" disabled={readOnly} checked={form.mapKind === 'custom'} onChange={() => onChange({ mapKind: 'custom' })} />Paid provider</label>
+    <div className="relative z-[1100] mb-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input className="field w-full pl-9" placeholder="Shop name, area, road, or paste Google Maps coordinates" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey}
+          role="combobox" aria-expanded={Boolean(list || point)} aria-controls="place-suggestions" aria-autocomplete="list" aria-label="Search place" autoComplete="off" />
+        {busy && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Searching…</span>}
       </div>
-      {form.mapKind === 'custom' && (
-        <div className="mt-3 space-y-2">
-          <label className="block text-sm font-medium">Map address
-            <input className="field mt-1 w-full font-mono text-xs" disabled={readOnly} placeholder="https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=YOUR_KEY" value={form.mapUrl} onChange={(e) => onChange({ mapUrl: e.target.value })} aria-label="Map address" />
-          </label>
-          <label className="block text-sm font-medium">Credit line
-            <input className="field mt-1 w-full" disabled={readOnly} maxLength={200} placeholder="© MapTiler © OpenStreetMap contributors" value={form.mapCredit} onChange={(e) => onChange({ mapCredit: e.target.value })} aria-label="Map credit" />
-          </label>
-        </div>
+      {error && <p role="alert" className="mt-1 text-sm text-destructive">{error}</p>}
+      {(point || list) && (
+        <ul id="place-suggestions" role="listbox" className="absolute z-[1000] mt-1 max-h-80 w-full overflow-auto rounded-xl border border-border bg-card shadow-lg">
+          {point && <li role="option" aria-selected><button className="w-full p-2 text-left text-sm hover:bg-secondary" onClick={usePoint}><b>Use this point</b> <span className="text-muted-foreground">{point.lat}, {point.lng}</span></button></li>}
+          {list?.length === 0 && <li className="p-2 text-sm text-muted-foreground">No match. Press Enter for a wider search, try the area or road name, or paste the coordinates from Google Maps.</li>}
+          {list?.map((s, i) => (
+            <li key={`${s.placeId ?? ''}${s.lat},${s.lng},${i}`} role="option" aria-selected={i === active}>
+              <button className={`flex w-full items-start gap-2 p-2 text-left text-sm ${i === active ? 'bg-secondary' : 'hover:bg-secondary'}`} onMouseEnter={() => setActive(i)} onClick={() => void pick(s)}>
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <span><span className="block font-medium">{s.label}</span>{s.detail && <span className="block text-xs text-muted-foreground">{s.detail}</span>}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-      {err && <span role="alert" className="mt-1 block text-xs text-destructive">{err}</span>}
-    </section>
+    </div>
   );
 }

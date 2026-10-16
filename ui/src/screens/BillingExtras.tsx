@@ -161,7 +161,7 @@ export function HeldBillsDialog({ onClose, onResume }: { onClose: () => void; on
             <li key={o.id} className="flex items-center gap-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">Token {o.tokenNo} · {formatPaise(o.grandTotal)}</p>
-                <p className="truncate text-xs text-muted-foreground">{[`${o.lineCount} item${o.lineCount === 1 ? '' : 's'}`, o.customerPhone, o.note, o.createdByName, age(o.updatedAt)].filter(Boolean).join(' · ')}</p>
+                <p className="truncate text-xs text-muted-foreground">{[`${o.lineCount} item${o.lineCount === 1 ? '' : 's'}`, o.customerName, o.customerPhone, o.note, o.createdByName, age(o.updatedAt)].filter(Boolean).join(' · ')}</p>
               </div>
               <button className="btn-primary h-9" onClick={() => onResume(o.id)}>Resume</button>
             </li>
@@ -176,20 +176,24 @@ export function HeldBillsDialog({ onClose, onResume }: { onClose: () => void; on
 export function CustomerDialog({ cart, onClose, onSaved }: { cart: Cart; onClose: () => void; onSaved: (c: Cart) => void }) {
   const { api, withApproval } = useSession();
   const key = useRef(newKey());
+  const [name, setName] = useState(cart.order.customerName ?? '');
   const [phone, setPhone] = useState(cart.order.customerPhone ?? '');
   const [note, setNote] = useState(cart.order.note ?? '');
   const [error, setError] = useState('');
   const save = async () => {
     if (phone.trim() && !/^\d{10}$/.test(phone.trim())) return setError('Phone number must be 10 digits.');
     try {
-      const c = await withApproval('Changing this bill', (o) => api.updateOrder(cart.order.id, { customerPhone: phone.trim() || null, note: note.trim() || null }, o, key.current));
+      const c = await withApproval('Changing this bill', (o) => api.updateOrder(cart.order.id, { customerName: name.trim() || null, customerPhone: phone.trim() || null, note: note.trim() || null }, o, key.current));
       if (c) onSaved(c);
     } catch (e) { key.current = newKey(); setError(messageOf(e)); }
   };
   return (
     <Modal title="Customer and note" onClose={onClose}>
-      <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Customer phone</span>
-        <input className="field" inputMode="numeric" maxLength={10} placeholder="10 digits (optional)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} autoFocus />
+      <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Customer name</span>
+        <input className="field" maxLength={60} autoComplete="off" placeholder="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </label>
+      <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Customer phone</span>
+        <input className="field" inputMode="numeric" maxLength={10} placeholder="10 digits (optional)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} />
       </label>
       <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Note</span>
         <input className="field" maxLength={200} placeholder="Table 4, less spicy, parcel…" value={note} onChange={(e) => setNote(e.target.value)} />

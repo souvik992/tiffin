@@ -1,4 +1,5 @@
 import type { HostApi } from '../../../src/addons/host.ts';
+import type { Actor } from '../../../src/services/ctx.ts';
 import type { Order } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
 
@@ -55,22 +56,29 @@ export const outboxDone = (host: HostApi, id: number, error?: string) => host.db
 export const outboxFailed = (host: HostApi, id: number, error: string) => host.db.run('UPDATE ods_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?', error.slice(0, 300), id);
 
 // ---- small settings
-const FEE_TAX = 'ods_fee_tax_group', MAP = 'ods_map_provider';
-export interface MapProvider { kind: 'osm' | 'custom'; url: string | null; attribution: string | null }
+const FEE_TAX = 'ods_fee_tax_group';
+/** Settings ending in "_key" are secret: the POS never lists them (src/services/settings.ts). */
+const GOOGLE_KEY = 'ods_google_maps_key';
 export const readFeeTaxGroup = (host: HostApi): string | null => host.getSetting(FEE_TAX) || null;
 export function saveFeeTaxGroup(host: HostApi, taxGroupId: string | null) {
   if (taxGroupId !== null && !host.db.get('SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', taxGroupId)) throw new host.AppError('VALIDATION', 'Choose a GST rate from the list.');
   host.setSetting(FEE_TAX, taxGroupId ?? '');
 }
-export function readMapProvider(host: HostApi): MapProvider {
-  try { const m = JSON.parse(host.getSetting(MAP) || 'null') as MapProvider | null; if (m && (m.kind === 'osm' || m.kind === 'custom')) return m; } catch { /* default */ }
-  return { kind: 'osm', url: null, attribution: null };
+
+/** Google Maps (map pictures + place search) when the owner set a key in Settings > API keys; else free OpenStreetMap. */
+export const readGoogleKey = (host: HostApi): string | null => host.getSetting(GOOGLE_KEY) || null;
+/** What screens see: never the key itself. */
+export interface ApiKeysView { google: { set: boolean; hint: string | null } }
+export function apiKeysView(host: HostApi): ApiKeysView {
+  const k = readGoogleKey(host);
+  return { google: { set: Boolean(k), hint: k ? `…${k.slice(-4)}` : null } };
 }
-export function saveMapProvider(host: HostApi, m: MapProvider) {
-  if (m.kind === 'custom') {
-    const ok = typeof m.url === 'string' && /^https:\/\/[^\s]+$/.test(m.url) && ['{z}', '{x}', '{y}'].every((p) => m.url!.includes(p)) && m.url.length <= 400;
-    if (!ok) throw new host.AppError('VALIDATION', 'Enter the tile address from your map provider: it starts with https:// and contains {z}, {x} and {y} (for example https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=YOUR_KEY).');
-    if (!m.attribution || !m.attribution.trim() || m.attribution.length > 200) throw new host.AppError('VALIDATION', 'Enter the map credit line your provider requires (for example "© MapTiler © OpenStreetMap contributors").');
-    host.setSetting(MAP, JSON.stringify({ kind: 'custom', url: m.url, attribution: m.attribution.trim() }));
-  } else host.setSetting(MAP, JSON.stringify({ kind: 'osm', url: null, attribution: null }));
+/** Owner only. null removes the key (back to the free map). */
+export function saveGoogleKey(host: HostApi, actor: Actor, key: unknown) {
+  host.assertPerm(actor, 'settings.write');
+  if (key === null || key === '') { host.setSetting(GOOGLE_KEY, ''); host.audit(host.ctx, actor.userId, 'ods.api_key.remove', 'settings', GOOGLE_KEY); return; }
+  const k = typeof key === 'string' ? key.trim() : '';
+  if (!/^AIza[0-9A-Za-z_-]{35}$/.test(k)) throw new host.AppError('VALIDATION', 'That is not a Google API key. It is 39 characters long and starts with AIza. Copy it again from the Google Cloud console.');
+  host.setSetting(GOOGLE_KEY, k);
+  host.audit(host.ctx, actor.userId, 'ods.api_key.set', 'settings', GOOGLE_KEY, { endsWith: k.slice(-4) }); // never the key itself
 }

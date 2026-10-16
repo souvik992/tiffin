@@ -6,7 +6,7 @@ import type { LoadedAddons } from '../addons/host.ts';
 import { AppError } from '../store/db.ts';
 import type { Actor, Ctx } from '../services/ctx.ts';
 import { assertPerm } from '../services/permissions.ts';
-import { authenticate, changePin, createUser, deactivateUser, listLoginUsers, listUsers, login, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
+import { authenticate, changePin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
 import { addLine, applyBillDiscount, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
 import { cancelInvoice, checkPayments, createCreditNote, creditNoteOptions, finalizeInvoice, getInvoice, listInvoices, previewCreditNote, reprintInvoice } from '../services/invoices.ts';
@@ -66,9 +66,14 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/setup', { auth: false }, (c) => setupFirstRun(c.ctx, rid(c), body(c, obj({
     outlet: obj({ name: str({ min: 1, max: 80 }), gstin: opt(nullable(str({ max: 15 }))), fssaiNo: opt(nullable(str({ max: 14 }))), stateCode: str({ min: 2, max: 2 }), address: opt(nullable(str({ max: 200 }))), phone: opt(nullable(str({ max: 15 }))) }),
     device: obj({ name: str({ min: 1, max: 40 }), seriesPrefix: str({ min: 1, max: 2 }) }),
-    owner: obj({ name: str({ min: 1, max: 60 }), pin: str({ min: 4, max: 6 }) }),
+    owner: obj({ name: str({ min: 1, max: 60 }), pin: str({ min: 4, max: 6 }), mobile: opt(nullable(str({ max: 10 }))) }),
   }))));
-  add('POST', '/api/auth/login', { auth: false, idem: false }, (c) => { const b = body(c, obj({ userId: str({ min: 1, max: 64 }), pin: str({ min: 1, max: 12 }) })); return login(c.ctx, b.userId, b.pin); });
+  add('POST', '/api/auth/login', { auth: false, idem: false }, (c) => {
+    const b = body(c, obj({ userId: opt(str({ min: 1, max: 64 })), mobile: opt(str({ min: 1, max: 10 })), pin: str({ min: 1, max: 12 }) }));
+    if (b.mobile) return loginByMobile(c.ctx, b.mobile, b.pin);
+    if (b.userId) return login(c.ctx, b.userId, b.pin); // unlocking after inactivity, and staff without a mobile number yet
+    throw new AppError('VALIDATION', 'Enter your mobile number.');
+  });
   add('POST', '/api/auth/logout', { idem: false }, (c) => { if (c.token) logout(c.ctx, c.token); return { ok: true }; });
   add('GET', '/api/me', {}, (c) => c.actor);
 
@@ -101,10 +106,10 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/modifier-groups', {}, (c) => createModifierGroup(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), minSelect: opt(int({ min: 0 })), maxSelect: opt(int({ min: 1 })), modifiers: arr(obj({ name: str({ min: 1, max: 60 }), price: int({ min: 0 }) }), { max: 50 }) }))));
 
   // ---- orders ----
-  add('POST', '/api/orders', {}, (c) => createOrder(c.ctx, c.actor, rid(c), body(c, obj({ channel: opt(str({ max: 10 })), customerPhone: opt(nullable(str({ max: 10 }))), note: opt(nullable(str({ max: 200 }))) }))));
+  add('POST', '/api/orders', {}, (c) => createOrder(c.ctx, c.actor, rid(c), body(c, obj({ channel: opt(str({ max: 10 })), customerPhone: opt(nullable(str({ max: 10 }))), customerName: opt(nullable(str({ max: 80 }))), note: opt(nullable(str({ max: 200 }))) }))));
   add('GET', '/api/orders', {}, (c) => { const st = c.query.get('status'); if (st !== null && st !== 'DRAFT' && st !== 'HELD') throw new AppError('VALIDATION', 'status must be DRAFT or HELD'); return listOpenOrders(c.ctx, { status: st ?? undefined }); });
   add('GET', '/api/orders/:id', {}, (c) => getCart(c.ctx, c.params.id!));
-  add('PATCH', '/api/orders/:id', {}, (c) => { const b = body(c, obj({ customerPhone: opt(nullable(str({ max: 10 }))), note: opt(nullable(str({ max: 200 }))), buyerGstin: opt(nullable(str({ max: 15 }))), placeOfSupply: opt(nullable(str({ max: 2 }))), override: opt(override) })); const { override: ov, ...rest } = b; return updateOrder(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...rest }, ov); });
+  add('PATCH', '/api/orders/:id', {}, (c) => { const b = body(c, obj({ customerPhone: opt(nullable(str({ max: 10 }))), customerName: opt(nullable(str({ max: 80 }))), note: opt(nullable(str({ max: 200 }))), buyerGstin: opt(nullable(str({ max: 15 }))), placeOfSupply: opt(nullable(str({ max: 2 }))), override: opt(override) })); const { override: ov, ...rest } = b; return updateOrder(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...rest }, ov); });
   add('POST', '/api/orders/:id/lines', {}, (c) => addLine(c.ctx, c.actor, rid(c), { orderId: c.params.id!, ...body(c, obj({ itemId: str({ min: 1, max: 64 }), qtyMilli: opt(int({ min: 1 })), modifierIds: opt(arr(str({ max: 64 }), { max: 30 })), note: opt(nullable(str({ max: 120 }))) })) }));
   add('PATCH', '/api/lines/:lineId', {}, (c) => updateLine(c.ctx, c.actor, rid(c), { lineId: c.params.lineId!, ...body(c, obj({ qtyMilli: opt(int({ min: 1 })), discount: opt(nullable(discount)), note: opt(nullable(str({ max: 120 }))), override: opt(override) })) }));
   add('DELETE', '/api/lines/:lineId', {}, (c) => removeLine(c.ctx, c.actor, rid(c), c.params.lineId!, body(c, obj({ override: opt(override) })).override));
@@ -208,11 +213,11 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('PUT', '/api/recipes/:itemId', {}, (c) => setRecipe(c.ctx, c.actor, rid(c), c.params.itemId!, body(c, obj({ lines: arr(obj({ stockItemId: str({ min: 1, max: 64 }), qtyMilli: int({ min: 1 }) }), { max: 50 }) })).lines));
 
   // ---- users, settings, admin ----
-  add('POST', '/api/users', {}, (c) => createUser(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), role: oneOf('owner', 'manager', 'cashier'), pin: str({ min: 4, max: 6 }) }))));
+  add('POST', '/api/users', {}, (c) => createUser(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), role: oneOf('owner', 'manager', 'cashier'), pin: str({ min: 4, max: 6 }), mobile: opt(nullable(str({ max: 10 }))) }))));
   add('POST', '/api/users/:id/pin', {}, (c) => changePin(c.ctx, c.actor, rid(c), { userId: c.params.id!, ...body(c, obj({ newPin: str({ min: 4, max: 6 }), currentPin: opt(str({ max: 6 })) })) }));
   add('POST', '/api/users/:id/deactivate', {}, (c) => deactivateUser(c.ctx, c.actor, rid(c), c.params.id!));
   add('GET', '/api/users', {}, (c) => listUsers(c.ctx, c.actor));
-  add('PATCH', '/api/users/:id', {}, (c) => updateUser(c.ctx, c.actor, rid(c), { userId: c.params.id!, ...body(c, obj({ name: str({ min: 1, max: 60 }), role: oneOf('owner', 'manager', 'cashier') })) }));
+  add('PATCH', '/api/users/:id', {}, (c) => updateUser(c.ctx, c.actor, rid(c), { userId: c.params.id!, ...body(c, obj({ name: str({ min: 1, max: 60 }), role: oneOf('owner', 'manager', 'cashier'), mobile: opt(nullable(str({ max: 10 }))) })) }));
   add('POST', '/api/users/:id/reactivate', {}, (c) => reactivateUser(c.ctx, c.actor, rid(c), c.params.id!));
   add('GET', '/api/settings', {}, (c) => { assertPerm(c.actor, 'settings.write'); return allSettings(c.ctx); });
   add('PUT', '/api/settings', {}, (c) => {

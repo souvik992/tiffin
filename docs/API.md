@@ -9,9 +9,9 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 
 | Method and path | Who | Notes |
 |---|---|---|
-| GET `/api/ping`, `/api/login-users` | public | login screen list (id, name, role) |
+| GET `/api/ping`, `/api/login-users` | public | active users (id, name, role, hasMobile) for the approval dialog and for staff without a mobile number; numbers are never shown |
 | POST `/api/setup` | public, once | creates outlet, counter, owner, GST groups |
-| POST `/api/auth/login`, `/api/auth/logout`; GET `/api/me` | | |
+| POST `/api/auth/login` `{ mobile, pin }` (sign-in) or `{ userId, pin }` (unlock after inactivity; staff without a mobile number); `/api/auth/logout`; GET `/api/me` | | an unknown number and a wrong PIN get the same answer |
 | GET `/api/catalog`, `/api/items/search?q=`, `/api/items/by-barcode/:code` | C | |
 | POST/PATCH/DELETE `/api/items`, POST `/api/categories`, `/api/tax-groups`, `/api/modifier-groups`, PUT `/api/items/:id/modifier-groups` | M | |
 | PUT `/api/items/:id/image` `{dataBase64}`; DELETE `/api/items/:id/image` | M | JPEG, PNG or WebP only (checked by content), up to 1 MB; the UI resizes to 640 px first |
@@ -21,7 +21,7 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | POST `/api/items/import/preview`, `/api/items/import` | M | CSV `name,category,price,tax_percent,hsn,barcode,unit,veg`; all-or-nothing; veg is `veg`, `non-veg` or empty; names already on the menu are refused |
 | POST `/api/orders`; GET `/api/orders` (open), `/api/orders/:id` (cart with totals) | C | |
 | POST `/api/orders/:id/lines`; PATCH/DELETE `/api/lines/:lineId` | C | discount above limit needs approval |
-| PATCH `/api/orders/:id` (phone, note, buyer GSTIN, place of supply) | C | |
+| PATCH `/api/orders/:id` (customer name and phone, note, buyer GSTIN, place of supply) | C | |
 | POST `/api/orders/:id/discount`, `/hold`, `/resume`, `/cancel` | C | |
 | PATCH `/api/orders/:id` and DELETE `/api/lines/:lineId` accept `override` | C | a change that pushes an approved discount over the limit needs the manager again |
 | POST `/api/orders/:id/finalize` | C | `payments:[{mode,amount,tendered?,reference?}]` must equal the total; returns `print: {receipts, kitchenTickets, warnings}` (`NO_RECEIPT_PRINTER`, `NO_KITCHEN_PRINTER`) |
@@ -41,8 +41,13 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | GET `/api/addons/:id/ui.js` | none | an active add-on's screens (checked bytes from its signed package) |
 | `/api/addons/ods/config` GET (C) / PUT (O) | | ODS add-on: online mode, channels, order types, payments, accept mode |
 | `/api/addons/ods/serviceability` GET (M) / PUT (O) | | location, delivery areas, packaging fee, pickup, hours (contract/src/serviceability.ts); errors in `details.fields` |
-| GET `/api/addons/ods/tiles/:z/:x/:y.png` (none), `/geocode?q=` (O) | | map tiles and address search through the POS; only in online mode (cached tiles work offline) |
-| Serviceability also carries `roadFactor` (1.00-2.00), `feeTaxGroupId` (GST group for fees) and `map` `{ kind: osm or custom, url, attribution }` | | |
+| GET `/api/addons/ods/tiles/:z/:x/:y.png` (none) | | map tiles through the POS; only in online mode (cached tiles work offline) |
+| GET `/api/addons/ods/geocode?q=&near=lat,lng&full=1&session=` (O) | | place suggestions `[{ label, detail, lat, lng, placeId }]`: Google Places with the owner's key, else Photon; `full=1` (Enter) may also ask Nominatim |
+| GET `/api/addons/ods/geocode/place?id=&session=` (O) | | the location of a suggestion that came without one (Google) |
+| Serviceability `maps` | | GET: `{ provider: google/osm, attribution }` |
+| GET `/api/addons/ods/api-keys`; PUT `{ google: key or null }` | O | `{ google: { set, hint } }` (never the key); null removes it |
+| POST `/api/addons/ods/api-keys/test` | O | `{ search: { ok, message }, map: { ok, message } }`; 409 in offline mode |
+| Serviceability also carries `roadFactor` (1.00-2.00) and `feeTaxGroupId` (GST group for fees) | | |
 | GET `/api/addons/ods/tax-groups` | C | GST groups to choose for delivery/packaging fees |
 | GET `/api/addons/ods/hub` (C); POST `/hub/pair` `{ hubUrl, code }` (O); DELETE `/hub` (O) | | order hub link: `paired, hubUrl, store, state, lastError, accepting`; https only (http only for a hub on this PC) |
 | GET `/api/addons/ods/orders` (C); GET `/events` (C, SSE `event: ods`, data `{ link, orders }`) | | online orders kept on this POS, with `posPrice` for new ones; the ODS screen's live feed |

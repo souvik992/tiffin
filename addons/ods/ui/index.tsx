@@ -1,10 +1,11 @@
 // ODS add-on: registers its screens with the POS (window.__POS__.register).
-import { Globe, MapPinned, MonitorPlay } from 'lucide-react';
+import { Globe, KeyRound, MapPinned, MonitorPlay } from 'lucide-react';
 import { host } from './host.ts';
 import { onlineEnabled, useOnlineConfig } from './online.ts';
 import { OnlineSettings } from './OnlineSettings.tsx';
 import { Ods } from './Ods.tsx';
 import { Serviceability } from './Serviceability.tsx';
+import { ApiKeys } from './ApiKeys.tsx';
 
 declare const __ADDON_CSS__: string; // this add-on's own style sheet, built with the POS's theme (scripts/build.mjs)
 const style = document.createElement('style');
@@ -31,6 +32,7 @@ host.register({
   settings: [
     { key: 'online', label: 'Online orders', hint: 'Sales channels, payments, accepting (off = offline mode)', icon: Globe, component: OnlineSettings, roles: ['owner', 'manager'] },
     { key: 'serviceability', label: 'Serviceability', hint: 'Delivery areas on a map, fees, minimum order, hours', icon: MapPinned, component: Serviceability, roles: ['owner', 'manager'] },
+    { key: 'api-keys', label: 'API keys', hint: 'Google Maps key for the map and place search', icon: KeyRound, component: ApiKeys, roles: ['owner'] },
   ],
   railFooter: StatusDot,
 });

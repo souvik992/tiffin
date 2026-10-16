@@ -90,7 +90,7 @@ export function Reports() {
     <PageShell route="reports" title="Reports" subtitle="Sales, tax, cash and stock reports. View them here, download for Excel, or print.">
       {!allowed ? <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">Reports are for a manager or owner. Ask them to sign in.</p> : (
         <div className="flex flex-col gap-6 lg:flex-row">
-          <nav className="shrink-0 lg:w-60" aria-label="Reports list">
+          <nav className="shrink-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-3rem)] lg:w-60 lg:self-start lg:overflow-y-auto lg:pr-1" aria-label="Reports list">
             {catalog === null && <p className="text-sm text-muted-foreground">Loading…</p>}
             {groups.map((g) => {
               const Icon = GROUP_ICON[g] ?? BarChart3;

@@ -23,6 +23,23 @@ test('removing an item after an approved amount discount needs approval again, a
   } finally { env.cleanup(); }
 });
 
+test('a bill can carry an optional customer name, shown in the cart and the held bills list', () => {
+  const env = makeEnv(); try {
+    startShift(env);
+    const a = createOrder(env.ctx, env.cashier, rid(), { customerName: '  Priya  ' });
+    assert.equal(a.order.customerName, 'Priya');
+    let c = updateOrder(env.ctx, env.cashier, rid(), { orderId: a.order.id, customerPhone: '9123456789' });
+    assert.equal(c.order.customerName, 'Priya'); // left out: kept
+    c = updateOrder(env.ctx, env.cashier, rid(), { orderId: a.order.id, customerName: 'Rahul S' });
+    assert.deepEqual([c.order.customerName, c.order.customerPhone], ['Rahul S', '9123456789']);
+    holdOrder(env.ctx, env.cashier, rid(), a.order.id);
+    assert.equal(listOpenOrders(env.ctx, { status: 'HELD' })[0]!.customerName, 'Rahul S');
+    const b = createOrder(env.ctx, env.cashier, rid());
+    assert.equal(updateOrder(env.ctx, env.cashier, rid(), { orderId: b.order.id, customerName: '   ' }).order.customerName, null); // blank: no name
+    assert.equal(code(() => updateOrder(env.ctx, env.cashier, rid(), { orderId: b.order.id, customerName: 'x'.repeat(61) })), 'VALIDATION');
+  } finally { env.cleanup(); }
+});
+
 test('held bills list shows total, customer and cashier, and can be filtered', () => {
   const env = makeEnv(); try {
     startShift(env);

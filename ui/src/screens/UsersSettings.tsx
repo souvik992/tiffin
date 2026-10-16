@@ -4,7 +4,7 @@ import { newKey } from '../lib/api.ts';
 import type { Role, StaffUser } from '../lib/api.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal } from '../components/ui.tsx';
-import { PIN_LENGTH, isPin, pinDigits } from '../lib/pin.ts';
+import { PIN_LENGTH, isMobile, isPin, mobileDigits, pinDigits } from '../lib/pin.ts';
 
 const ROLES: Array<{ role: Role; label: string; can: string }> = [
   { role: 'cashier', label: 'Cashier', can: 'Bills, payments, own shift, reprints, sees stock.' },
@@ -32,16 +32,17 @@ export function UsersSettings() {
         <h2 className="font-display text-2xl">Users</h2>
         <button className="btn-primary ml-auto" onClick={() => setDialog({ kind: 'add' })}><Plus className="h-4 w-4" />Add user</button>
       </div>
-      <p className="mb-4 text-sm text-muted-foreground">Everyone who signs in to this POS. They pick their name on the sign-in screen and type their PIN.</p>
+      <p className="mb-4 text-sm text-muted-foreground">Everyone who signs in to this POS. They sign in with their mobile number and PIN. After an inactivity lock, the PIN alone unlocks.</p>
       <table className="table">
         <thead className="bg-muted text-left">
-          <tr><th className="p-3">Name</th><th>Role</th><th>Status</th><th className="w-80 pr-3 text-right">Actions</th></tr>
+          <tr><th className="p-3">Name</th><th>Mobile</th><th>Role</th><th>Status</th><th className="w-80 pr-3 text-right">Actions</th></tr>
         </thead>
         <tbody>
-          {users === null && <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">Loading…</td></tr>}
+          {users === null && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Loading…</td></tr>}
           {users?.map((u) => (
             <tr key={u.id} className={`border-t border-border ${u.active ? '' : 'text-muted-foreground'}`}>
               <td className="p-3 font-medium">{u.name}{u.you && <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-xs text-primary">You</span>}</td>
+              <td className="tabular-nums">{u.mobile ?? <span className="text-xs text-destructive">Not set: Edit to add</span>}</td>
               <td>{roleLabel(u.role)}</td>
               <td>
                 {!u.active ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">Deactivated</span>
@@ -89,24 +90,28 @@ function UserDialog({ user, onClose, onDone }: { user?: StaffUser; onClose: () =
   const { api } = useSession();
   const key = useRef(newKey());
   const [name, setName] = useState(user?.name ?? '');
+  const [mobile, setMobile] = useState(user?.mobile ?? '');
   const [role, setRole] = useState<Role>(user?.role ?? 'cashier');
   const [pin, setPin] = useState('');
   const [again, setAgain] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const save = async () => {
-    const problem = !name.trim() ? 'Enter a name.' : user ? null : pinProblem(pin, again);
+    const problem = !name.trim() ? 'Enter a name.' : !isMobile(mobile) ? 'Enter a 10-digit mobile number (starting with 6, 7, 8 or 9). It is used to sign in.' : user ? null : pinProblem(pin, again);
     if (problem) { setError(problem); return; }
     setBusy(true); setError(null);
     try {
-      const r = user ? await api.updateUser(user.id, { name: name.trim(), role }, key.current) : await api.createUser({ name: name.trim(), role, pin }, key.current);
+      const r = user ? await api.updateUser(user.id, { name: name.trim(), role, mobile }, key.current) : await api.createUser({ name: name.trim(), role, pin, mobile }, key.current);
       onDone(r.name);
     } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(false); }
   };
   return (
     <Modal title={user ? `Edit ${user.name}` : 'Add user'} onClose={onClose} width="max-w-lg">
       <div className="space-y-4">
-        <label className="block text-sm font-medium">Name, as shown on the sign-in screen
+        <label className="block text-sm font-medium">Mobile number, used to sign in
+          <input className="field mt-1 w-full tabular-nums" inputMode="numeric" maxLength={10} value={mobile} onChange={(e) => setMobile(mobileDigits(e.target.value))} placeholder="98XXXXXXXX" aria-label="Mobile number" />
+        </label>
+        <label className="block text-sm font-medium">Name
           <input className="field mt-1 w-full" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ravi K" aria-label="Name" autoFocus />
         </label>
         <fieldset>

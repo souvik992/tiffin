@@ -11,7 +11,8 @@ import { readOnlineConfig, saveOnlineConfig } from '../backend/onlineConfig.ts';
 import type { OnlineInput } from '../backend/onlineConfig.ts';
 import { readServiceability, saveServiceability } from '../backend/serviceability.ts';
 import { makeMaps } from '../backend/maps.ts';
-import { saveMapProvider } from '../backend/store.ts';
+import { apiKeysView, saveGoogleKey } from '../backend/store.ts';
+import { makePlaces } from '../backend/places.ts';
 import type { Fetcher } from '../backend/maps.ts';
 import { register } from '../backend/index.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
@@ -60,13 +61,12 @@ test('serviceability: defaults until saved; owner saves a checked configuration;
   } finally { env.cleanup(); }
 });
 
-test('map tiles and address search: only in online mode, cached on disk, polite to the map service', async () => {
+test('map tiles: only in online mode, cached on disk, per provider', async () => {
   const env = makeEnv(); try {
     const { host } = hostFor(env);
     const net = fakeNet();
     const maps = makeMaps(host, net.f);
     assert.equal(await code(() => maps.tile(12, 2925, 1880)), 'OFFLINE_MODE'); // offline mode: no connection at all
-    assert.equal(await code(() => maps.search('Kalyan Nagar')), 'OFFLINE_MODE');
     assert.equal(net.calls.length, 0);
     saveOnlineConfig(host, env.owner, rid(), input());
     assert.deepEqual(await maps.tile(12, 2925, 1880), PNG);
@@ -76,18 +76,43 @@ test('map tiles and address search: only in online mode, cached on disk, polite 
     assert.equal(net.calls.length, 1);
     assert.equal(await code(() => maps.tile(3, 9, 0)), 'NOT_FOUND'); // x beyond 2^z
     assert.equal(await code(() => maps.tile(20, 0, 0)), 'NOT_FOUND');
+  } finally { env.cleanup(); }
+});
+
+test('Google map tiles with the owner key: one session reused, tiles not kept on disk, a switched-off API is explained', async () => {
+  const env = makeEnv(); try {
+    const { host } = hostFor(env);
+    const calls: Array<{ url: string; method?: string }> = [];
+    let sessionAnswer: { status: number; json: unknown } = { status: 200, json: { session: 'SESS1', expiry: String(Math.floor(Date.now() / 1000) + 3600) } };
+    const f: Fetcher = async (url, init) => {
+      calls.push({ url, method: init.method });
+      if (url.includes('createSession')) return { ok: sessionAnswer.status < 400, status: sessionAnswer.status, arrayBuffer: async () => new ArrayBuffer(0), json: async () => sessionAnswer.json };
+      return { ok: true, status: 200, arrayBuffer: async () => PNG.buffer.slice(PNG.byteOffset, PNG.byteOffset + PNG.length), json: async () => null };
+    };
+    const maps = makeMaps(host, f);
     saveOnlineConfig(host, env.owner, rid(), input());
-    assert.deepEqual(await maps.search('  Kalyan   Nagar '), [{ label: 'Kalyan Nagar, Bengaluru', lat: 13.0213, lng: 77.646 }]);
-    await maps.search('kalyan nagar'); // cached: no second request
-    assert.equal(net.calls.filter((u) => u.includes('nominatim')).length, 1);
-    assert.match(net.calls.find((u) => u.includes('nominatim'))!, /countrycodes=in/);
-    assert.equal(await code(() => maps.search('ab')), 'VALIDATION');
-    // a paid provider: its own address and its own cache folder
-    assert.throws(() => saveMapProvider(host, { kind: 'custom', url: 'http://tiles.example/{z}/{x}/{y}.png', attribution: 'X' }), /https/);
-    assert.throws(() => saveMapProvider(host, { kind: 'custom', url: 'https://tiles.example/{z}/{x}/{y}.png', attribution: ' ' }), /credit/);
-    saveMapProvider(host, { kind: 'custom', url: 'https://tiles.example/{z}/{x}/{y}.png?key=K', attribution: '(c) Example' });
+    assert.throws(() => saveGoogleKey(host, env.manager, 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345'), /permission|not allowed|owner/i);
+    assert.throws(() => saveGoogleKey(host, env.owner, 'AIza-too-short'), /not a Google API key/);
+    saveGoogleKey(host, env.owner, 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345');
+    assert.deepEqual(apiKeysView(host), { google: { set: true, hint: '…2345' } });
+    assert.ok(get(env.ctx.db, "SELECT 1 FROM audit_log WHERE action = 'ods.api_key.set'"), 'the change is audited');
     assert.deepEqual(await maps.tile(12, 2925, 1880), PNG);
-    assert.equal(net.calls.at(-1), 'https://tiles.example/12/2925/1880.png?key=K');
+    await maps.tile(12, 2925, 1881);
+    await maps.tile(12, 2925, 1880); // from memory
+    assert.equal(calls.filter((c) => c.url.includes('createSession')).length, 1, 'one session for many tiles');
+    assert.equal(calls.find((c) => c.url.includes('createSession'))!.method, 'POST');
+    assert.equal(calls.filter((c) => c.url.includes('/2dtiles/')).length, 2);
+    assert.match(calls.find((c) => c.url.includes('/2dtiles/'))!.url, /^https:\/\/tile\.googleapis\.com\/v1\/2dtiles\/12\/2925\/1880\?session=SESS1&key=AIza/);
+    assert.ok(!existsSync(join(host.dataDir, 'tiles', 'osm', '12', '2925', '1881.png')), 'Google tiles are not saved on disk');
+    // the Map Tiles API is not switched on: the owner is told what to do
+    sessionAnswer = { status: 403, json: { error: { status: 'PERMISSION_DENIED', message: 'Map Tiles API has not been used in project 1 before or it is disabled.' } } };
+    assert.match((await maps.testTiles()).message, /Map Tiles API is not switched on.*Enable/);
+    // key removed: back to the free map
+    saveGoogleKey(host, env.owner, null);
+    assert.deepEqual(apiKeysView(host), { google: { set: false, hint: null } });
+    assert.deepEqual(await maps.tile(12, 2925, 1882), PNG);
+    assert.match(calls.at(-1)!.url, /tile\.openstreetmap\.org/);
+    assert.ok(!get(env.ctx.db, "SELECT 1 FROM audit_log WHERE action LIKE 'ods.api_key%' AND detail LIKE '%AIza%'"), 'the key is never written to the audit log');
   } finally { env.cleanup(); }
 });
 
@@ -97,11 +122,75 @@ test('the add-on registers its routes under /api/addons/ods', async () => {
     register(host);
     stops.push(...sink.stops);
     assert.deepEqual(sink.routes.map((r) => `${r.method} ${r.path}`).sort(), [
-      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/hub',
+      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/api-keys', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/geocode/place', 'GET /api/addons/ods/hub',
       'GET /api/addons/ods/orders', 'GET /api/addons/ods/serviceability', 'GET /api/addons/ods/tax-groups', 'GET /api/addons/ods/tiles/:z/:x/:y',
-      'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
-      'PUT /api/addons/ods/config', 'PUT /api/addons/ods/serviceability',
+      'POST /api/addons/ods/api-keys/test', 'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
+      'PUT /api/addons/ods/api-keys', 'PUT /api/addons/ods/config', 'PUT /api/addons/ods/serviceability',
     ]);
     assert.equal(sink.routes.find((r) => r.path.endsWith('/tiles/:z/:x/:y'))!.opts.auth, false);
   } finally { for (const s of stops) await s(); env.cleanup(); }
+});
+
+test('place search: suggestions while typing (free Photon, India only, near the shop), Nominatim on Enter; Google Places when the owner saved a Google key', async () => {
+  const env = makeEnv(); try {
+    const { host } = hostFor(env);
+    const calls: Array<{ url: string; method?: string; headers: Record<string, string>; body?: string }> = [];
+    const reply = (json: unknown, status = 200) => ({ ok: status < 400, status, arrayBuffer: async () => new ArrayBuffer(0), json: async () => json });
+    let googleStatus = 200;
+    const f: Fetcher = async (url, init) => {
+      calls.push({ url, method: init.method, headers: init.headers, body: init.body });
+      if (url.includes('photon') && url.includes('q=empire%20brookfield')) return reply({ features: [] });
+      if (url.includes('photon') && url.includes('q=empire&')) return reply({ features: [0, 1].map(() => ({ properties: { name: 'Empire', street: 'ITPL Main Road', district: 'Priyadarshini Ward', countrycode: 'IN' }, geometry: { coordinates: [77.7175, 12.9661] } })) });
+      if (url.includes('photon')) return reply({ features: url.includes('nothing') ? [] : [
+        { properties: { name: 'Brookfield Mall', district: 'Priyadarshini Ward', city: 'Bengaluru', state: 'Karnataka', countrycode: 'IN' }, geometry: { coordinates: [77.7166, 12.9667] } },
+        { properties: { name: 'Brookfield', city: 'Brookfield', state: 'WI', countrycode: 'US' }, geometry: { coordinates: [-88.1, 43.0] } },
+        { properties: { street: 'ITPL Main Road', housenumber: '12', countrycode: 'IN' }, geometry: { coordinates: [77.72, 12.98] } },
+      ] });
+      if (url.includes('nominatim')) return reply([{ name: '', display_name: '12, 4th Cross, Kalyan Nagar, Bengaluru', lat: '13.0213', lon: '77.6460' }]);
+      if (url.includes('places:autocomplete')) return reply({ suggestions: [{ placePrediction: { placeId: 'ChIJempire', text: { text: 'Empire Restaurant, Brookfield' }, structuredFormat: { mainText: { text: 'Empire Restaurant' }, secondaryText: { text: 'Brookfield, Bengaluru' } } } }] }, googleStatus);
+      if (url.includes('places.googleapis.com/v1/places/')) return reply({ location: { latitude: 12.9661, longitude: 77.7175 }, formattedAddress: 'ITPL Main Rd, Brookfield, Bengaluru', displayName: { text: 'Empire Restaurant' } });
+      return reply(null, 404);
+    };
+    const places = makePlaces(host, f);
+    assert.equal(await code(() => places.suggest('brookfield')), 'OFFLINE_MODE');
+    assert.equal(calls.length, 0, 'offline mode: no connection at all');
+    saveOnlineConfig(host, env.owner, rid(), input());
+    assert.equal(await code(() => places.suggest('br')), 'VALIDATION');
+
+    // free: Photon, India only, biased to the shop
+    const free = await places.suggest('  brook  field', { near: { lat: 12.96677, lng: 77.71661 } });
+    assert.deepEqual(free, [
+      { label: 'Brookfield Mall', detail: 'Priyadarshini Ward, Bengaluru, Karnataka', lat: 12.9667, lng: 77.7166, placeId: null },
+      { label: '12, ITPL Main Road', detail: '', lat: 12.98, lng: 77.72, placeId: null },
+    ]);
+    assert.match(calls[0]!.url, /photon\.komoot\.io.*bbox=68\.1,6\.5,97\.4,35\.7&lat=12\.97&lon=77\.72/);
+    await places.suggest('brook field', { near: { lat: 12.96677, lng: 77.71661 } });
+    assert.equal(calls.length, 1, 'cached');
+    // the map names the area differently: fewer words are tried; the same place twice is shown once
+    assert.deepEqual(await places.suggest('empire brookfield'), [{ label: 'Empire', detail: 'ITPL Main Road, Priyadarshini Ward', lat: 12.9661, lng: 77.7175, placeId: null }]);
+    // nothing on Photon: Nominatim only when the owner pressed Enter
+    assert.deepEqual(await places.suggest('nothing here'), []);
+    assert.equal(calls.filter((c) => c.url.includes('nominatim')).length, 0);
+    assert.equal((await places.suggest('nothing here', { full: true }))[0]!.label, '12');
+    assert.equal(calls.filter((c) => c.url.includes('nominatim')).length, 1);
+
+    // Google Places with the owner's key (Settings > API keys)
+    saveGoogleKey(host, env.owner, 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345');
+    const g = await places.suggest('empire brookfield', { near: { lat: 12.97, lng: 77.72 }, session: 's1' });
+    assert.deepEqual(g, [{ label: 'Empire Restaurant', detail: 'Brookfield, Bengaluru', lat: null, lng: null, placeId: 'g:ChIJempire' }]);
+    const gc = calls.find((c) => c.url.includes('places:autocomplete'))!;
+    assert.equal(gc.method, 'POST');
+    assert.equal(gc.headers['X-Goog-Api-Key'], 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345');
+    assert.deepEqual(JSON.parse(gc.body!).includedRegionCodes, ['in']);
+    assert.ok(!gc.url.includes('AIza'), 'the key is not in the address');
+    // only Essentials fields are asked for (the cheapest tier, largest free allowance)
+    assert.deepEqual(await places.place('g:ChIJempire', 's1'), { label: 'ITPL Main Rd, Brookfield, Bengaluru', lat: 12.9661, lng: 77.7175 });
+    assert.equal(calls.find((c) => c.url.includes('/v1/places/ChIJempire'))!.headers['X-Goog-FieldMask'], 'location,formattedAddress');
+    assert.equal(await code(() => places.place('g:../../x')), 'VALIDATION');
+    googleStatus = 403;
+    assert.equal(await code(() => places.suggest('empire again')), 'MAP_KEY');
+    saveGoogleKey(host, env.owner, null);
+    assert.equal((await places.suggest('brook field', { near: { lat: 12.96677, lng: 77.71661 } }))[0]!.label, 'Brookfield Mall', 'no key: the free search again');
+
+  } finally { env.cleanup(); }
 });

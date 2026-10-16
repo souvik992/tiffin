@@ -14,11 +14,11 @@ export function seedDemo(ctx: Ctx) {
   const { ownerId } = setupFirstRun(ctx, rid(), {
     outlet: { name: 'Demo Burger Hub', gstin: '29ABCDE1234F1Z5', fssaiNo: '11223344556677', stateCode: '29', address: '12 MG Road, Bengaluru', phone: '9876543210' },
     device: { name: 'Counter 1', seriesPrefix: 'A1' },
-    owner: { name: 'Owner', pin: '1234' },
+    owner: { name: 'Owner', pin: '1234', mobile: '9000000001' },
   });
   const owner: Actor = { userId: ownerId, role: 'owner', name: 'Owner' };
-  createUser(ctx, owner, rid(), { name: 'Manager', role: 'manager', pin: '2345' });
-  createUser(ctx, owner, rid(), { name: 'Cashier', role: 'cashier', pin: '1111' });
+  createUser(ctx, owner, rid(), { name: 'Manager', role: 'manager', pin: '2345', mobile: '9000000002' });
+  createUser(ctx, owner, rid(), { name: 'Cashier', role: 'cashier', pin: '1111', mobile: '9000000003' });
   const tg = Object.fromEntries(all<{ id: string; rate_bp: number }>(ctx.db, 'SELECT id, rate_bp FROM tax_group').map((t) => [t.rate_bp, t.id]));
   const cats: Record<string, string> = {};
   for (const [name, station] of [['Burgers', 'kitchen'], ['Wraps', 'kitchen'], ['Sides', 'kitchen'], ['Beverages', 'bar'], ['Desserts', 'bar']] as const) {

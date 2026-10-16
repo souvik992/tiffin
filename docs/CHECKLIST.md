@@ -78,7 +78,8 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Health check, disk-space warning, live events stream
 
 ### Billing UI (`ui/`, rebuilt from the Lovable "Tiffin POS" design)
-- [x] PIN sign-in with on-screen keypad; first-run shop setup
+- [x] Sign-in with mobile number and PIN (on-screen keypad); after an inactivity lock the PIN alone unlocks; after sign-out both are asked; first-run shop setup asks for the owner's mobile number
+- [ ] Existing staff without a mobile number still pick their name on the sign-in screen until the owner adds one in Settings > Users
 - [x] Billing: categories, search, barcode scan, modifiers, quantities, bill discount, Cash/UPI/Card, change from the backend
 - [x] Manager approval dialog (discount over limit, reprint)
 - [x] Open and close shift with Z-report summary; unfinished bills block closing
@@ -89,7 +90,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Item photos: upload, change and remove (drag and drop or choose), resized in the browser, shown on the menu table and billing tiles
 - [x] Orders: today's bills, bill detail, reprint
 - [x] Failed-print alerts with retry, showing the bill number and printer
-- [x] Split payment (up to 6 modes) checked by the backend; hold and resume with a held-bills list; customer phone and note
+- [x] Split payment (up to 6 modes) checked by the backend; hold and resume with a held-bills list; customer name (optional), phone and note
 - [x] After-payment panel: change to give, live print status per job, print on screen, reprint
 - [x] Orders: cancel a bill and refund items (credit note) with manager approval; print on screen
 - [x] Settings (sidebar) with sections: Printer setup and Receipt
@@ -175,7 +176,10 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
 - [x] GST on delivery and packaging fees: billed as fee lines with the GST rate chosen in Serviceability; the hub's price equals the POS bill (same GST code). **Needs CA confirmation of the rate**
 - [x] Road distance: measured by a road-routing server on the hub (HUB_ROUTING_URL, OSRM) or straight line x road factor (default 1.30, set per store)
-- [x] Map provider switch: OpenStreetMap (free) or a paid provider (tile address with key + credit line); tiles cached per provider
+- [x] Google Maps (ODS 1.0.1): Settings > API keys (owner only) holds the Google key; the map (Map Tiles API) and place search (Places API (New), Essentials fields) use Google when it is set, OpenStreetMap + Photon when not; Test key explains what to switch on; the key never reaches screens, settings lists, the audit log or the hub
+- [x] Place search with suggestions while typing: near the shop, fewer-words retry, pasted Google Maps coordinates or links
+- [ ] Google map pictures and place search seen working with the owner's key (2026-10-16: the key was accepted, but Places API (New) and Map Tiles API were not yet switched on in its project)
+- [ ] Google Maps logo on the map (Google's display rules); now only the text credit "Map data ©Google"
 - [x] Add-on loader hardening: folder must equal the id, no going back to an older version, add-on database steps limited to their own tables (no ATTACH/PRAGMA/VACUUM); review notes in docs/ADDONS.md
 - [ ] Human security review of the add-on loader and online billing (docs/ADDONS.md "Security review")
 - [ ] Online orders, still to build: SMS for OTP, payment gateway (online payment, refunds), hosting the hub, store apps (Android/iOS/website; the demo page stands in), Swiggy/Zomato relay, customer notifications (SMS/WhatsApp)
@@ -196,6 +200,6 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Excel (.xlsx) upload directly (today: save as CSV UTF-8)
 - [ ] Update prices of existing items in bulk (the upload only adds new items)
 - [ ] Live updates through the events stream (the UI polls print failures every 20 s)
-- [ ] Customer phone, buyer GSTIN and order channel (Swiggy/Zomato) on the bill
+- [ ] Customer name and phone, buyer GSTIN and order channel (Swiggy/Zomato) on the bill
 - [ ] Layout for screens narrower than 1280 px and touch-first testing
 - [x] The Electron host loading the built UI (app://pos)

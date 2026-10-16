@@ -91,7 +91,7 @@ test('sessions: idle lock, logout, deactivation, and the login list never leaks 
     deactivateUser(env.ctx, env.owner, rid(), env.cashier.userId);
     assert.equal(code(() => authenticate(env.ctx, t3)), 'UNAUTHENTICATED');
     assert.equal(code(() => login(env.ctx, env.cashier.userId, '1111')), 'BAD_PIN');
-    assert.ok(listLoginUsers(env.ctx).every((u) => Object.keys(u).sort().join() === 'id,name,role'));
+    assert.ok(listLoginUsers(env.ctx).every((u) => Object.keys(u).sort().join() === 'hasMobile,id,name,role'));
     assert.equal(listLoginUsers(env.ctx).length, 2);
   } finally { env.cleanup(); }
 });

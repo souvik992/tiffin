@@ -27,9 +27,14 @@ Install: `TiffinPOS-ODS-Setup-<version>.exe`, after the POS. It is per user and 
 
 ## The map
 
-* **Map:** OpenStreetMap tiles. **Address search:** Nominatim, limited to India.
-* **How they load:** the POS fetches them (never the page) only while online orders are on. Tiles are cached in `<POS data>\addons\ods\tiles` and keep working offline.
-* **Usage policy:** light use with caching and an identifying User-Agent is within these services' policies. For many stores, choose **Paid provider** in Settings > Serviceability > Map provider. Paste its tile address (https, with `{z}`, `{x}`, `{y}` and your key) and its credit line. Each provider has its own tile cache.
+* **Google Maps** when the owner saved a Google key in **Settings > API keys** (owner only):
+  * map pictures from the **Map Tiles API** (one tile session reused; tiles are not saved on disk, as Google's terms ask);
+  * place search from **Places API (New)**: Autocomplete + Place Details with Essentials fields only (location, address), one session per search.
+  * **Test key** checks both and says in plain words what to switch on in the Google Cloud console.
+  * The key stays in the POS backend: screens, settings lists, the audit log and the order hub never see it (settings named `..._key` are secret).
+* **Without a key:** OpenStreetMap tiles (saved in `<POS data>\addons\ods\tiles`, they keep working offline) and Photon search (India only, near the shop pin, fewer-words retry, Nominatim on Enter).
+* **Suggestions while typing** (no Search button needed); **paste coordinates** or a Google Maps link and choose "Use this point".
+* **How they load:** the POS fetches them (never the page) only while online orders are on.
 * **Distances** are road distances. The hub measures them on a road map when `HUB_ROUTING_URL` (OSRM) is set; otherwise it uses the straight line × the store's **road factor** (default 1.30).
 
 ## Development

@@ -2,19 +2,20 @@ import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useSession, messageOf } from '../lib/session.tsx';
 import { newKey } from '../lib/api.ts';
-import { PIN_LENGTH, isPin, pinDigits } from '../lib/pin.ts';
+import { PIN_LENGTH, isMobile, isPin, mobileDigits, pinDigits } from '../lib/pin.ts';
 
 /** First run on a new PC: creates the outlet, this counter and the owner (POST /api/setup, allowed once). */
 export function Setup({ onDone }: { onDone: () => void }) {
   const { api, notify } = useSession();
   const key = useRef(newKey()); // one key for this setup, so a double submit cannot create two outlets
-  const [f, setF] = useState({ name: '', gstin: '', fssaiNo: '', stateCode: '', address: '', phone: '', device: 'Counter 1', prefix: 'A1', owner: '', pin: '', pin2: '' });
+  const [f, setF] = useState({ name: '', gstin: '', fssaiNo: '', stateCode: '', address: '', phone: '', device: 'Counter 1', prefix: 'A1', owner: '', mobile: '', pin: '', pin2: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: k === 'pin' || k === 'pin2' ? pinDigits(e.target.value) : e.target.value });
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: k === 'pin' || k === 'pin2' ? pinDigits(e.target.value) : k === 'mobile' ? mobileDigits(e.target.value) : e.target.value });
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isMobile(f.mobile)) return setError('Enter the owner\'s 10-digit mobile number. It is used to sign in.');
     if (!isPin(f.pin)) return setError(`The PIN must be exactly ${PIN_LENGTH} digits.`);
     if (f.pin !== f.pin2) return setError('The two PINs do not match.');
     setBusy(true); setError('');
@@ -22,7 +23,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       await api.setup({
         outlet: { name: f.name.trim(), gstin: f.gstin.trim().toUpperCase() || null, fssaiNo: f.fssaiNo.trim() || null, stateCode: f.stateCode.trim(), address: f.address.trim() || null, phone: f.phone.trim() || null },
         device: { name: f.device.trim(), seriesPrefix: f.prefix.trim().toUpperCase() },
-        owner: { name: f.owner.trim(), pin: f.pin },
+        owner: { name: f.owner.trim(), pin: f.pin, mobile: f.mobile },
       }, key.current);
       notify('success', 'Shop set up. Sign in as the owner to add your menu.');
       onDone();
@@ -53,6 +54,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
           {field('Bill number prefix', 'prefix', { required: true, maxLength: 2, hint: '1-2 letters or digits, e.g. A1 gives A1/26-27/000001' })}
           {field('Owner name', 'owner', { required: true, maxLength: 60 })}
           <div />
+          {field('Owner mobile number', 'mobile', { required: true, inputMode: 'numeric', maxLength: 10, placeholder: '98XXXXXXXX', hint: 'Used with the PIN to sign in' })}
           {field('Owner PIN', 'pin', { required: true, type: 'password', inputMode: 'numeric', maxLength: PIN_LENGTH, hint: `${PIN_LENGTH} digits` })}
           {field('Repeat PIN', 'pin2', { required: true, type: 'password', inputMode: 'numeric', maxLength: PIN_LENGTH })}
         </div>

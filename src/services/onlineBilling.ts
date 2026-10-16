@@ -21,6 +21,7 @@ export interface OnlineBillInput {
   /** The hub's order number, e.g. "W-1042". */
   externalId: string;
   customerPhone?: string | null;
+  customerName?: string | null;
   note?: string | null;
   lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }>;
   /** Fees computed by the POS from its serviceability settings; taxGroupId may be null only when both are 0. */
@@ -50,7 +51,7 @@ export function billOnlineOrder(ctx: Ctx, actor: Actor, requestId: string, input
 
   // a draft from an earlier, interrupted attempt for the same hub order is reused
   const draft = get<{ id: string }>(ctx.db, "SELECT id FROM sale_order WHERE channel = ? AND external_id = ? AND status IN ('DRAFT','HELD')", input.channel, input.externalId);
-  const orderId = draft?.id ?? createOrder(ctx, actor, `${requestId}:order`, { channel: input.channel, customerPhone: input.customerPhone ?? null, note: input.note ?? null }).order.id;
+  const orderId = draft?.id ?? createOrder(ctx, actor, `${requestId}:order`, { channel: input.channel, customerPhone: input.customerPhone ?? null, customerName: input.customerName ?? null, note: input.note ?? null }).order.id;
   if (!draft) ctx.db.prepare('UPDATE sale_order SET external_id = ? WHERE id = ?').run(input.externalId, orderId);
   try {
     if (!draft || getCart(ctx, orderId).lines.length === 0) {

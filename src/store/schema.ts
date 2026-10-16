@@ -360,6 +360,17 @@ CREATE TABLE addon_migrations (
 );
 `;
 
+// V7: an optional customer name on a bill, next to the phone number.
+const V7 = `
+ALTER TABLE sale_order ADD COLUMN customer_name TEXT;
+`;
+
+// V8: staff sign in with their mobile number and PIN. Older users have none until the owner adds it.
+const V8 = `
+ALTER TABLE app_user ADD COLUMN mobile TEXT;
+CREATE UNIQUE INDEX app_user_mobile ON app_user(mobile) WHERE mobile IS NOT NULL AND deleted_at IS NULL;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'initial', sql: V1 },
   { version: 2, name: 'inventory', sql: V2 },
@@ -367,5 +378,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 4, name: 'printer_usb', sql: V4, foreignKeysOff: true },
   { version: 5, name: 'outlet_version', sql: V5 },
   { version: 6, name: 'addon_migrations', sql: V6 },
+  { version: 7, name: 'customer_name', sql: V7 },
+  { version: 8, name: 'user_mobile', sql: V8 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

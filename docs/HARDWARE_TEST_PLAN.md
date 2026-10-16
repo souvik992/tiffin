@@ -105,7 +105,8 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Live online orders on a shop PC: pair with a real hub over https, order from a phone, sound plays, Accept prints the bill and KOT on the shop printer | |
 | Internet drop for 2-10 minutes during service: orders placed meanwhile arrive once after it returns; accepts made offline reach the customer | |
 | PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
-| Paid map provider (MapTiler or similar) with a real key: tiles show with the provider's credit | |
+| Settings > API keys with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google map shows, "empire brookfield" suggests the right place, picking it moves the pin | |
+| Place search screen: suggestions appear while typing, arrow keys + Enter, pasted Google Maps coordinates and link | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
 
 Done on the dev PC (2026-10-16, ODS 1.0.0): the built signed package in a POS backend (temp folder) with a hub on the same PC: pair, website order, live on the ODS in under 0.2 s, accept = GST bill with 5% GST fee lines, customer sees accepted + bill number, through to delivered; online orders could not be switched off while the order was open. The ODS installer installed into a temp folder, its copy loaded in a POS 0.3.0 and was switched off on POS 0.2.0, and it uninstalled cleanly. No printer was used; the ODS screen itself was not opened in Electron.

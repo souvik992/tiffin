@@ -44,8 +44,9 @@ export function loadSettings(ctx: Ctx): Settings {
 }
 export function allSettings(ctx: Ctx): Record<string, string> {
   const out = { ...DEFAULTS };
-  // the receipt design has its own endpoints; the order hub device key is a secret and never leaves the backend
-  for (const r of all<{ key: string; value: string }>(ctx.db, "SELECT key, value FROM settings WHERE key NOT LIKE 'receipt_template%' AND key <> 'ods_hub_key'")) out[r.key] = r.value;
+  // the receipt design has its own endpoints; settings named "..._key" (order hub device key, Google Maps key) are
+  // secrets and never leave the backend
+  for (const r of all<{ key: string; value: string }>(ctx.db, "SELECT key, value FROM settings WHERE key NOT LIKE 'receipt_template%' AND key NOT LIKE '%!_key' ESCAPE '!'")) out[r.key] = r.value;
   return out;
 }
 export const SETTING_KEYS = Object.keys(DEFAULTS);

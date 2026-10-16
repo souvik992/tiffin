@@ -38,7 +38,8 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     assert.match(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle()), /^Tiffin POS/);
 
     // a cashier bills a coffee: commands, the print queue and the live events stream, all through app://pos/api
-    await page.getByRole('button', { name: /^Cashier/ }).click();
+    await page.getByLabel('Mobile number').fill('9000000003'); // demo cashier
+    await page.locator('h1').click(); // leave the field so the keys go to the PIN pad
     await page.keyboard.type('1111');
     await page.keyboard.press('Enter');
     await page.getByLabel('Opening cash in rupees').fill('1000');
@@ -53,7 +54,8 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     await page.getByRole('menuitem', { name: 'Sign out' }).click();
 
     // the manager sees that bill in Reports
-    await page.getByRole('button', { name: /^Manager/ }).click();
+    await page.getByLabel('Mobile number').fill('9000000002'); // demo manager
+    await page.locator('h1').click();
     await page.keyboard.type('2345');
     await page.keyboard.press('Enter');
     await page.getByRole('link', { name: 'Reports' }).click();
@@ -85,7 +87,7 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     assert.ok(pid, 'backend utility process found');
     process.kill(pid!);
     await page.waitForEvent('load', { timeout: 60_000 });
-    await page.getByRole('button', { name: /^Manager/ }).waitFor({ timeout: 60_000 }); // signed out after the restart; bills are safe
+    await page.getByLabel('Mobile number').waitFor({ timeout: 60_000 }); // signed out after the restart; bills are safe
     assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
     const newPid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'Tiffin POS backend')?.pid);
     assert.ok(newPid && newPid !== pid);

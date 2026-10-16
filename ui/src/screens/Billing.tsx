@@ -242,7 +242,7 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
       <div className="flex items-center gap-1 px-4 pb-1 pt-3">
         <h2 className="min-w-0 flex-1 truncate font-display text-base font-semibold leading-none">
           {cart ? `Bill · Token ${cart.order.tokenNo}` : 'New bill'}
-          {(cart?.order.customerPhone || cart?.order.note) && <span className="mt-0.5 block truncate font-sans text-[11px] font-normal text-muted-foreground">{[cart.order.customerPhone, cart.order.note].filter(Boolean).join(' · ')}</span>}
+          {(cart?.order.customerName || cart?.order.customerPhone || cart?.order.note) && <span className="mt-0.5 block truncate font-sans text-[11px] font-normal text-muted-foreground">{[cart.order.customerName, cart.order.customerPhone, cart.order.note].filter(Boolean).join(' · ')}</span>}
         </h2>
         <button className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label="Customer and note" title="Customer and note" disabled={!cart || busy} onClick={onCustomer}>
           <UserRound className="h-5 w-5" />

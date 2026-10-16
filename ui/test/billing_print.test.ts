@@ -17,7 +17,7 @@ async function start() {
   const port = await listen(server, 0);
   let token: string | null = null;
   const api = createApi({ baseUrl: `http://127.0.0.1:${port}`, getToken: () => token, retryDelayMs: 1 });
-  const signIn = async (name: string, pin: string) => { const u = (await api.loginUsers()).find((x) => x.name === name)!; token = (await api.login(u.id, pin)).token; return u; };
+  const signIn = async (name: string, pin: string) => { const u = (await api.loginUsers()).find((x) => x.name === name)!; token = (await api.login({ userId: u.id }, pin)).token; return u; };
   const close = () => new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); env.cleanup(); });
   return { env, api, queue, mem, signIn, close };
 }

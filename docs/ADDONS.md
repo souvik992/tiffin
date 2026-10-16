@@ -6,7 +6,7 @@ The POS can load **signed add-ons**: modules that ship and install separately fr
 
 ```
 TiffinPOS-Setup-0.3.0.exe            -> %LOCALAPPDATA%\Programs\TiffinPOS        (the POS)
-TiffinPOS-ODS-Setup-1.0.0.exe -> %LOCALAPPDATA%\TiffinPOS\addons\ods\
+TiffinPOS-ODS-Setup-1.0.1.exe -> %LOCALAPPDATA%\TiffinPOS\addons\ods\
                                           manifest.json  backend.cjs  ui.js  uninstall.exe
 ```
 
@@ -35,6 +35,7 @@ The steps, in order:
 * **Screens:** write normal React. The build maps `react` and `react/jsx-runtime` to the POS's copy (`window.__POS__`). Use `host.useSession()` for `api`, `user` and `notify`, `host.PageShell`/`host.Modal` for layout, and `host.money` to format and parse rupees. The UI never calculates money.
 * **Styles:** the POS's Tailwind only contains classes used by the POS itself. Each add-on builds **its own** style sheet from its own source, with the POS theme copied from `ui/src/styles.css` (see `addons/ods/scripts/build.mjs`), and injects it.
 * **Offline first:** anything that connects to the internet must check the add-on's own switch first (ODS: `isOnlineMode`).
+* **Secrets:** name a setting `<id>_..._key` for anything secret (API keys, device keys). The POS never lists such settings to the screens; keep them out of responses and audit details too.
 * **Data:**
   * Use your own setting keys or tables, created by your own numbered database steps.
   * Never edit a database step that has already run; add a new one.

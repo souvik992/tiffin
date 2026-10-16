@@ -5,17 +5,18 @@ import type { RejectReason } from '../../../contract/src/types.ts';
 import { readOnlineConfig, saveOnlineConfig } from './onlineConfig.ts';
 import type { OnlineInput } from './onlineConfig.ts';
 import { readServiceability, saveServiceability } from './serviceability.ts';
-import { makeMaps } from './maps.ts';
+import { makeMaps, mapAttribution } from './maps.ts';
+import { makePlaces } from './places.ts';
 import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
-import { MIGRATIONS, readFeeTaxGroup, readMapProvider, saveFeeTaxGroup, saveMapProvider } from './store.ts';
-import type { MapProvider } from './store.ts';
+import { MIGRATIONS, apiKeysView, readFeeTaxGroup, saveFeeTaxGroup, saveGoogleKey } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
 export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: ConnectorOptions } = {}): Connector {
   host.migrations(MIGRATIONS);
   const maps = makeMaps(host, opts.fetcher);
+  const places = makePlaces(host, opts.fetcher ?? (fetch as unknown as Fetcher));
   const conn = new Connector(host, opts.connector);
   // start after the POS has finished loading (database steps applied)
   const boot = setTimeout(() => { try { conn.refresh(); } catch (e) { host.log.warn('order hub start failed', String(e)); } }, 0);
@@ -31,18 +32,26 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     if (open.length && readOnlineConfig(host).enabled) throw new host.AppError('ONLINE_ORDERS_OPEN', `${open.length} online order${open.length > 1 ? 's are' : ' is'} still open (${open.slice(0, 5).map((o) => o.number).join(', ')}). Finish or reject ${open.length > 1 ? 'them' : 'it'} on the ODS first.`, 409);
     const r = saveOnlineConfig(host, c.actor, c.requestId, c.body as OnlineInput); conn.refresh(); return r;
   });
-  host.route('GET', '/serviceability', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readServiceability(host), feeTaxGroupId: readFeeTaxGroup(host), map: readMapProvider(host) }; });
+  host.route('GET', '/serviceability', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readServiceability(host), feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution(host) }; });
   host.route('PUT', '/serviceability', {}, (c) => {
     const b = body(c);
-    const { feeTaxGroupId, map, ...svc } = b as Record<string, unknown> & { feeTaxGroupId?: string | null; map?: MapProvider };
+    const { feeTaxGroupId, maps: _maps, ...svc } = b as Record<string, unknown> & { feeTaxGroupId?: string | null };
     host.assertPerm(c.actor, 'settings.write');
     const saved = host.db.tx(() => {
       if (feeTaxGroupId !== undefined) saveFeeTaxGroup(host, feeTaxGroupId);
-      if (map !== undefined) saveMapProvider(host, map);
       return saveServiceability(host, c.actor, c.requestId, svc);
     });
     conn.refresh();
-    return { ...saved, feeTaxGroupId: readFeeTaxGroup(host), map: readMapProvider(host) };
+    return { ...saved, feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution(host) };
+  });
+  // ---- API keys (owner only; the keys never leave the POS backend)
+  host.route('GET', '/api-keys', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return apiKeysView(host); });
+  host.route('PUT', '/api-keys', {}, (c) => { const b = body(c); if ('google' in b) saveGoogleKey(host, c.actor, b.google); return apiKeysView(host); });
+  host.route('POST', '/api-keys/test', {}, async (c) => {
+    host.assertPerm(c.actor, 'settings.write');
+    if (!readOnlineConfig(host).enabled) throw new host.AppError('OFFLINE_MODE', 'Turn on online orders first: in offline mode the POS makes no internet connection.', 409);
+    const [search, map] = await Promise.all([places.testSearch(), maps.testTiles()]);
+    return { search, map };
   });
   host.route('GET', '/tax-groups', {}, () => host.billing.menu(host.ctx).taxGroups);
 
@@ -91,6 +100,11 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     c.res.end(img);
     return Symbol.for('handled');
   });
-  host.route('GET', '/geocode', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return maps.search(c.query.get('q') ?? ''); });
+  host.route('GET', '/geocode', {}, (c) => { // suggestions while typing; near = the shop pin, to rank nearby places first
+    host.assertPerm(c.actor, 'settings.write');
+    const near = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/.exec(c.query.get('near') ?? '');
+    return places.suggest(c.query.get('q') ?? '', { near: near ? { lat: Number(near[1]), lng: Number(near[2]) } : null, full: c.query.get('full') === '1', session: (c.query.get('session') ?? '').slice(0, 64) });
+  });
+  host.route('GET', '/geocode/place', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return places.place(c.query.get('id') ?? '', (c.query.get('session') ?? '').slice(0, 64)); });
   return conn;
 }

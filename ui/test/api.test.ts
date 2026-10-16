@@ -20,7 +20,7 @@ async function start() {
   const api = createApi({ baseUrl: `http://127.0.0.1:${port}`, getToken: () => token, onAuthLost: (c) => lost.push(c), retryDelayMs: 1 });
   const signIn = async (name: string, pin: string) => {
     const u = (await api.loginUsers()).find((x) => x.name === name)!;
-    token = (await api.login(u.id, pin)).token;
+    token = (await api.login({ userId: u.id }, pin)).token;
     return u;
   };
   const close = () => new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); env.cleanup(); });
@@ -115,7 +115,7 @@ test('UI client: network failures retry with the same key, so a lost response ne
       return res;
     };
     const u = (await s.api.loginUsers()).find((x) => x.name === 'Cashier')!;
-    const token = (await s.api.login(u.id, '1111')).token;
+    const token = (await s.api.login({ userId: u.id }, '1111')).token;
     const api2 = createApi({ baseUrl: `http://127.0.0.1:${s.port}`, getToken: () => token, fetchImpl: flaky, retryDelayMs: 1 });
     const done = await api2.finalize(cart.order.id, [{ mode: 'UPI', amount: cart.totals.grandTotal }]);
     assert.equal(calls, 2);
@@ -278,11 +278,13 @@ test('receipt design: the owner previews and uploads a .tiffinreceipt file; a br
 test('users: the owner adds a cashier with a PIN, resets it, changes the role and deactivates; managers cannot', async () => {
   const s = await start(); try {
     await s.signIn('Owner', '1234');
-    const u = await s.api.createUser({ name: 'Ravi K', role: 'cashier', pin: '4821' });
-    await assert.rejects(s.api.createUser({ name: 'ravi k', role: 'cashier', pin: '1357' }), is('NAME_TAKEN'));
+    const u = await s.api.createUser({ name: 'Ravi K', role: 'cashier', pin: '4821', mobile: '9812345678' });
+    await assert.rejects(s.api.createUser({ name: 'ravi k', role: 'cashier', pin: '1357', mobile: '9812345679' }), is('NAME_TAKEN'));
     assert.ok((await s.api.users()).some((x) => x.id === u.id && x.active && x.role === 'cashier'));
     await s.api.resetPin(u.id, '9753');
-    await s.api.updateUser(u.id, { name: 'Ravi K', role: 'manager' });
+    await s.api.updateUser(u.id, { name: 'Ravi K', role: 'manager', mobile: '9812345678' });
+    s.setToken((await s.api.login({ mobile: '9812345678' }, '9753')).token); // mobile number and PIN
+    assert.equal((await s.api.me()).name, 'Ravi K');
     await s.signIn('Ravi K', '9753');
     await assert.rejects(s.api.users(), is('FORBIDDEN'));
     await s.signIn('Owner', '1234');

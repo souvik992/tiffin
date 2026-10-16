@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, createApi } from './api.ts';
-import type { Api, LoginUser, Me, Override } from './api.ts';
+import type { Api, LoginWith, Me, Override } from './api.ts';
 
 // The token lives in sessionStorage: a page reload keeps the cashier signed in, closing the window does not.
 // Storage can be unavailable (private mode, locked-down kiosk); the app then simply asks for the PIN again.
@@ -20,7 +20,7 @@ interface SessionValue {
   user: Me | null;
   /** Set when the session expired or locked: the login screen preselects this person. */
   lockedUserId: string | null;
-  signIn: (u: LoginUser, pin: string) => Promise<void>;
+  signIn: (who: LoginWith, pin: string) => Promise<void>;
   signOut: () => Promise<void>;
   restore: () => Promise<boolean>;
   notices: Notice[];
@@ -81,8 +81,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     notify('error', messageOf(e));
   }, [notify]);
 
-  const signIn = useCallback(async (u: LoginUser, pin: string) => {
-    const r = await api.login(u.id, pin);
+  const signIn = useCallback(async (who: LoginWith, pin: string) => {
+    const r = await api.login(who, pin);
     tokenRef.current = r.token; writeToken(r.token);
     setLockedUserId(null);
     setUser(r.user);

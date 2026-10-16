@@ -126,6 +126,10 @@ test('HTTP: rejects unauthenticated, malformed, oversized, cross-site and rebind
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: { surprise: 1 } })).json.error.code, 'VALIDATION'); // unknown fields rejected
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: { channel: 5 } })).status, 400);
     assert.equal((await call('POST', '/api/auth/login', { body: { userId: 'x', pin: '1' } })).json.error.code, 'BAD_PIN');
+    const byMobile = await call('POST', '/api/auth/login', { body: { mobile: '9000000003', pin: '1111' } }); // the demo cashier
+    assert.equal(byMobile.json.user.name, 'Cashier');
+    assert.equal((await call('POST', '/api/auth/login', { body: { mobile: '9000000003', pin: '9999' } })).json.error.message, 'Incorrect mobile number or PIN.');
+    assert.equal((await call('POST', '/api/auth/login', { body: { pin: '1111' } })).json.error.code, 'VALIDATION');
     assert.equal((await call('GET', '/api/nope', { token: cashier })).status, 404);
     assert.equal((await call('DELETE', '/api/catalog', { token: cashier })).status, 405);
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: 'x'.repeat(2_100_000), headers: { 'content-type': 'application/json' } }).catch(() => ({ status: 413 }))).status, 413);

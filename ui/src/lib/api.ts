@@ -3,10 +3,12 @@
 // retries and for the re-send after a manager approval, so a retry can never bill twice (RULES.md rule 3).
 
 export type Role = 'owner' | 'manager' | 'cashier';
-export interface LoginUser { id: string; name: string; role: Role }
+export interface LoginUser { id: string; name: string; role: Role; hasMobile: boolean }
+/** Who is signing in: by mobile number, or by user id (unlocking after inactivity, or staff without a mobile number yet). */
+export type LoginWith = { mobile: string } | { userId: string };
 export interface Me { userId: string; role: Role; name: string }
 /** Settings > Users (owner only). */
-export interface StaffUser { id: string; name: string; role: Role; active: boolean; locked: boolean; createdAt: number; you: boolean }
+export interface StaffUser { id: string; name: string; role: Role; mobile: string | null; active: boolean; locked: boolean; createdAt: number; you: boolean }
 export interface Category { id: string; name: string; sortOrder: number; kitchenStation: string | null; itemCount: number }
 export interface ImportPreview {
   rows: number;
@@ -33,13 +35,13 @@ export interface CartLine {
   cgst: number; sgst: number; igst: number; cess: number; lineTotal: number;
 }
 export interface Order {
-  id: string; status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; channel: string; tokenNo: number; customerPhone: string | null; note: string | null;
+  id: string; status: 'DRAFT' | 'HELD' | 'INVOICED' | 'CANCELLED'; channel: string; tokenNo: number; customerPhone: string | null; customerName: string | null; note: string | null;
   placeOfSupply: string; buyerGstin: string | null; shiftId: string; createdAt: number; updatedAt: number; billDiscount: Discount | null; discountApproved: boolean;
 }
 export interface Cart { order: Order; lines: CartLine[]; totals: Totals }
 export interface OpenOrder {
   id: string; status: 'DRAFT' | 'HELD'; tokenNo: number; channel: string; updatedAt: number; createdAt: number; lineCount: number;
-  customerPhone: string | null; note: string | null; createdByName: string | null; grandTotal: number;
+  customerPhone: string | null; customerName: string | null; note: string | null; createdByName: string | null; grandTotal: number;
 }
 export type PayMode = 'CASH' | 'UPI' | 'CARD' | 'WALLET' | 'CREDIT' | 'OTHER';
 export interface PaymentIn { mode: PayMode; amount: number; tendered?: number | null; reference?: string | null }
@@ -100,7 +102,7 @@ export interface ItemInput { name: string; categoryId: string | null; taxGroupId
 export interface SetupInput {
   outlet: { name: string; gstin: string | null; fssaiNo: string | null; stateCode: string; address: string | null; phone: string | null };
   device: { name: string; seriesPrefix: string };
-  owner: { name: string; pin: string };
+  owner: { name: string; pin: string; mobile: string };
 }
 
 export type StockUnit = 'kg' | 'g' | 'l' | 'ml' | 'pcs';
@@ -193,7 +195,7 @@ export function createApi(o: ApiOptions) {
     ping: () => get<{ ok: boolean }>('/ping'),
     loginUsers: () => get<LoginUser[]>('/login-users'),
     setup: (input: SetupInput, key?: string) => change<{ ownerId: string }>('POST', '/setup', input, key),
-    login: (userId: string, pin: string) => request<{ token: string; user: Me }>('POST', '/auth/login', { userId, pin }),
+    login: (who: LoginWith, pin: string) => request<{ token: string; user: Me }>('POST', '/auth/login', { ...who, pin }),
     logout: () => request<{ ok: boolean }>('POST', '/auth/logout', {}),
     me: () => get<Me>('/me'),
     // catalog
@@ -222,8 +224,8 @@ export function createApi(o: ApiOptions) {
     sampleReceipt: (widthMm: 58 | 80) => get<{ widthMm: number; cols: number; lines: string[] }>(`/printers/sample-receipt?width=${widthMm}`),
     addons: () => get<AddonInfo[]>('/addons'),
     users: () => get<StaffUser[]>('/users'),
-    createUser: (input: { name: string; role: Role; pin: string }, key?: string) => change<{ id: string; name: string; role: Role }>('POST', '/users', input, key),
-    updateUser: (id: string, input: { name: string; role: Role }, key?: string) => change<{ id: string; name: string; role: Role }>('PATCH', '/users/' + enc(id), input, key),
+    createUser: (input: { name: string; role: Role; pin: string; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('POST', '/users', input, key),
+    updateUser: (id: string, input: { name: string; role: Role; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('PATCH', '/users/' + enc(id), input, key),
     resetPin: (id: string, newPin: string, key?: string) => change<{ ok: boolean }>('POST', '/users/' + enc(id) + '/pin', { newPin }, key),
     changeOwnPin: (id: string, currentPin: string, newPin: string, key?: string) => change<{ ok: boolean }>('POST', '/users/' + enc(id) + '/pin', { newPin, currentPin }, key),
     deactivateUser: (id: string, key?: string) => change<{ ok: boolean }>('POST', '/users/' + enc(id) + '/deactivate', {}, key),
@@ -255,7 +257,7 @@ export function createApi(o: ApiOptions) {
     openOrders: (status?: 'DRAFT' | 'HELD') => get<OpenOrder[]>(`/orders${status ? `?status=${status}` : ''}`),
     holdOrder: (orderId: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/hold`, {}, key),
     resumeOrder: (orderId: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/resume`, {}, key),
-    updateOrder: (orderId: string, input: { customerPhone?: string | null; note?: string | null }, override?: Override, key?: string) => change<Cart>('PATCH', `/orders/${enc(orderId)}`, override ? { ...input, override } : input, key),
+    updateOrder: (orderId: string, input: { customerPhone?: string | null; customerName?: string | null; note?: string | null }, override?: Override, key?: string) => change<Cart>('PATCH', `/orders/${enc(orderId)}`, override ? { ...input, override } : input, key),
     checkPayments: (orderId: string, payments: PaymentIn[]) => request<PaymentCheck>('POST', `/orders/${enc(orderId)}/payment-check`, { payments }),
     createOrder: (key?: string) => change<Cart>('POST', '/orders', {}, key),
     getOrder: (id: string) => get<Cart>(`/orders/${enc(id)}`),
