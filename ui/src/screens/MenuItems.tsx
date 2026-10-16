@@ -10,11 +10,12 @@ import { preparePhoto } from '../lib/photo.ts';
 import type { PreparedPhoto } from '../lib/photo.ts';
 import { MenuCategories } from './MenuCategories.tsx';
 import { MenuImport } from './MenuImport.tsx';
+import { MenuPhotos } from './MenuPhotos.tsx';
 
-type Tab = 'items' | 'categories' | 'import';
-const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['import', 'Bulk upload']];
+type Tab = 'items' | 'categories' | 'import' | 'photos';
+const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['import', 'Bulk upload'], ['photos', 'Bulk photos']];
 const TAB_KEY = 'pos.menu.tab';
-const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'import' ? t : 'items'; } catch { return 'items'; } };
+const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'import' || t === 'photos' ? t : 'items'; } catch { return 'items'; } };
 
 /** Menu creation: items (with veg / non-veg), categories and bulk upload. Changes appear on the billing screen at once. */
 export function MenuItems() {
@@ -42,6 +43,7 @@ export function MenuItems() {
       {!catalog ? <p className="text-sm text-muted-foreground">Loading…</p>
         : tab === 'items' ? <ItemsTab catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'categories' ? <MenuCategories catalog={catalog} canEdit={canEdit} reload={load} />
+        : tab === 'photos' ? <MenuPhotos catalog={catalog} canEdit={canEdit} reload={load} />
         : <MenuImport canEdit={canEdit} reload={load} onDone={() => setTab('items')} />}
     </PageShell>
   );

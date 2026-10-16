@@ -88,6 +88,8 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Categories: add, rename, kitchen station, reorder, delete when empty, item counts
 - [x] Bulk upload: template download, CSV file or paste, row-by-row check, all-or-nothing import
 - [x] Item photos: upload, change and remove (drag and drop or choose), resized in the browser, shown on the menu table and billing tiles
+- [x] Menu creation > Bulk photos: choose or drop up to 300 photos; matched by file name (item name, short name, SKU or barcode; exact only, no guessing), pick the item for the rest, option to keep existing photos, saved one by one with progress. Pictures pasted inside Excel are not read (CSV holds text only)
+- [ ] Bulk photos screen seen in the desktop app with a real folder of shop photos
 - [x] Orders: today's bills, bill detail, reprint
 - [x] Failed-print alerts with retry, showing the bill number and printer
 - [x] Split payment (up to 6 modes) checked by the backend; hold and resume with a held-bills list; customer name (optional), phone and note
