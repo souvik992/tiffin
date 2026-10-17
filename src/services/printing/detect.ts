@@ -9,6 +9,8 @@ import { getSetting, setSetting } from '../settings.ts';
 import { listWindowsPrinters } from './devices.ts';
 import type { WindowsPrinter } from './devices.ts';
 import { listUsbPrinters } from './usb.ts';
+import { listAndroidPrinters } from './android.ts';
+import type { AndroidPrinterInfo } from './android.ts';
 import type { UsbPrinterInfo } from './usb.ts';
 import { buildTestPage } from './receipt.ts';
 import { colsFor } from './transports.ts';
@@ -20,10 +22,10 @@ import { enqueueJob } from './jobs.ts';
  */
 
 export interface DetectedPrinter {
-  key: string; transport: 'usb' | 'spooler'; address: string; name: string; detail: string; widthMm: 58 | 80;
+  key: string; transport: 'usb' | 'spooler' | 'android'; address: string; name: string; detail: string; widthMm: 58 | 80;
 }
 export interface UsbDevice extends DetectedPrinter { printerId: string | null; printerName: string | null; printerActive: boolean | null; dismissed: boolean }
-interface Scan { usb: UsbPrinterInfo[]; windows: WindowsPrinter[] }
+interface Scan { usb: UsbPrinterInfo[]; windows: WindowsPrinter[]; android?: AndroidPrinterInfo[] }
 interface CacheEntry { at: number; data: Scan; detected: DetectedPrinter[] }
 
 const cache = new WeakMap<Ctx, CacheEntry>();
@@ -33,9 +35,12 @@ const IGNORE_KEY = 'printer_detect_ignored';
 export function resetDetectCache(ctx: Ctx): void { cache.delete(ctx); }
 
 async function defaultScan(): Promise<Scan> {
+  if (process.platform === 'android') return { usb: [], windows: [], android: await listAndroidPrinters().catch(() => []) };
   const [usb, windows] = await Promise.all([listUsbPrinters().catch(() => []), listWindowsPrinters().catch(() => [])]);
   return { usb, windows };
 }
+/** Platforms where printers can be found: Windows, and Android inside the Tiffin POS app. */
+const canScan = (platform: string) => platform === 'win32' || platform === 'android';
 
 const guessWidth = (s: string): 58 | 80 => (/(^|\D)58(\D|$)|58\s?mm/i.test(s) ? 58 : 80);
 const ignored = (ctx: Ctx): Set<string> => { try { return new Set(JSON.parse(getSetting(ctx, IGNORE_KEY) || '[]') as string[]); } catch { return new Set(); } };
@@ -68,6 +73,9 @@ function listRaw(scan: Scan): DetectedPrinter[] {
     const key = `spooler:${w.name}`;
     out.push({ key, transport: 'spooler', address: w.name, name: w.name, detail: `USB, Windows driver ${w.driver} on ${w.port}`, widthMm: guessWidth(`${w.name} ${w.driver}`) });
   }
+  for (const a of scan.android ?? []) {
+    out.push({ key: `android:${a.address}`, transport: 'android', address: a.address, name: a.name, detail: a.detail, widthMm: a.builtin ? 58 : guessWidth(a.name) });
+  }
   return out;
 }
 
@@ -86,13 +94,13 @@ async function scanned(ctx: Ctx, o: { scan?: () => Promise<Scan>; maxAgeMs?: num
 
 /** USB printers that are plugged in but not set up (and not dismissed). Scans at most once per maxAgeMs. */
 export async function detectPrinters(ctx: Ctx, o: { scan?: () => Promise<Scan>; platform?: string; maxAgeMs?: number } = {}): Promise<DetectedPrinter[]> {
-  if ((o.platform ?? process.platform) !== 'win32') return [];
+  if (!canScan(o.platform ?? process.platform)) return [];
   return (await scanned(ctx, o)).detected;
 }
 
 /** Every USB printer plugged in now (for the Printer setup screen). refresh: scan now instead of using the last scan. */
 export async function listUsbDevices(ctx: Ctx, o: { scan?: () => Promise<Scan>; platform?: string; refresh?: boolean } = {}): Promise<{ scannedAt: number | null; devices: UsbDevice[] }> {
-  if ((o.platform ?? process.platform) !== 'win32') return { scannedAt: null, devices: [] };
+  if (!canScan(o.platform ?? process.platform)) return { scannedAt: null, devices: [] };
   const c = await scanned(ctx, { scan: o.scan, maxAgeMs: o.refresh ? 0 : 15_000 });
   return { scannedAt: c.at, devices: allDevices(ctx, c.data) };
 }
@@ -101,7 +109,7 @@ export async function listUsbDevices(ctx: Ctx, o: { scan?: () => Promise<Scan>; 
 export function dismissDetected(ctx: Ctx, actor: Actor, requestId: string, key: string): { key: string } {
   return runCommand(ctx, requestId, 'printer.detect.dismiss', actor, () => {
     assertPerm(actor, 'print.read');
-    if (typeof key !== 'string' || key.length > 300 || !/^(usb|spooler):/.test(key)) throw new AppError('VALIDATION', 'Unknown printer.');
+    if (typeof key !== 'string' || key.length > 300 || !/^(usb|spooler|android):/.test(key)) throw new AppError('VALIDATION', 'Unknown printer.');
     const s = ignored(ctx);
     s.add(key);
     setSetting(ctx, IGNORE_KEY, JSON.stringify([...s].slice(-100)));

@@ -15,6 +15,7 @@ import { parseEscPos } from './virtual.ts';
 import { parseSerialAddress } from './serial.ts';
 import { parseUsbAddress } from './usb.ts';
 import { loadInvoiceFull } from '../invoiceView.ts';
+import { ANDROID_ADDRESS } from './android.ts';
 
 export function receiptDataFrom(f: InvoiceFull): ReceiptData {
   return {
@@ -124,6 +125,9 @@ export function validateAddress(transport: PrinterRow['transport'], address: str
       if (!u) return bad('A direct USB printer is identified by its vendor:product id. Use the detected printer in Settings, Printers.');
       return [u.vid, u.pid, u.serial].filter(Boolean).join(':');
     }
+    case 'android':
+      if (!ANDROID_ADDRESS.test(a)) return bad('Choose the USB or Bluetooth printer from the list on this device.');
+      return a;
     case 'file':
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(a) || a.includes('..')) return bad('A file printer needs a plain file name (it is saved in the data folder).');
       return a;
@@ -133,7 +137,7 @@ export function validateAddress(transport: PrinterRow['transport'], address: str
 
 function checkPrinter(i: PrinterInput) {
   if (!i.name?.trim() || i.name.length > 60) throw new AppError('VALIDATION', 'Printer name is required (max 60 characters).');
-  if (!['memory', 'tcp', 'file', 'spooler', 'serial', 'usb'].includes(i.transport)) throw new AppError('VALIDATION', 'Unknown printer connection.');
+  if (!['memory', 'tcp', 'file', 'spooler', 'serial', 'usb', 'android'].includes(i.transport)) throw new AppError('VALIDATION', 'Unknown printer connection.');
   i.address = validateAddress(i.transport, i.address);
   if (i.widthMm !== undefined && i.widthMm !== 58 && i.widthMm !== 80) throw new AppError('VALIDATION', 'Paper width must be 58 or 80 mm.');
   if (i.profile !== undefined && !(i.profile in PROFILES)) throw new AppError('VALIDATION', 'Unknown data speed setting.');

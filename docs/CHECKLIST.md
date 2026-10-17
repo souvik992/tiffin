@@ -86,7 +86,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Menu creation with three tabs: Items, Categories, Bulk upload (manager/owner; cashiers can view)
 - [x] Items: add and edit with veg / non-veg / not food, category, price, GST, unit, short name, HSN, barcode; search and filters
 - [x] Categories: add, rename, kitchen station, reorder, delete when empty, item counts
-- [x] Bulk upload: template download, CSV file or paste, row-by-row check, all-or-nothing import
+- [x] Bulk upload: template download, CSV file or paste, row-by-row check, all-or-nothing import; categories already on the menu are reused (capitals and extra spaces ignored), missing ones created once, and the preview marks which categories are new
 - [x] Item photos: upload, change and remove (drag and drop or choose), resized in the browser, shown on the menu table and billing tiles
 - [x] Menu creation > Bulk photos: choose or drop up to 300 photos; matched by file name (item name, short name, SKU or barcode; exact only, no guessing), pick the item for the rest, option to keep existing photos, saved one by one with progress. Pictures pasted inside Excel are not read (CSV holds text only)
 - [ ] Bulk photos screen seen in the desktop app with a real folder of shop photos
@@ -206,3 +206,16 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Customer name and phone, buyer GSTIN and order channel (Swiggy/Zomato) on the bill
 - [ ] Layout for screens narrower than 1280 px and touch-first testing
 - [x] The Electron host loading the built UI (app://pos)
+
+## Android (standalone)
+- [x] Same backend as Windows on Node 24 for Android (Termux nodejs-lts 24.18, pinned with SHA-256); node:sqlite, ICU (Indian number format) and scrypt checked on the emulator
+- [x] The full POS test suite on the Android emulator: 177 of 184 pass; 5 Windows-only tests skipped; 2 timing tests fail only because the emulator is slow (four processes writing at once; 1,000-line cart speed)
+- [x] Android app (Java, no libraries): unpacks the POS once per version, starts it, gatekeeper with a private cookie, file picker (single and multiple), screen kept on; APKs for arm64-v8a, armeabi-v7a, x86_64 (33-38 MB)
+- [x] Started on the emulator: backend start-up checks pass, the Set up this shop screen appears and takes input
+- [x] Every push builds the Windows installer and the Android APKs on GitHub after all tests pass
+- [x] Android printers: Bluetooth (paired) including the built-in printer of Sunmi-type machines ("InnerPrinter"), USB printers through Android's USB host API (asks once to allow), shown in Printer setup and plug-and-play; LAN printers as on Windows (database step 10, transport `android`)
+- [x] Android: downloads saved to the Download folder; Print / PDF through Android's print screen; backup copies to a USB stick or SD card (Settings > This device); foreground service keeps the POS running in the background
+- [x] Android release signing key (outside the repo) and signed release APKs; GitHub builds signed releases once the key secrets are added
+- [ ] Android: printers that need a vendor SDK (PAX, some iMin); the ODS add-on on Android
+- [ ] Android: printing on a real Bluetooth / USB / Sunmi built-in printer, and the backup copy to a real USB stick (emulator: the print reached the app's printer service, which answered correctly; folder picker needs a person)
+- [ ] Android: tried on a real POS machine (speed, printer, power cut during a bill)

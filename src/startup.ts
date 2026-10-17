@@ -10,9 +10,10 @@ import { UsbTransport } from './services/printing/usb.ts';
 import { join } from 'node:path';
 import { runBackup } from './services/backup.ts';
 import { pruneImages } from './services/images.ts';
+import { AndroidTransport } from './services/printing/android.ts';
 
 export function defaultQueue(ctx: Ctx): PrintQueue {
-  return new PrintQueue(ctx, { memory: new MemoryTransport(), tcp: new TcpTransport(), file: new FileTransport(join(ctx.dataDir, 'print-files')), spooler: new SpoolerTransport(), serial: new SerialTransport(), usb: new UsbTransport() });
+  return new PrintQueue(ctx, { memory: new MemoryTransport(), tcp: new TcpTransport(), file: new FileTransport(join(ctx.dataDir, 'print-files')), spooler: new SpoolerTransport(), serial: new SerialTransport(), usb: new UsbTransport(), android: new AndroidTransport() });
 }
 
 /** Runs once at startup. A failed integrity check refuses to start rather than risk billing on a damaged database. */

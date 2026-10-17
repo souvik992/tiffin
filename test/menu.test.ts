@@ -89,6 +89,42 @@ test('bulk upload: strict veg column, integer tax parsing, duplicates refused, a
   } finally { env.cleanup(); }
 });
 
+test('bulk upload categories: an existing one is reused (any capitals or spacing), a missing one is created once, and the preview says which are new', () => {
+  const env = makeEnv(); try {
+    const head = 'name,category,price,tax_percent,hsn,barcode,unit,veg\n';
+    const csv = head + 'Aloo Tikki Burger,  burgers ,99,5,,,pcs,veg\nMango Shake,Shakes,129,5,,,pcs,veg\nOreo Shake,SHAKES,149,5,,,pcs,veg\nBerry  Shake,shakes,149,5,,,pcs,veg\nPlain Water,,20,0,,,pcs,\nVanilla Shake,Thick   Shakes,149,5,,,pcs,veg\nChoco Shake,thick shakes,149,5,,,pcs,veg\n';
+    const p = previewItemsCsv(env.ctx, csv);
+    assert.deepEqual(p.errors, []);
+    assert.deepEqual(p.items.map((i) => [i.category, i.newCategory]), [
+      ['Burgers', false], // existing: shown with its saved name
+      ['Shakes', true], ['Shakes', true], ['Shakes', true], // one new category, written as first seen
+      ['General', true],
+      ['Thick Shakes', true], ['Thick Shakes', true], // extra spaces do not make a second category
+    ]);
+    assert.deepEqual(p.newCategories, ['Shakes', 'General', 'Thick Shakes']);
+    const before = getCatalog(env.ctx).categories.length;
+    const r = importItemsCsv(env.ctx, env.manager, rid(), csv);
+    assert.deepEqual([r.imported, r.categoriesCreated], [7, 3]);
+    const cats = getCatalog(env.ctx).categories;
+    assert.equal(cats.length, before + 3);
+    const burgers = cats.find((c) => c.name === 'Burgers')! as { id: string };
+    assert.equal(get<{ c: string }>(env.ctx.db, "SELECT category_id c FROM item WHERE name = 'Aloo Tikki Burger'")!.c, burgers.id);
+    // the next upload finds them all
+    const again = previewItemsCsv(env.ctx, head + 'Kesar Shake,shakes,149,5,,,pcs,veg\nGinger Ale,general,60,18,,,pcs,\n');
+    assert.deepEqual([again.newCategories, again.items.map((i) => i.category)], [[], ['Shakes', 'General']]);
+    // adding one by hand follows the same rule
+    assert.equal(code(() => createCategory(env.ctx, env.manager, rid(), { name: 'thick  SHAKES' })), 'DUPLICATE');
+    assert.equal(code(() => updateCategory(env.ctx, env.manager, rid(), burgers.id, { name: ' shakes ' })), 'DUPLICATE');
+    // capitals never matter: BURGERS, burgers and Burgers are one category
+    assert.equal(code(() => createCategory(env.ctx, env.manager, rid(), { name: 'BURGERS' })), 'DUPLICATE');
+    assert.equal(code(() => createCategory(env.ctx, env.manager, rid(), { name: 'burgers' })), 'DUPLICATE');
+    assert.equal(previewItemsCsv(env.ctx, head + 'Spicy Burger,bUrGeRs,99,5,,,pcs,veg\n').items[0]!.category, 'Burgers');
+    // a category may be renamed to a different capitalisation of its own name
+    updateCategory(env.ctx, env.manager, rid(), burgers.id, { name: 'BURGERS' });
+    assert.ok(getCatalog(env.ctx).categories.some((c) => c.name === 'BURGERS'));
+  } finally { env.cleanup(); }
+});
+
 test('menu changes reach billing: a new item can be sold, and a renamed item keeps its old name on past bills', () => {
   const env = makeEnv(); try {
     startShift(env);

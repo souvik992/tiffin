@@ -5,9 +5,10 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## What is where
 | Folder | What |
 |---|---|
-| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 9, `coupons`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
+| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 10, `printer_android`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
 | `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation (items, categories, bulk upload, bulk photos), Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Coupons, Users for the owner); with the ODS add-on also ODS, Settings > Online orders and Serviceability. |
 | `desktop/` | Electron 44 Windows app. The backend runs in a utility process; the UI is on `app://pos`; `/api` is forwarded with a per-launch `X-POS-Secret`. NSIS per-user installer goes to `desktop/release/`. See `desktop/README.md`. |
+| `android/` | Standalone Android app (`android/README.md`): the same backend on Node 24 for Android (Termux nodejs-lts, pinned in `node-runtime.json`, renamed to lib*.so by `scripts/prepare.ts`), a gatekeeper (`backend/front.ts`, private cookie) and a Java WebView shell. APKs per ABI: arm64-v8a, armeabi-v7a, x86_64. |
 | `addons/` | Separately installed, signed modules (`docs/ADDONS.md`). `addons/ods`: Online orders settings, Serviceability (map, distance bands, fees with GST, road factor, hours), Settings > API keys (owner: Google Maps key for map + place search; OpenStreetMap without it), order hub pairing + connector (outbox, SSE) and the live ODS; own package, tests, build (`npm run build` -> `addons/dist/packages`) and installer (`npm run installer`). |
 | `hub/` | Online order hub: Node + node:sqlite, SSE to the POS, customer API, demo page `/order/<slug>`. `hub/README.md`. |
 | `contract/` | Online order contract v1 (life cycle `src/order.ts`, shapes, checks, `openapi.yaml`). Hub, POS connector and apps must follow it; see `docs/ONLINE_ORDERS_PLAN.md`. |
@@ -17,10 +18,12 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (183 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (187 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `hub/` | `npm run dev` (local hub + demo store, prints a pairing code), `npm start`, `npm run admin -- create-store|pairing-code|list|revoke-device`, `npm test`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
+| `android/` | `node android/scripts/prepare.ts` (after `cd ui && npm run build`), then in `android/`: `gradlew.bat assembleDebug` with `JAVA_HOME` = Android Studio's `jbr`. Emulator AVD `Pixel_10_Pro_XL` (x86_64). |
+| CI | `.github/workflows/build.yml`: every push runs all tests, then builds the Windows installer and the Android APKs (artifacts). |
 | `desktop/` | `npm start`, `npm test`, `npm run test:e2e`, `npm run typecheck`, `npm run dist` (installer; raise `version` in `desktop/package.json` for each release). |
 
 ## Working style
@@ -44,9 +47,11 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 - **Every receipt build passes `...designOptions(ctx)`**: the active design, the UPI id and the logo.
 - **Bills show the store details valid at issue time** (`storeAt`, `outlet_version` is append-only). Never read the live outlet row for a bill.
 - **Offline mode is the default.** Online orders live in the add-on; anything there that connects out must check `isOnlineMode(host)` (addons/ods/backend/onlineConfig.ts) first.
-- **Add-ons:** backend code may import only `contract/` and *types* from `src/` (everything else via `HostApi`); screens use `window.__POS__`; each add-on ships its own Tailwind CSS (the POS CSS only has classes the POS uses). Signing key: `%USERPROFILE%\.tiffinpos\addon-signing\private.pem`, never in the repo.
+- **Add-ons:** backend code may import only `contract/` and *types* from `src/` (everything else via `HostApi`); screens use `window.__POS__`; each add-on ships its own Tailwind CSS (the POS CSS only has classes the POS uses). Signing key: `%USERPROFILE%\.tiffinpos\addon-signing\private.pem`, never in the repo. Android release key: `%USERPROFILE%\.tiffinpos\android-signing\` (release.jks + release.properties), never in the repo.
 - **This PC has a real POS install (0.1.1) with real bills.** Never install, upgrade or uninstall the POS here, and never touch `%LOCALAPPDATA%\TiffinPOS`; test with `POS_HOME` temp folders and installers with `/D=<temp>`.
 - **Never print test jobs** to the dev PC's personal Windows printers.
+- **Android:** only files named lib*.so in the app's native library folder may be run, so Node and its libraries are renamed and their ELF names rewritten (`android/scripts/elf.ts`). Git's `tar` on Windows reads `C:\...` as a remote host: run it with relative paths. Every Android build follows `desktop/package.json`'s version.
+- **Speed tests fail while the emulator or Gradle is running** (they share the CPU). Stop them (`adb emu kill`, `gradlew --stop`) before `npm test`.
 
 ## Next planned work (in order)
 1. Real-printer checks from `docs/HARDWARE_TEST_PLAN.md` (Posiflex PP8800: logo, drawer, out of paper).

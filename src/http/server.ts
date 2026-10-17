@@ -161,7 +161,7 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
 
   // ---- printing ----
   add('GET', '/api/printers', {}, (c) => { assertPerm(c.actor, 'print.read'); return listPrinters(c.ctx); });
-  const printerShape = { name: str({ min: 1, max: 60 }), transport: oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb'), address: opt(nullable(str({ max: 200 }))), widthMm: opt(int()), profile: opt(str({ max: 30 })), isReceipt: opt(bool), drawer: opt(bool), stations: opt(arr(str({ max: 30 }), { max: 20 })), active: opt(bool) };
+  const printerShape = { name: str({ min: 1, max: 60 }), transport: oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb', 'android'), address: opt(nullable(str({ max: 200 }))), widthMm: opt(int()), profile: opt(str({ max: 30 })), isReceipt: opt(bool), drawer: opt(bool), stations: opt(arr(str({ max: 30 }), { max: 20 })), active: opt(bool) };
   add('POST', '/api/printers', {}, (c) => createPrinter(c.ctx, c.actor, rid(c), body(c, obj(printerShape))));
   add('PATCH', '/api/printers/:id', {}, (c) => updatePrinter(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ ...printerShape, name: opt(str({ min: 1, max: 60 })), transport: opt(oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb')) }))));
   add('DELETE', '/api/printers/:id', {}, (c) => deletePrinter(c.ctx, c.actor, rid(c), c.params.id!));

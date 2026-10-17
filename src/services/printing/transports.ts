@@ -3,7 +3,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface PrinterRow {
-  id: string; name: string; transport: 'memory' | 'tcp' | 'file' | 'spooler' | 'serial' | 'usb'; address: string | null; width_mm: number;
+  id: string; name: string; transport: 'memory' | 'tcp' | 'file' | 'spooler' | 'serial' | 'usb' | 'android'; address: string | null; width_mm: number;
   profile: string; raster: number; is_receipt: number; drawer: number; stations: string; active: number;
 }
 export interface Transport { send(printer: PrinterRow, bytes: Uint8Array): Promise<void> }

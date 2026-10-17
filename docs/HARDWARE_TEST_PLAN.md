@@ -113,6 +113,20 @@ Done on the dev PC (2026-10-16, ODS 1.0.0): the built signed package in a POS ba
 
 Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; add-on installer installed into a temp folder silently and uninstalled cleanly (the real POS install was not touched).
 
+## Android POS machines
+
+| Check | Result |
+|---|---|
+| Install the APK for the machine's processor (arm64-v8a or armeabi-v7a) and complete shop setup | |
+| A day of billing: speed of adding items and paying (target: under 0.2 s per tap) | |
+| Power cut or app killed during a bill: the bill is either complete or not there, numbering has no gap | |
+| Sunmi built-in printer (Printer setup > Bluetooth > Built-in printer), a paired Bluetooth printer, a USB printer with an OTG cable (allow it once), a LAN printer on port 9100 | |
+| Settings > This device: choose a folder on a USB stick, Copy now, check TiffinPOS-backups on a PC; restore one on Windows | |
+| Reports: Download CSV (Download folder) and Print / PDF (Android print screen, Save as PDF) | |
+| Leave the app in the background for an hour, come back: the POS still answers | |
+
+Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages). Node 24 runs; 177/184 backend tests pass (the 2 failures are timing on the slow emulator); the app starts the POS and shows the setup screen.
+
 ## Bill designs
 
 | Check | Result |

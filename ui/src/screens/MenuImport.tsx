@@ -7,6 +7,7 @@ import { formatPaise, formatRateBp } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { VegMark } from '../components/ui.tsx';
 import { TEMPLATE } from '../lib/menuTemplate.ts';
+import { saveFile } from '../lib/android.ts';
 
 const MAX_BYTES = 1_500_000; // the backend accepts 2 MB per request
 
@@ -22,11 +23,7 @@ export function MenuImport({ canEdit, reload, onDone }: { canEdit: boolean; relo
   const [busy, setBusy] = useState(false);
 
   const downloadTemplate = () => {
-    const url = URL.createObjectURL(new Blob(['﻿' + TEMPLATE], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = 'menu-template.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveFile('menu-template.csv', new Blob(['﻿' + TEMPLATE], { type: 'text/csv;charset=utf-8' })).catch((e: Error) => setError(e.message));
   };
 
   const check = async (text: string) => {
@@ -79,7 +76,7 @@ export function MenuImport({ canEdit, reload, onDone }: { canEdit: boolean; relo
           <button className="btn-ghost mt-3" onClick={downloadTemplate}><Download className="h-4 w-4" />Download template</button>
         </Step>
         <Step n={2} title="Fill it in Excel or Sheets">
-          <p>One item per row. New categories are created for you. Prices include GST.</p>
+          <p>One item per row. A category already on the menu is used (capitals and spaces do not matter); a new one is created for you. Prices include GST.</p>
           <p className="mt-1">Save as <b>CSV UTF-8</b>.</p>
         </Step>
         <Step n={3} title="Upload and check">
@@ -120,6 +117,13 @@ export function MenuImport({ canEdit, reload, onDone }: { canEdit: boolean; relo
             </div>
           )}
           {preview.items.length > 0 && (
+            <p className="mb-2 text-sm">
+              {preview.newCategories.length
+                ? <>New categor{preview.newCategories.length === 1 ? 'y' : 'ies'} to create: {preview.newCategories.map((c) => <span key={c} className="mr-1 rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-primary">{c}</span>)}<span className="text-muted-foreground">Other categories are already on the menu.</span></>
+                : <span className="text-muted-foreground">All categories are already on the menu; none will be created.</span>}
+            </p>
+          )}
+          {preview.items.length > 0 && (
             <div className="max-h-96 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-card text-left text-muted-foreground"><tr><th className="py-2">Item</th><th>Category</th><th>GST</th><th>Unit</th><th className="text-right">Price</th></tr></thead>
@@ -127,7 +131,7 @@ export function MenuImport({ canEdit, reload, onDone }: { canEdit: boolean; relo
                   {preview.items.slice(0, 500).map((it, i) => (
                     <tr key={i} className="border-t border-border">
                       <td className="py-1.5"><span className="flex items-center gap-2"><VegMark veg={it.isVeg} />{it.name}</span></td>
-                      <td>{it.category}</td>
+                      <td>{it.category}{it.newCategory && <span className="ml-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-primary">new</span>}</td>
                       <td>{formatRateBp(it.taxPercent)}</td>
                       <td>{it.unit}</td>
                       <td className="text-right tabular-nums">{formatPaise(it.price)}</td>

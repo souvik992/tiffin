@@ -366,6 +366,24 @@ ALTER TABLE sale_order ADD COLUMN customer_name TEXT;
 `;
 
 // V8: staff sign in with their mobile number and PIN. Older users have none until the owner adds it.
+// V10: printers on Android (USB through Android's USB host API, Bluetooth including the built-in printer of Sunmi-type
+// POS machines), reached through the Android app: printers gain an 'android' transport (address usb:vid:pid[:serial]
+// or bt:MAC). Same 12-step rebuild as V3/V4; printer still has no indexes, triggers or views.
+const V10 = `
+CREATE TABLE printer_new (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  transport TEXT NOT NULL CHECK (transport IN ('memory','tcp','file','spooler','serial','usb','android')),
+  address TEXT, width_mm INTEGER NOT NULL DEFAULT 80 CHECK (width_mm IN (58, 80)),
+  profile TEXT NOT NULL DEFAULT 'generic', raster INTEGER NOT NULL DEFAULT 0,
+  is_receipt INTEGER NOT NULL DEFAULT 0, drawer INTEGER NOT NULL DEFAULT 0,
+  stations TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+);
+INSERT INTO printer_new (id, name, transport, address, width_mm, profile, raster, is_receipt, drawer, stations, active, created_at)
+  SELECT id, name, transport, address, width_mm, profile, raster, is_receipt, drawer, stations, active, created_at FROM printer;
+DROP TABLE printer;
+ALTER TABLE printer_new RENAME TO printer;
+`;
+
 // V9: coupon codes, and the coupon a bill uses (its code is kept on the bill even if the coupon changes later).
 const V9 = `
 CREATE TABLE coupon (
@@ -395,5 +413,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 7, name: 'customer_name', sql: V7 },
   { version: 8, name: 'user_mobile', sql: V8 },
   { version: 9, name: 'coupons', sql: V9 },
+  { version: 10, name: 'printer_android', sql: V10, foreignKeysOff: true },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

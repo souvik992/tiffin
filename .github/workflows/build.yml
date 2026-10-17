@@ -1,0 +1,112 @@
+# Every push: run all tests, then build the Windows installer and the Android apps from the same commit.
+# Downloads: the run's page on GitHub > Artifacts.
+name: Build Windows and Android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: POS backend
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Screens
+        working-directory: ui
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Desktop app
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Order hub
+        run: node --test --test-concurrency=1 "hub/test/*.test.ts"
+
+  windows:
+    name: Windows installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+        working-directory: ui
+      - run: npm ci
+        working-directory: desktop
+      - name: Build installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # unsigned until a code-signing certificate is added as a secret
+        run: |
+          node scripts/build.mjs
+          npx electron-builder --win --config electron-builder.config.cjs --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiffinPOS-Windows
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android apps
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: Build screens
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/cache@v4
+        with:
+          path: android/.cache
+          key: node-runtime-${{ hashFiles('android/node-runtime.json') }}
+      - name: Node runtime and POS files (pinned, checksum-checked)
+        run: node android/scripts/prepare.ts
+      - name: Build APKs (signed release when the signing key secrets are set, else debug)
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.POS_ANDROID_KEYSTORE_B64 }}
+          POS_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.POS_ANDROID_KEYSTORE_PASSWORD }}
+          POS_ANDROID_KEY_ALIAS: ${{ secrets.POS_ANDROID_KEY_ALIAS }}
+          POS_ANDROID_KEY_PASSWORD: ${{ secrets.POS_ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            POS_ANDROID_KEYSTORE="$RUNNER_TEMP/release.jks" ./gradlew assembleRelease --console=plain
+            rm -f "$RUNNER_TEMP/release.jks"
+          else
+            ./gradlew assembleDebug --console=plain
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiffinPOS-Android
+          path: android/app/build/outputs/apk/*/*.apk
+          if-no-files-found: error

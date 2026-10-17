@@ -4,6 +4,7 @@ import { CheckCircle2, Clock, Printer, RotateCw, TriangleAlert } from 'lucide-re
 import type { InvoicePrintJob, ReceiptPreview } from '../lib/api.ts';
 import { useSession } from '../lib/session.tsx';
 import { Modal } from './ui.tsx';
+import { printPage } from '../lib/android.ts';
 
 /**
  * The receipt exactly as the thermal printer prints it (rendered by the backend from the same ESC/POS bytes),
@@ -26,7 +27,7 @@ export function ReceiptDialog({ invoiceId, title, onClose }: { invoiceId: string
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Paper</span>
         {([80, 58] as const).map((w) => <button key={w} className={`chip ${width === w ? 'chip-active' : ''}`} onClick={() => setWidth(w)}>{w} mm</button>)}
-        <button className="btn-primary ml-auto" disabled={!rc} onClick={() => window.print()}><Printer className="h-4 w-4" />Print</button>
+        <button className="btn-primary ml-auto" disabled={!rc} onClick={() => printPage(title)}><Printer className="h-4 w-4" />Print</button>
       </div>
       <div className="max-h-[60vh] overflow-auto rounded-lg border border-border bg-white p-3">
         {!rc ? <p className="text-sm text-muted-foreground">Loading…</p> : (

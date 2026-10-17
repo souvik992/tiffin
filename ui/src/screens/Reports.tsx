@@ -7,6 +7,7 @@ import { PRESETS, formatDay, formatIstDateTime, presetRange } from '../lib/dates
 import type { Preset } from '../lib/dates.ts';
 import { useSession } from '../lib/session.tsx';
 import { PageShell } from '../components/ui.tsx';
+import { onAndroid, printPage, saveFile } from '../lib/android.ts';
 
 const KEY = 'pos.reports.key';
 const GROUP_ICON: Record<string, typeof BarChart3> = { Sales: BarChart3, Items: UtensilsCrossed, Tax: Receipt, Controls: ShieldCheck, Inventory: Boxes };
@@ -65,7 +66,7 @@ export function Reports() {
     if (!printing) return;
     const done = () => setPrinting(false);
     window.addEventListener('afterprint', done);
-    const t = setTimeout(() => window.print(), 50); // let the print copy render first
+    const t = setTimeout(() => { printPage('Tiffin POS report'); if (onAndroid()) setTimeout(done, 60_000); }, 50); // let the print copy render first (Android: no afterprint event)
     return () => { clearTimeout(t); window.removeEventListener('afterprint', done); };
   }, [printing]);
 
@@ -73,12 +74,7 @@ export function Reports() {
     setDownloading(true);
     try {
       const { filename, csv } = await api.reportCsv(key, range.from, range.to);
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-      const a = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify('success', `Downloaded ${filename}`);
+      notify('success', await saveFile(filename, new Blob([csv], { type: 'text/csv;charset=utf-8' })));
     } catch (e) { fail(e); } finally { setDownloading(false); }
   };
 

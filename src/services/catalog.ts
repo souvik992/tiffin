@@ -55,8 +55,8 @@ export function itemByBarcode(ctx: Ctx, code: string) {
 export function createCategory(ctx: Ctx, actor: Actor, requestId: string, input: { name: string; sortOrder?: number; kitchenStation?: string | null }) {
   return runCommand(ctx, requestId, 'category.create', actor, () => {
     assertPerm(actor, 'catalog.write');
-    const name = clean(input.name, 'Category name', 60)!;
-    if (get(ctx.db, 'SELECT 1 FROM category WHERE lower(name) = lower(?) AND deleted_at IS NULL', name)) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
+    const name = clean(input.name, 'Category name', 60)!.replace(/\s+/g, ' ');
+    if (categoriesByKey(ctx).has(categoryKey(name))) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
     const id = ctx.ids.next();
     run(ctx.db, 'INSERT INTO category(id, name, sort_order, kitchen_station, updated_at) VALUES (?,?,?,?,?)', id, name, input.sortOrder ?? 0, clean(input.kitchenStation, 'Kitchen station', 30, false), ctx.clock.now());
     audit(ctx, actor.userId, 'category.create', 'category', id);
@@ -70,8 +70,9 @@ export function updateCategory(ctx: Ctx, actor: Actor, requestId: string, id: st
     assertPerm(actor, 'catalog.write');
     const cur = get<{ name: string; sort_order: number; kitchen_station: string | null }>(ctx.db, 'SELECT name, sort_order, kitchen_station FROM category WHERE id = ? AND deleted_at IS NULL', id);
     if (!cur) throw new AppError('NOT_FOUND', 'Category not found.', 404);
-    const name = input.name === undefined ? cur.name : clean(input.name, 'Category name', 60)!;
-    if (get(ctx.db, 'SELECT 1 FROM category WHERE lower(name) = lower(?) AND deleted_at IS NULL AND id <> ?', name, id)) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
+    const name = input.name === undefined ? cur.name : clean(input.name, 'Category name', 60)!.replace(/\s+/g, ' ');
+    const same = categoriesByKey(ctx).get(categoryKey(name));
+    if (same && same.id !== id) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
     const station = input.kitchenStation === undefined ? cur.kitchen_station : clean(input.kitchenStation, 'Kitchen station', 30, false);
     run(ctx.db, 'UPDATE category SET name=?, sort_order=?, kitchen_station=?, version=version+1, updated_at=? WHERE id=?', name, input.sortOrder ?? cur.sort_order, station, ctx.clock.now(), id);
     audit(ctx, actor.userId, 'category.update', 'category', id);
@@ -251,7 +252,20 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export interface CsvPreview { rows: number; errors: Array<{ row: number; message: string }>; items: Array<{ name: string; category: string; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null }> }
+export interface CsvPreview {
+  rows: number; errors: Array<{ row: number; message: string }>;
+  /** category: the existing category's saved name, or the new one as first written; newCategory: it will be created. */
+  items: Array<{ name: string; category: string; newCategory: boolean; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null }>;
+  /** Categories the import will create, in file order. */
+  newCategories: string[];
+}
+
+/** Category names compare without capitals or extra spaces: "  hot   DRINKS " is "Hot Drinks". */
+const categoryKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+/** Existing categories by key. */
+function categoriesByKey(ctx: Ctx): Map<string, { id: string; name: string }> {
+  return new Map(all<{ id: string; name: string }>(ctx.db, 'SELECT id, name FROM category WHERE deleted_at IS NULL ORDER BY sort_order').map((c) => [categoryKey(c.name), c]));
+}
 
 const VEG = new Set(['veg', 'v', 'yes', 'y', '1', 'true', 'vegetarian']);
 const NON_VEG = new Set(['non-veg', 'nonveg', 'non veg', 'nv', 'no', 'n', '0', 'false', 'non-vegetarian', 'egg']);
@@ -269,11 +283,14 @@ export function previewItemsCsv(ctx: Ctx, csv: string): CsvPreview {
   const rows = parseCsv(csv);
   const errors: CsvPreview['errors'] = [];
   const items: CsvPreview['items'] = [];
-  if (rows.length === 0) return { rows: 0, errors: [{ row: 0, message: 'The file is empty.' }], items };
+  const newCategories: string[] = [];
+  if (rows.length === 0) return { rows: 0, errors: [{ row: 0, message: 'The file is empty.' }], items, newCategories };
   const header = rows[0]!.map((h) => h.trim().toLowerCase());
   const col = (n: string) => header.indexOf(n);
   for (const need of ['name', 'price']) if (col(need) < 0) errors.push({ row: 1, message: `Missing required column "${need}".` });
-  if (errors.length) return { rows: rows.length - 1, errors, items };
+  if (errors.length) return { rows: rows.length - 1, errors, items, newCategories };
+  const existing = categoriesByKey(ctx);
+  const fresh = new Map<string, string>(); // key -> name as first written in the file
   const seenBarcodes = new Set<string>();
   const seenNames = new Set<string>();
   rows.slice(1).forEach((r, idx) => {
@@ -304,14 +321,17 @@ export function previewItemsCsv(ctx: Ctx, csv: string): CsvPreview {
       }
       const isVeg = parseVeg(v('veg'));
       if (isVeg === undefined) throw new Error(`veg "${v('veg')}" is not understood (use veg, non-veg or leave empty)`);
-      const category = v('category') || 'General';
-      if (category.length > 60) throw new Error('category is too long');
-      items.push({ name, category, price, taxPercent, hsn, barcode, unit: v('unit') || 'pcs', isVeg });
+      const written = v('category').replace(/\s+/g, ' ') || 'General';
+      if (written.length > 60) throw new Error('category is too long');
+      const ck = categoryKey(written);
+      const found = existing.get(ck);
+      if (!found && !fresh.has(ck)) { fresh.set(ck, written); newCategories.push(written); }
+      items.push({ name, category: found ? found.name : fresh.get(ck)!, newCategory: !found, price, taxPercent, hsn, barcode, unit: v('unit') || 'pcs', isVeg });
     } catch (e) {
       errors.push({ row: n, message: (e as Error).message });
     }
   });
-  return { rows: rows.length - 1, errors, items };
+  return { rows: rows.length - 1, errors, items, newCategories };
 }
 
 /** All-or-nothing import. Nothing is written if any row has an error. */
@@ -320,16 +340,17 @@ export function importItemsCsv(ctx: Ctx, actor: Actor, requestId: string, csv: s
     assertPerm(actor, 'catalog.write');
     const p = previewItemsCsv(ctx, csv);
     if (p.errors.length) throw new AppError('IMPORT_ERRORS', `${p.errors.length} row(s) have errors. Nothing was imported.`, 422, { errors: p.errors.slice(0, 50) });
-    const cats = new Map<string, string>();
+    // reuse an existing category (any capitals or spacing); create each missing one once
+    const cats = new Map([...categoriesByKey(ctx)].map(([k, c]) => [k, c.id]));
     const taxes = new Map<number, string>();
     let categoriesCreated = 0;
     const now = ctx.clock.now();
     for (const it of p.items) {
-      const ck = it.category.toLowerCase();
+      const ck = categoryKey(it.category);
       if (!cats.has(ck)) {
-        const ex = get<{ id: string }>(ctx.db, 'SELECT id FROM category WHERE lower(name) = ? AND deleted_at IS NULL', ck);
-        if (ex) cats.set(ck, ex.id);
-        else { const id = ctx.ids.next(); run(ctx.db, 'INSERT INTO category(id, name, sort_order, updated_at) VALUES (?,?,(SELECT coalesce(max(sort_order), 0) + 10 FROM category WHERE deleted_at IS NULL),?)', id, it.category, now); cats.set(ck, id); categoriesCreated++; }
+        const id = ctx.ids.next();
+        run(ctx.db, 'INSERT INTO category(id, name, sort_order, updated_at) VALUES (?,?,(SELECT coalesce(max(sort_order), 0) + 10 FROM category WHERE deleted_at IS NULL),?)', id, it.category, now);
+        cats.set(ck, id); categoriesCreated++;
       }
       if (!taxes.has(it.taxPercent)) {
         const ex = get<{ id: string }>(ctx.db, 'SELECT id FROM tax_group WHERE rate_bp = ? AND cess_bp = 0 AND price_includes_tax = 1 AND deleted_at IS NULL', it.taxPercent);

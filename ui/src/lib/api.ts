@@ -19,7 +19,8 @@ export interface Category { id: string; name: string; sortOrder: number; kitchen
 export interface ImportPreview {
   rows: number;
   errors: Array<{ row: number; message: string }>;
-  items: Array<{ name: string; category: string; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null }>;
+  items: Array<{ name: string; category: string; newCategory: boolean; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null }>;
+  newCategories: string[];
 }
 export interface TaxGroup { id: string; name: string; rateBp: number; cessBp: number; priceIncludesTax: number }
 export interface Item {
@@ -90,8 +91,8 @@ export interface ReportTable {
   summary: Array<{ label: string; value: number | string; type: ReportColType }>;
 }
 export interface PrintJob { id: string; kind: string; refId: string; printerId: string; printerName: string; invoiceNo: string | null; tokenNo: number | null; status: string; attempts: number; lastError: string | null; createdAt: number }
-export type Transport = 'memory' | 'tcp' | 'file' | 'spooler' | 'serial' | 'usb';
-export interface DetectedPrinter { key: string; transport: 'usb' | 'spooler'; address: string; name: string; detail: string; widthMm: 58 | 80 }
+export type Transport = 'memory' | 'tcp' | 'file' | 'spooler' | 'serial' | 'usb' | 'android';
+export interface DetectedPrinter { key: string; transport: 'usb' | 'spooler' | 'android'; address: string; name: string; detail: string; widthMm: 58 | 80 }
 export interface UsbDevice extends DetectedPrinter { printerId: string | null; printerName: string | null; printerActive: boolean | null; dismissed: boolean }
 export interface Printer {
   id: string; name: string; transport: Transport; address: string | null; widthMm: 58 | 80; profile: string; isReceipt: boolean; drawer: boolean; stations: string[]; active: boolean;

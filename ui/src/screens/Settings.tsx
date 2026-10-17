@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  Banknote, Bluetooth, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Store, Ticket, Trash2, Usb, Users, Wifi,
+  Banknote, Bluetooth, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
 } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Printer, PrinterInput, ReceiptDesign, ReceiptDesignPreview, SerialPortInfo, Transport, UsbDevice, WindowsPrinter } from '../lib/api.ts';
@@ -11,6 +11,8 @@ import { ReceiptLines } from '../components/print.tsx';
 import { StoreSettings } from './StoreSettings.tsx';
 import { UsersSettings } from './UsersSettings.tsx';
 import { CouponsSettings } from './CouponsSettings.tsx';
+import { DeviceSettings } from './DeviceSettings.tsx';
+import { onAndroid } from '../lib/android.ts';
 import { useAddons } from '../lib/addons.ts';
 
 type Section = string; // core sections, or one an add-on registered
@@ -24,8 +26,14 @@ const KINDS: Array<{ kind: Kind; transport: Transport; label: string; hint: stri
   { kind: 'bluetooth', transport: 'serial', label: 'Bluetooth', hint: 'Printer paired with this PC over Bluetooth', icon: Bluetooth },
   { kind: 'screen', transport: 'memory', label: 'Screen only', hint: 'No printer: bills can still be printed from the screen', icon: Monitor },
 ];
-const kindOf = (t: Transport): Kind => (t === 'spooler' || t === 'usb' ? 'usb' : t === 'tcp' ? 'wifi' : t === 'serial' ? 'bluetooth' : 'screen');
-const connLabel = (p: { transport: Transport }) => (p.transport === 'usb' ? 'USB (no driver needed)' : p.transport === 'spooler' ? 'USB (Windows printer)' : KINDS.find((k) => k.kind === kindOf(p.transport))!.label);
+/** On Android, USB and Bluetooth printers are reached through the app ('android' transport, address usb:… or bt:…). */
+const ANDROID_KINDS: Partial<Record<Kind, { transport: Transport; hint: string }>> = {
+  usb: { transport: 'android', hint: 'Printer plugged into this device with a USB (OTG) cable' },
+  bluetooth: { transport: 'android', hint: 'The built-in printer of this POS machine, or a printer paired over Bluetooth' },
+};
+const kindsHere = () => (onAndroid() ? KINDS.map((k) => ({ ...k, ...(ANDROID_KINDS[k.kind] ?? {}) })) : KINDS);
+const kindOf = (t: Transport, address?: string | null): Kind => (t === 'android' ? ((address ?? '').startsWith('usb:') ? 'usb' : 'bluetooth') : t === 'spooler' || t === 'usb' ? 'usb' : t === 'tcp' ? 'wifi' : t === 'serial' ? 'bluetooth' : 'screen');
+const connLabel = (p: { transport: Transport; address?: string | null }) => (p.transport === 'android' ? ((p.address ?? '').startsWith('usb:') ? 'USB (this device)' : 'Bluetooth / built-in') : p.transport === 'usb' ? 'USB (no driver needed)' : p.transport === 'spooler' ? 'USB (Windows printer)' : KINDS.find((k) => k.kind === kindOf(p.transport))!.label);
 const when = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 export function Settings() {
@@ -40,6 +48,7 @@ export function Settings() {
     ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
     ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
+    ...(onAndroid() ? [['device', 'This device', Smartphone, 'Backup copies on a USB stick or SD card'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(user?.role === 'owner' ? [
       ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
@@ -60,7 +69,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : <ReceiptSettings />}</div>
         </div>
       )}
     </PageShell>
@@ -186,7 +195,7 @@ function PrinterSetup() {
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {list.map((p) => {
-            const Icon = KINDS.find((x) => x.kind === kindOf(p.transport))!.icon;
+            const Icon = KINDS.find((x) => x.kind === kindOf(p.transport, p.address))!.icon;
             return (
               <div key={p.id} className={`rounded-xl border bg-card p-4 ${p.active ? 'border-border' : 'border-dashed border-border opacity-70'}`}>
                 <div className="flex items-start gap-3">
@@ -242,7 +251,8 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
   const { api } = useSession();
   const key = useRef(newKey());
   const startTransport = printer?.transport ?? prefill?.transport ?? 'spooler';
-  const [kind, setKind] = useState<Kind>(kindOf(startTransport));
+  const [kind, setKind] = useState<Kind>(kindOf(startTransport, printer?.address ?? prefill?.address));
+  const android = onAndroid();
   const [name, setName] = useState(printer?.name ?? prefill?.name ?? '');
   const [address, setAddress] = useState(printer?.address ?? prefill?.address ?? '');
   const [width, setWidth] = useState<58 | 80>(printer?.widthMm ?? prefill?.widthMm ?? 80);
@@ -254,7 +264,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const directUsb = startTransport === 'usb' && kind === 'usb'; // plug-and-play printer: keep its USB id
-  const transport: Transport = directUsb ? 'usb' : KINDS.find((k) => k.kind === kind)!.transport;
+  const transport: Transport = directUsb ? 'usb' : kindsHere().find((k) => k.kind === kind)!.transport;
   const allStations = [...new Set([...stations, ...chosen.filter((s) => s !== '*')])];
 
   const pick = (addr: string, suggestedName?: string) => { setAddress(addr); if (!name.trim() && suggestedName) setName(suggestedName); };
@@ -262,7 +272,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
 
   const save = async () => {
     if (!name.trim()) return setError('Give the printer a name, like "Counter" or "Kitchen".');
-    if (kind !== 'screen' && !address.trim()) return setError(kind === 'usb' ? 'Choose the USB printer.' : kind === 'wifi' ? 'Enter or find the printer IP address.' : 'Choose the Bluetooth COM port.');
+    if (kind !== 'screen' && !address.trim()) return setError(kind === 'usb' ? 'Choose the USB printer.' : kind === 'wifi' ? 'Enter or find the printer IP address.' : android ? 'Choose the printer.' : 'Choose the Bluetooth COM port.');
     if (!isReceipt && chosen.length === 0) return setError('Choose what this printer prints: bills, kitchen tickets, or both.');
     setBusy(true); setError('');
     const input: PrinterInput = { name: name.trim(), transport, address: kind === 'screen' ? null : address.trim(), widthMm: width, isReceipt, drawer: isReceipt && drawer, stations: chosen, active, profile: slow ? 'slow_buffer' : 'generic' };
@@ -277,9 +287,9 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
       <div className="max-h-[75vh] overflow-y-auto pr-1">
         <Step n={1} title="How is the printer connected?">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4" role="radiogroup" aria-label="Connection">
-            {KINDS.map(({ kind: k, label, hint, icon: Icon }) => (
+            {kindsHere().map(({ kind: k, label, hint, icon: Icon }) => (
               <button key={k} type="button" role="radio" aria-checked={kind === k} title={hint}
-                onClick={() => { if (k !== kind) { setKind(k); setAddress(k === kindOf(startTransport) ? (printer?.address ?? prefill?.address ?? '') : ''); setError(''); } }}
+                onClick={() => { if (k !== kind) { setKind(k); setAddress(k === kindOf(startTransport, printer?.address ?? prefill?.address) ? (printer?.address ?? prefill?.address ?? '') : ''); setError(''); } }}
                 className={`flex flex-col items-center gap-1 rounded-xl border p-3 text-sm font-semibold transition-colors ${kind === k ? 'border-primary bg-accent text-primary' : 'border-border bg-background hover:border-primary'}`}>
                 <Icon className="h-5 w-5" />{label}
               </button>
@@ -289,11 +299,13 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
 
         {kind !== 'screen' && (
           <Step n={2} title={kind === 'usb' ? 'Which USB printer?' : kind === 'wifi' ? 'Which network printer?' : 'Which Bluetooth printer?'}>
+            {android && (kind === 'usb' || kind === 'bluetooth') ? <AndroidPicker kind={kind} value={address} onPick={pick} /> : <>
             {kind === 'usb' && (directUsb
               ? <p className="rounded-xl border border-border bg-background p-3 text-sm">Plugged straight into USB, no driver needed (id <b>{address}</b>). It works in any USB socket of this PC.</p>
               : <UsbPicker value={address} onPick={pick} />)}
             {kind === 'wifi' && <WifiPicker value={address} onPick={pick} />}
             {kind === 'bluetooth' && <BluetoothPicker value={address} onPick={pick} />}
+            </>}
           </Step>
         )}
 
@@ -427,6 +439,38 @@ function WifiPicker({ value, onPick }: { value: string; onPick: (addr: string, n
       <label className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">Or type the IP address (port 9100 unless you add :port)
         <input className="field" value={value} maxLength={200} placeholder="192.168.1.50" onChange={(e) => onPick(e.target.value)} aria-label="Printer IP address" />
       </label>
+    </Picker>
+  );
+}
+
+/** Android: the USB or Bluetooth printers this device sees (the built-in printer of a POS machine is listed first). */
+function AndroidPicker({ kind, value, onPick }: { kind: 'usb' | 'bluetooth'; value: string; onPick: (addr: string, name?: string) => void }) {
+  const { api } = useSession();
+  const [list, setList] = useState<UsbDevice[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const prefix = kind === 'usb' ? 'usb:' : 'bt:';
+  const load = useCallback(() => {
+    setLoading(true); setErr('');
+    api.usbDevices(true).then((r) => setList(r.devices.filter((d) => d.transport === 'android' && d.address.startsWith(prefix)))).catch((e) => setErr(messageOf(e))).finally(() => setLoading(false));
+  }, [api, prefix]);
+  useEffect(load, [load]);
+  return (
+    <Picker title={kind === 'usb' ? 'USB printers on this device' : 'Built-in and Bluetooth printers'} loading={loading} onRefresh={load} refreshLabel="Refresh">
+      <p className="mb-2 text-xs text-muted-foreground">{kind === 'usb'
+        ? 'Plug the printer in with a USB (OTG) cable. The first print asks you to allow it: tap OK.'
+        : 'A POS machine with a printer shows "Built-in printer". For another printer, pair it first in Android Settings, Bluetooth (PIN often 0000 or 1234), and allow Nearby devices for Tiffin POS.'}</p>
+      {err && <p className="text-sm text-destructive">{err}</p>}
+      {list?.length === 0 && <p className="text-sm text-muted-foreground">{kind === 'usb' ? 'No USB printer is plugged in.' : 'No printer found. Pair it in Android Settings, then press Refresh.'}</p>}
+      <ul className="max-h-48 space-y-1 overflow-y-auto">
+        {list?.map((d) => (
+          <li key={d.key}><button type="button" aria-pressed={value === d.address} onClick={() => onPick(d.address, d.name)}
+            className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm ${value === d.address ? 'border-primary bg-accent' : 'border-transparent hover:bg-secondary'}`}>
+            {kind === 'usb' ? <Usb className="h-4 w-4 text-primary" /> : <Bluetooth className="h-4 w-4 text-primary" />}
+            <span className="font-medium">{d.name}</span><span className="min-w-0 truncate text-xs text-muted-foreground">{d.detail}{d.printerName ? ` · set up as ${d.printerName}` : ''}</span>
+          </button></li>
+        ))}
+      </ul>
     </Picker>
   );
 }
