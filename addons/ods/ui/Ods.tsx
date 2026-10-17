@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-react';
 import { BASE, host } from './host.ts';
 import { setSoundOn } from './buzzer.ts';
+import { ChannelBadge } from './channels.tsx';
 import { CHANNEL_LABELS, useOnlineConfig } from './online.ts';
 import type { Order } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
@@ -44,7 +45,7 @@ export function Ods() {
   }, [notify]);
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 15_000); return () => clearInterval(t); }, []); // countdowns
 
-  const channels = online ? (Object.keys(CHANNEL_LABELS) as Array<keyof typeof CHANNEL_LABELS>).filter((c) => online.channels[c]).map((c) => CHANNEL_LABELS[c]) : [];
+  const channels = online ? (Object.keys(CHANNEL_LABELS) as Array<keyof typeof CHANNEL_LABELS>).filter((c) => online.channels[c]) : [];
   const link = view?.link;
   const conn = !link ? 'Loading…' : !link.paired ? 'Not connected to an order hub' : link.state === 'connected' ? `Connected to the order hub${link.store ? ` (${link.store.name})` : ''}` : link.state === 'retrying' ? `Reconnecting… ${link.lastError ?? ''}` : 'Connecting…';
   const done = (view?.orders ?? []).filter((o) => DONE.includes(o.state)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12);
@@ -55,7 +56,7 @@ export function Ods() {
         <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${link?.state === 'connected' && live ? 'bg-veg/15 text-veg' : 'bg-destructive/10 text-destructive'}`}>
           {link?.state === 'connected' && live ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}{conn}
         </span>
-        {channels.map((c) => <span key={c} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary">{c}</span>)}
+        {channels.map((c) => <ChannelBadge key={c} channel={c} />)}
         <button className="btn-ghost ml-auto h-9" onClick={() => { const v = !sound; setSound(v); setSoundOn(v); }} aria-label={sound ? 'Sound on' : 'Sound off'}>
           {sound ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}{sound ? 'Sound on' : 'Sound off'}
         </button>
@@ -80,7 +81,7 @@ export function Ods() {
           <ul className="divide-y divide-border text-sm">
             {done.map((o) => (
               <li key={o.id} className="flex flex-wrap items-center gap-2 py-2">
-                <b>{o.number}</b><span className="text-muted-foreground">{DONE_LABEL[o.state]}</span>
+                <ChannelBadge channel={o.order.channel} /><b>{o.number}</b><span className="text-muted-foreground">{DONE_LABEL[o.state]}</span>
                 {o.billNo && <span className="text-xs text-muted-foreground">Bill {o.billNo}</span>}
                 <span className="ml-auto tabular-nums">{money.formatPaise(o.billTotal ?? o.order.total)}</span>
                 {o.alert && <AlertActions o={o} />}
@@ -109,7 +110,7 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
     <article className={`rounded-xl border p-3 text-sm ${isNew ? 'border-primary bg-accent/40' : 'border-border bg-background'}`} aria-label={`Order ${o.number}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <b className="text-base">{o.number}</b>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{CHANNEL_LABELS[d.channel as keyof typeof CHANNEL_LABELS] ?? d.channel}</span>
+        <ChannelBadge channel={d.channel} size="md" />
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{d.fulfilment === 'DELIVERY' ? `Delivery${d.distanceKm !== null ? ` · ${d.distanceKm} km` : ''}` : 'Pickup'}</span>
         <span className="ml-auto text-xs text-muted-foreground">{ago(d.placedAt)}</span>
       </div>

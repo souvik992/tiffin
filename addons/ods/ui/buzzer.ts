@@ -5,21 +5,22 @@ import { useSyncExternalStore } from 'react';
 import { BASE, host } from './host.ts';
 
 export interface WaitingOrder { id: string; number: string }
-interface Snapshot { waiting: WaitingOrder[]; silenced: boolean; soundOn: boolean }
+interface Snapshot { waiting: WaitingOrder[]; silenced: boolean; soundOn: boolean; /** Connected to the order hub (null until the feed answers). */ connected: boolean | null }
 
 const RING_EVERY_MS = 3000;
 let started = false;
 let waiting: WaitingOrder[] = [];
 let known = new Set<string>();
 const silencedIds = new Set<string>();
-let snapshot: Snapshot = { waiting: [], silenced: false, soundOn: true };
+let connected: boolean | null = null;
+let snapshot: Snapshot = { waiting: [], silenced: false, soundOn: true, connected: null };
 const subs = new Set<() => void>();
 let ctx: AudioContext | null = null;
 
 export const soundOn = (): boolean => { try { return localStorage.getItem('ods.sound') !== 'off'; } catch { return true; } };
 const loud = () => waiting.some((w) => !silencedIds.has(w.id));
 function emit() {
-  snapshot = { waiting, silenced: waiting.length > 0 && !loud(), soundOn: soundOn() };
+  snapshot = { waiting, silenced: waiting.length > 0 && !loud(), soundOn: soundOn(), connected };
   subs.forEach((f) => f());
 }
 
@@ -64,6 +65,7 @@ export function startBuzzer(): void {
   started = true;
   host.stream(`${BASE}/events`, (type, data) => {
     if (type !== 'ods') return;
+    connected = (data as { link?: { state?: string } }).link?.state === 'connected';
     const orders = (data as { orders?: Array<{ id: string; number: string; state: string; billInvoiceId: string | null }> }).orders ?? [];
     waiting = orders.filter((o) => (o.state === 'SENT_TO_STORE' || o.state === 'RECEIVED') && !o.billInvoiceId).map((o) => ({ id: o.id, number: o.number }));
     const ids = new Set(waiting.map((w) => w.id));
@@ -72,7 +74,7 @@ export function startBuzzer(): void {
     known = ids;
     emit();
     if (arrived) tick(); // ring at once, then every few seconds
-  });
+  }, (live) => { if (!live) { connected = false; emit(); } }); // the feed itself dropped: not connected
   setInterval(tick, RING_EVERY_MS);
 }
 

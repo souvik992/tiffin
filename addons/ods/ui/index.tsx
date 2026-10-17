@@ -20,12 +20,16 @@ function StatusDot() {
   const online = useOnlineConfig();
   const on = online?.enabled === true;
   useEffect(() => { if (on) startBuzzer(); }, [on]);
+  const { connected } = useBuzzer();
+  const green = on && connected === true;
+  const label = !on ? 'Offline mode: online orders are off' : connected === true ? 'Online orders on: connected' : connected === null ? 'Online orders on: connecting…' : 'Online orders on, but not connected to the order hub';
   return (
     <>
-      <span className="group relative mb-1 flex h-8 w-8 items-center justify-center" tabIndex={0} aria-label={on ? 'Online orders on' : 'Offline mode'}>
-        <span className={`h-2.5 w-2.5 rounded-full ${on ? 'bg-veg' : 'bg-muted-foreground/40'}`} />
-        <span aria-hidden className="rail-tip">{on ? 'Online orders on' : 'Offline mode: no internet needed'}</span>
-      </span>
+      <a href={on ? '#/ods' : '#/settings'} className="group relative mb-1 flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-primary" aria-label={label}>
+        <Globe className="h-5 w-5" />
+        <span className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-card ${green ? 'bg-veg' : 'bg-destructive'}`} />
+        <span aria-hidden className="rail-tip">{label}</span>
+      </a>
       {on && <OrderAlert />}
     </>
   );
