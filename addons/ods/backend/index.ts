@@ -10,7 +10,7 @@ import { makePlaces } from './places.ts';
 import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
-import { MIGRATIONS, apiKeysView, readFeeTaxGroup, saveFeeTaxGroup, saveGoogleKey } from './store.ts';
+import { MIGRATIONS, apiKeysView, readFeeTaxGroup, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
 export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: ConnectorOptions } = {}): Connector {
@@ -44,6 +44,16 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     conn.refresh();
     return { ...saved, feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution(host) };
   });
+  // ---- menu sync per sales channel
+  host.route('GET', '/menu-sync', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { channels: readMenuSync(host), publishedAt: readPublishedAt(host), hub: conn.link().paired }; });
+  host.route('PUT', '/menu-sync', {}, (c) => { const b = body(c); const r = saveMenuSync(host, c.actor, b.channel, b); conn.refresh(); return { channels: r, publishedAt: readPublishedAt(host), hub: conn.link().paired }; });
+  host.route('POST', '/menu-sync/now', {}, async (c) => {
+    host.assertPerm(c.actor, 'settings.write');
+    if (!conn.link().paired) throw new host.AppError('NOT_CONNECTED', 'Connect this POS to the order hub first (Order hub, above).', 409);
+    try { await conn.publish(true); } catch (e) { throw new host.AppError('SYNC_FAILED', `The menu could not be sent: ${(e as Error).message}. Check the internet connection.`, 503); }
+    return { publishedAt: readPublishedAt(host) };
+  });
+
   // ---- API keys (owner only; the keys never leave the POS backend)
   host.route('GET', '/api-keys', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return apiKeysView(host); });
   host.route('PUT', '/api-keys', {}, (c) => { const b = body(c); if ('google' in b) saveGoogleKey(host, c.actor, b.google); return apiKeysView(host); });

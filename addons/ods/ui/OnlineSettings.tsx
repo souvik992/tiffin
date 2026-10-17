@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Globe, Link2, WifiOff } from 'lucide-react';
+import { Globe, Link2, Settings2, WifiOff } from 'lucide-react';
+import { MenuSyncDialog } from './MenuSync.tsx';
+import { ChannelBadge } from './channels.tsx';
 import { BASE, host } from './host.ts';
 import { CHANNEL_LABELS, setOnlineConfig, useOnlineConfig } from './online.ts';
 import type { OnlineConfig, OnlineSettingsInput } from './online.ts';
@@ -46,6 +48,7 @@ export function OnlineSettings() {
   const [draft, setDraft] = useState<OnlineSettingsInput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState<Channel | null>(null);
   useEffect(() => { if (saved && !draft) setDraft(inputOf(saved)); }, [saved, draft]);
   useEffect(() => { setError(null); }, [draft]); // an old message goes away as soon as something changes
   if (!draft || !saved) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -90,6 +93,10 @@ export function OnlineSettings() {
               <div className="divide-y divide-border">
                 {(Object.keys(CHANNEL_LABELS) as Channel[]).map((c) => (
                   <Row key={c} title={CHANNEL_LABELS[c]} hint={HINTS[c]}>
+                    <ChannelBadge channel={c} />
+                    <button type="button" className="btn-ghost h-9 px-3" onClick={() => setSyncing(c)} aria-label={`${CHANNEL_LABELS[c]} menu sync settings`} title="Menu sync: items and prices for this channel">
+                      <Settings2 className="h-4 w-4" />Menu sync
+                    </button>
                     <Toggle on={draft.channels[c]} disabled={!isOwner} label={CHANNEL_LABELS[c]} onChange={(v) => set({ channels: { ...draft.channels, [c]: v } })} />
                   </Row>
                 ))}
@@ -151,6 +158,7 @@ export function OnlineSettings() {
         <p className="rounded-xl border border-border bg-background p-3 text-xs text-muted-foreground">
           App and website orders arrive through the order hub. Swiggy and Zomato also need this store to be onboarded with them as an integration partner (not built yet).
         </p>
+        {syncing && <MenuSyncDialog channel={syncing} readOnly={!isOwner} onClose={() => setSyncing(null)} />}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {isOwner ? (
           <div className="flex gap-2">

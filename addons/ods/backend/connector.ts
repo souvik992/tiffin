@@ -4,11 +4,13 @@ import type { Actor } from '../../../src/services/ctx.ts';
 import type { HostApi } from '../../../src/addons/host.ts';
 import type { Order, PosEvent, RejectReason, Rider } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
-import { priceOrder } from '../../../contract/src/menu.ts';
+import { priceOrder , channelPrice } from '../../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../../contract/src/menu.ts';
 import { quote } from '../../../contract/src/serviceability.ts';
 import { readOnlineConfig } from './onlineConfig.ts';
 import { readServiceability } from './serviceability.ts';
+import { listsItem, readMenuSync, savePublishedAt, SYNC_CHANNELS } from './store.ts';
+import type { MenuSync, SyncChannel } from './store.ts';
 import { enqueue, getOrder, listOrders, outboxDone, outboxFailed, pendingOutbox, readFeeTaxGroup, saveOrder, setState } from './store.ts';
 import type { LocalOrder } from './store.ts';
 
@@ -27,6 +29,15 @@ export interface ConnectorOptions { fetcher?: typeof fetch; retryMs?: number[]; 
 export interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: ConnState; lastError: string | null; lastEventAt: number | null; accepting: boolean }
 
 const CHANNEL: Record<Order['channel'], 'APP' | 'WEBSITE' | 'SWIGGY' | 'ZOMATO'> = { app: 'APP', website: 'WEBSITE', swiggy: 'SWIGGY', zomato: 'ZOMATO' };
+
+/** Each item gets the channels that list it (only channels switched on); the hub shows a channel only its items. */
+export function withChannels<T extends { id: string; price: number }>(items: T[], on: Record<SyncChannel, boolean>, sync: MenuSync): Array<T & { channels: SyncChannel[]; prices?: Partial<Record<SyncChannel, number>> }> {
+  return items.map((i) => {
+    const channels = SYNC_CHANNELS.filter((c) => on[c] && listsItem(sync[c], i.id));
+    const own = channels.filter((c) => sync[c].pricing === 'custom').map((c) => [c, channelPrice(i.id, i.price, sync[c])] as const).filter(([, p]) => p !== i.price);
+    return { ...i, channels, ...(own.length ? { prices: Object.fromEntries(own) } : {}) };
+  });
+}
 
 export class Connector {
   host: HostApi;
@@ -224,7 +235,7 @@ export class Connector {
     const outlet = this.host.db.get<{ name: string }>('SELECT name FROM outlet LIMIT 1');
     const { updatedAt: _u, ...serviceability } = svc;
     const body: Omit<PublishedMenu, 'version'> = {
-      storeName: outlet?.name ?? 'Store', categories: m.categories, items: m.items, modifierGroups: m.modifierGroups, roundToRupee: m.roundToRupee,
+      storeName: outlet?.name ?? 'Store', categories: m.categories, items: withChannels(m.items, cfg.channels, readMenuSync(this.host)), modifierGroups: m.modifierGroups, roundToRupee: m.roundToRupee,
       feeTax: t ? { rateBp: t.rateBp, cessBp: t.cessBp, priceIncludesTax: t.priceIncludesTax } : null,
       options: { acceptMode: cfg.acceptMode, acceptTimeoutMin: cfg.acceptTimeoutMin, channels: cfg.channels, fulfilment: cfg.fulfilment, payments: cfg.payments },
       serviceability,
@@ -236,6 +247,7 @@ export class Connector {
       if (!r.ok) throw new Error(`publishing the menu failed (${r.status})`);
       this.host.setSetting(MENU_VER, String(version));
       this.host.setSetting(MENU_HASH, hash);
+      savePublishedAt(this.host, Date.now());
     }
     await this.syncImages(m.items);
     const actor = this.host.billing.shiftActor(this.host.ctx);
@@ -300,12 +312,21 @@ export class Connector {
   orders() { return listOrders(this.host); }
 
   /** The POS's own price for the order now (menu and serviceability on this POS). Differs from the customer's total only if something changed since the order was placed (F5). */
+  /** The channel's own price for an item when that channel does not use the POS price (worked out here from POS settings). */
+  private billPrice(channel: string, itemId: string): { channelPrice?: number } {
+    const sync = readMenuSync(this.host)[channel as SyncChannel];
+    if (!sync || sync.pricing !== 'custom') return {};
+    const item = this.host.billing.menu(this.host.ctx).items.find((i) => i.id === itemId);
+    return item ? { channelPrice: channelPrice(item.id, item.price, sync) } : {};
+  }
+
   posPrice(o: Order): { total: number; deliveryFee: number; packagingFee: number; differs: boolean; problem: string | null } {
     const m = this.host.billing.menu(this.host.ctx);
     const svc = readServiceability(this.host);
     const feeGroup = readFeeTaxGroup(this.host);
     const t = feeGroup ? m.taxGroups.find((g) => g.id === feeGroup) : null;
-    const menu = { items: m.items, modifierGroups: m.modifierGroups as PublishedMenu['modifierGroups'], roundToRupee: m.roundToRupee, feeTax: t ? { rateBp: t.rateBp, cessBp: t.cessBp, priceIncludesTax: t.priceIncludesTax } : null };
+    const sync = readMenuSync(this.host)[o.channel as SyncChannel];
+    const menu = { items: sync ? m.items.map((i) => ({ ...i, price: channelPrice(i.id, i.price, sync) })) : m.items, modifierGroups: m.modifierGroups as PublishedMenu['modifierGroups'], roundToRupee: m.roundToRupee, feeTax: t ? { rateBp: t.rateBp, cessBp: t.cessBp, priceIncludesTax: t.priceIncludesTax } : null };
     const cart = o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((x) => x.id), note: l.note }));
     const items = priceOrder(menu, cart);
     if (!items.ok) return { total: o.total, deliveryFee: o.deliveryFee, packagingFee: o.packagingFee, differs: true, problem: items.message };
@@ -336,7 +357,7 @@ export class Connector {
     const bill = this.host.billing.bill(this.host.ctx, actor, `ods-${requestId}`.slice(0, 120), {
       channel: CHANNEL[o.channel], externalId: o.number, customerPhone: o.customer.mobile, customerName: o.customer.name?.slice(0, 60) ?? null,
       note: `${o.number} ${o.fulfilment === 'DELIVERY' ? 'DELIVERY' : 'PICKUP'} ${who}${o.customer.mobile}${addr}${o.note ? ` | ${o.note}` : ''}`.slice(0, 300),
-      lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note })),
+      lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note, ...this.billPrice(o.channel, l.itemId) })),
       fees: { delivery: price.deliveryFee, packaging: price.packagingFee, taxGroupId: readFeeTaxGroup(this.host) },
       paymentMode: o.payment === 'COD' ? 'CASH' : 'UPI',
     });

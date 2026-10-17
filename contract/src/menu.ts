@@ -2,6 +2,7 @@
 // Pricing uses the POS's own tax calculation (src/core/tax.ts, pure) on the same lines the POS will bill (items merged the
 // way the POS merges them, then the delivery and packaging fee lines), so the customer's total equals the POS bill.
 import { computeInvoice } from '../../src/core/tax.ts';
+import { mulDivRound } from '../../src/core/money.ts';
 import type { TaxableLineInput } from '../../src/core/tax.ts';
 import type { OrderLine } from './types.ts';
 import type { ServiceabilityConfig } from './serviceability.ts';
@@ -11,6 +12,25 @@ export interface MenuItem {
   rateBp: number; cessBp: number; priceIncludesTax: boolean; modifierGroupIds: string[]; available: boolean;
   /** The item's photo: "<sha256 of the bytes>.<jpg|png|webp>"; the hub serves it at /v1/stores/<slug>/images/<image>. */
   image?: string | null;
+  /** A short description for the online menu. */
+  description?: string | null;
+  /** The sales channels that list this item (menu sync per channel). Missing: every channel. */
+  channels?: Array<'app' | 'website' | 'swiggy' | 'zomato'>;
+  /** A channel's own price for this item (paise) when the channel does not use the POS price. */
+  prices?: Partial<Record<'app' | 'website' | 'swiggy' | 'zomato', number>>;
+}
+
+/** How a channel prices the menu: the POS price, or the POS price plus a percentage (to whole rupees) with per-item prices. */
+export interface ChannelPricing { pricing: 'same' | 'custom'; markupBp: number; prices: Record<string, number> }
+
+/** An item's price on a channel (paise). One rule for the POS (its bill) and the hub (the customer's total). */
+export function channelPrice(itemId: string, posPrice: number, p: ChannelPricing): number {
+  if (p.pricing !== 'custom') return posPrice;
+  const own = p.prices[itemId];
+  if (Number.isSafeInteger(own) && own! >= 0) return own!;
+  if (!p.markupBp) return posPrice;
+  const raised = mulDivRound(posPrice, 10000 + p.markupBp, 10000);
+  return Math.max(0, raised + 50 - ((raised + 50) % 100)); // to the nearest rupee
 }
 export interface MenuModifierGroup { id: string; name: string; minSelect: number; maxSelect: number; modifiers: Array<{ id: string; name: string; price: number }> }
 export interface StoreOptions {

@@ -122,10 +122,10 @@ test('the add-on registers its routes under /api/addons/ods', async () => {
     register(host);
     stops.push(...sink.stops);
     assert.deepEqual(sink.routes.map((r) => `${r.method} ${r.path}`).sort(), [
-      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/api-keys', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/geocode/place', 'GET /api/addons/ods/hub',
+      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/api-keys', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/geocode/place', 'GET /api/addons/ods/hub', 'GET /api/addons/ods/menu-sync',
       'GET /api/addons/ods/orders', 'GET /api/addons/ods/serviceability', 'GET /api/addons/ods/tax-groups', 'GET /api/addons/ods/tiles/:z/:x/:y',
-      'POST /api/addons/ods/api-keys/test', 'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
-      'PUT /api/addons/ods/api-keys', 'PUT /api/addons/ods/config', 'PUT /api/addons/ods/serviceability',
+      'POST /api/addons/ods/api-keys/test', 'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/menu-sync/now', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
+      'PUT /api/addons/ods/api-keys', 'PUT /api/addons/ods/config', 'PUT /api/addons/ods/menu-sync', 'PUT /api/addons/ods/serviceability',
     ]);
     assert.equal(sink.routes.find((r) => r.path.endsWith('/tiles/:z/:x/:y'))!.opts.auth, false);
   } finally { for (const s of stops) await s(); env.cleanup(); }

@@ -2,6 +2,7 @@ import type { HostApi } from '../../../src/addons/host.ts';
 import type { Actor } from '../../../src/services/ctx.ts';
 import type { Order } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
+import type { ChannelPricing } from '../../../contract/src/menu.ts';
 
 /** The add-on's own tables (prefix ods_, created by its numbered database steps) and small settings. */
 
@@ -82,3 +83,60 @@ export function saveGoogleKey(host: HostApi, actor: Actor, key: unknown) {
   host.setSetting(GOOGLE_KEY, k);
   host.audit(host.ctx, actor.userId, 'ods.api_key.set', 'settings', GOOGLE_KEY, { endsWith: k.slice(-4) }); // never the key itself
 }
+
+// ---- menu sync: which menu items each sales channel lists
+export type SyncChannel = 'app' | 'website' | 'swiggy' | 'zomato';
+export const SYNC_CHANNELS: SyncChannel[] = ['app', 'website', 'swiggy', 'zomato'];
+/** all = the whole menu; exclude = all but these items; include = only these items. */
+export interface ChannelSync extends ChannelPricing { mode: 'all' | 'exclude' | 'include'; items: string[] }
+export type MenuSync = Record<SyncChannel, ChannelSync>;
+const MENU_SYNC = 'ods_menu_sync', PUBLISHED_AT = 'ods_menu_published_at';
+const ALL: ChannelSync = { mode: 'all', items: [], pricing: 'same', markupBp: 0, prices: {} };
+
+export function readMenuSync(host: HostApi): MenuSync {
+  let saved: Partial<MenuSync> = {};
+  try { saved = JSON.parse(host.getSetting(MENU_SYNC) || '{}') as Partial<MenuSync>; } catch { /* defaults */ }
+  return Object.fromEntries(SYNC_CHANNELS.map((c) => {
+    const s = saved[c];
+    if (!s || !['all', 'exclude', 'include'].includes(s.mode) || !Array.isArray(s.items)) return [c, ALL];
+    const prices = Object.fromEntries(Object.entries(s.prices ?? {}).filter(([, v]) => Number.isSafeInteger(v) && v >= 0));
+    return [c, { mode: s.mode, items: s.items.filter((x) => typeof x === 'string'), pricing: s.pricing === 'custom' ? 'custom' : 'same', markupBp: Number.isSafeInteger(s.markupBp) ? s.markupBp : 0, prices }];
+  })) as MenuSync;
+}
+
+/** Saves one channel's choice. Items are checked against the menu; unknown ones are dropped. */
+export function saveMenuSync(host: HostApi, actor: Actor, channel: unknown, input: { mode?: unknown; items?: unknown; pricing?: unknown; markupBp?: unknown; prices?: unknown }): MenuSync {
+  host.assertPerm(actor, 'settings.write');
+  if (!SYNC_CHANNELS.includes(channel as SyncChannel)) throw new host.AppError('VALIDATION', 'Unknown sales channel.');
+  const mode = input.mode;
+  if (mode !== 'all' && mode !== 'exclude' && mode !== 'include') throw new host.AppError('VALIDATION', 'Choose all items, all except some, or only some.');
+  const want = Array.isArray(input.items) ? [...new Set(input.items.filter((x): x is string => typeof x === 'string'))] : [];
+  if (want.length > 5000) throw new host.AppError('VALIDATION', 'Too many items selected.');
+  const known = new Set(host.billing.menu(host.ctx).items.map((i) => i.id));
+  const items = mode === 'all' ? [] : want.filter((id) => known.has(id));
+  if (mode === 'include' && items.length === 0) throw new host.AppError('VALIDATION', 'Choose at least one item to list, or list all items.');
+  const pricing = input.pricing === 'custom' ? 'custom' : 'same';
+  const markupBp = pricing === 'custom' && input.markupBp !== undefined ? Number(input.markupBp) : 0;
+  if (!Number.isSafeInteger(markupBp) || markupBp < -5000 || markupBp > 10000) throw new host.AppError('VALIDATION', 'The price change must be between -50% and +100%.');
+  const prices: Record<string, number> = {};
+  if (pricing === 'custom' && input.prices && typeof input.prices === 'object') {
+    for (const [id, v] of Object.entries(input.prices as Record<string, unknown>)) {
+      if (!known.has(id)) continue;
+      if (!Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > 100_000_000) throw new host.AppError('VALIDATION', 'A channel price is not a valid amount.');
+      prices[id] = v as number;
+    }
+  }
+  const all = readMenuSync(host);
+  all[channel as SyncChannel] = { mode, items, pricing, markupBp, prices };
+  host.setSetting(MENU_SYNC, JSON.stringify(all));
+  host.audit(host.ctx, actor.userId, 'ods.menu_sync', 'settings', String(channel), { mode, count: items.length, pricing, markupBp, ownPrices: Object.keys(prices).length });
+  return all;
+}
+
+/** Whether a channel lists an item. */
+export function listsItem(sync: ChannelSync, itemId: string): boolean {
+  return sync.mode === 'all' || (sync.mode === 'include' ? sync.items.includes(itemId) : !sync.items.includes(itemId));
+}
+
+export const readPublishedAt = (host: HostApi): number | null => Number(host.getSetting(PUBLISHED_AT)) || null;
+export const savePublishedAt = (host: HostApi, at: number) => host.setSetting(PUBLISHED_AT, String(at));

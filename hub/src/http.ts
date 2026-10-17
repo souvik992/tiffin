@@ -87,7 +87,7 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   });
 
   // ---- customer
-  add('GET', '/v1/stores/:slug', (c) => hub.storePublic(c.params.slug!), { cors: true });
+  add('GET', '/v1/stores/:slug', (c) => hub.storePublic(c.params.slug!, c.query.get('channel') === 'app' ? 'app' : 'website'), { cors: true });
   add('GET', '/v1/stores/:slug/images/:name', (c) => {
     const img = hub.image(c.params.slug!, c.params.name!);
     c.res.writeHead(200, { 'Content-Type': img.type, 'Content-Length': img.bytes.length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', ...CORS });

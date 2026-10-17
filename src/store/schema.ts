@@ -366,6 +366,11 @@ ALTER TABLE sale_order ADD COLUMN customer_name TEXT;
 `;
 
 // V8: staff sign in with their mobile number and PIN. Older users have none until the owner adds it.
+// V11: a short description per menu item (shown on the online menu: website, app, delivery apps).
+const V11 = `
+ALTER TABLE item ADD COLUMN description TEXT;
+`;
+
 // V10: printers on Android (USB through Android's USB host API, Bluetooth including the built-in printer of Sunmi-type
 // POS machines), reached through the Android app: printers gain an 'android' transport (address usb:vid:pid[:serial]
 // or bt:MAC). Same 12-step rebuild as V3/V4; printer still has no indexes, triggers or views.
@@ -414,5 +419,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 8, name: 'user_mobile', sql: V8 },
   { version: 9, name: 'coupons', sql: V9 },
   { version: 10, name: 'printer_android', sql: V10, foreignKeysOff: true },
+  { version: 11, name: 'item_description', sql: V11 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

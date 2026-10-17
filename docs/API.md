@@ -50,6 +50,7 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | GET `/api/addons/ods/api-keys`; PUT `{ google: key or null }` | O | `{ google: { set, hint } }` (never the key); null removes it |
 | POST `/api/addons/ods/api-keys/test` | O | `{ search: { ok, message }, map: { ok, message } }`; 409 in offline mode |
 | Serviceability also carries `roadFactor` (1.00-2.00) and `feeTaxGroupId` (GST group for fees) | | |
+| GET `/api/addons/ods/menu-sync` (M); PUT `{ channel, mode: all/exclude/include, items, pricing: same/custom, markupBp, prices }` (O); POST `/menu-sync/now` (O) | | menu sync per channel; `now` sends the menu to the hub at once (409 when not paired) |
 | GET `/api/addons/ods/tax-groups` | C | GST groups to choose for delivery/packaging fees |
 | GET `/api/addons/ods/hub` (C); POST `/hub/pair` `{ hubUrl, code }` (O); DELETE `/hub` (O) | | order hub link: `paired, hubUrl, store, state, lastError, accepting`; https only (http only for a hub on this PC) |
 | GET `/api/addons/ods/orders` (C); GET `/events` (C, SSE `event: ods`, data `{ link, orders }`) | | online orders kept on this POS, with `posPrice` for new ones; the ODS screen's live feed |

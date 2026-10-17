@@ -61,7 +61,7 @@ const files = {};
 rmSync(cssOut);
 for (const f of ['backend.cjs', 'ui.js']) files[f] = sha256hex(readFileSync(join(out, f)));
 const manifest = signManifest({
-  id: 'ods', name: 'ODS', version: pkg.version, minPosVersion: '0.3.0',
+  id: 'ods', name: 'ODS', version: pkg.version, minPosVersion: '0.3.4',
   description: 'Online orders settings, serviceability (delivery areas, fees, hours) and the ODS.',
   backend: 'backend.cjs', ui: 'ui.js', files,
 }, readFileSync(keyPath, 'utf8'));

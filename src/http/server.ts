@@ -82,7 +82,7 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('GET', '/api/catalog', {}, (c) => getCatalog(c.ctx));
   add('GET', '/api/items/search', {}, (c) => searchItems(c.ctx, c.query.get('q') ?? '', num(c.query, 'limit') ?? 30));
   add('GET', '/api/items/by-barcode/:code', {}, (c) => itemByBarcode(c.ctx, c.params.code!));
-  const itemShape = { name: str({ min: 1, max: 120 }), categoryId: opt(nullable(str({ max: 64 }))), shortName: opt(nullable(str({ max: 40 }))), sku: opt(nullable(str({ max: 40 }))), barcode: opt(nullable(str({ max: 40 }))), hsnCode: opt(nullable(str({ max: 8 }))), taxGroupId: str({ min: 1, max: 64 }), price: int({ min: 0 }), unit: opt(str({ max: 10 })), isVeg: opt(nullable(bool)), imageFile: opt(nullable(str({ max: 200 }))) };
+  const itemShape = { name: str({ min: 1, max: 120 }), categoryId: opt(nullable(str({ max: 64 }))), shortName: opt(nullable(str({ max: 40 }))), sku: opt(nullable(str({ max: 40 }))), barcode: opt(nullable(str({ max: 40 }))), hsnCode: opt(nullable(str({ max: 8 }))), taxGroupId: str({ min: 1, max: 64 }), price: int({ min: 0 }), unit: opt(str({ max: 10 })), isVeg: opt(nullable(bool)), imageFile: opt(nullable(str({ max: 200 }))), description: opt(nullable(str({ max: 300 }))) };
   add('POST', '/api/items', {}, (c) => createItem(c.ctx, c.actor, rid(c), body(c, obj(itemShape))));
   add('PATCH', '/api/items/:id', {}, (c) => updateItem(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ ...itemShape, name: opt(str({ min: 1, max: 120 })), taxGroupId: opt(str({ min: 1, max: 64 })), price: opt(int({ min: 0 })) }))));
   add('DELETE', '/api/items/:id', {}, (c) => deleteItem(c.ctx, c.actor, rid(c), c.params.id!));

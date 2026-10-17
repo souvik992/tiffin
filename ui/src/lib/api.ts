@@ -25,7 +25,7 @@ export interface ImportPreview {
 export interface TaxGroup { id: string; name: string; rateBp: number; cessBp: number; priceIncludesTax: number }
 export interface Item {
   id: string; categoryId: string | null; name: string; shortName: string | null; sku: string | null; barcode: string | null;
-  hsnCode: string | null; taxGroupId: string; price: number; unit: string; isVeg: number | null; imageFile: string | null; modifierGroupIds: string[];
+  hsnCode: string | null; taxGroupId: string; price: number; unit: string; isVeg: number | null; imageFile: string | null; description: string | null; modifierGroupIds: string[];
 }
 export interface Modifier { id: string; name: string; price: number }
 export interface ModifierGroup { id: string; name: string; minSelect: number; maxSelect: number; modifiers: Modifier[] }

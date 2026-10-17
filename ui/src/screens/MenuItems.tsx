@@ -163,6 +163,7 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
   const [food, setFood] = useState<FoodType>(item ? toFood(item.isVeg) : 'veg');
   const [unit, setUnit] = useState(item?.unit ?? 'pcs');
   const [shortName, setShortName] = useState(item?.shortName ?? '');
+  const [description, setDescription] = useState(item?.description ?? '');
   const [hsn, setHsn] = useState(item?.hsnCode ?? '');
   const [barcode, setBarcode] = useState(item?.barcode ?? '');
   const [more, setMore] = useState(!!(item?.shortName || item?.hsnCode || item?.barcode));
@@ -182,6 +183,7 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
     const input = {
       name: name.trim(), categoryId: categoryId || null, price: paise, taxGroupId, unit,
       isVeg: food === 'na' ? null : food === 'veg', shortName: shortName.trim() || null, hsnCode: hsn.trim() || null, barcode: barcode.trim() || null,
+      description: description.trim() || null,
     };
     try {
       const id = item ? (await api.updateItem(item.id, input, key.current), item.id) : (await api.createItem(input, key.current)).id;
@@ -214,6 +216,9 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
         <PhotoPicker name={name} current={item?.imageFile ?? null} value={photo} onChange={(p) => { setPhoto(p); photoKey.current = newKey(); }} />
         <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Item name</span>
           <input className="field" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </label>
+        <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Description <span className="font-normal text-muted-foreground">(optional, shown on the online menu)</span></span>
+          <textarea className="field min-h-16 py-2" maxLength={300} rows={2} placeholder="e.g. Crispy dosa with potato masala, chutney and sambar" value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
         <div>
           <span className="mb-1 block text-sm font-medium">Food type</span>

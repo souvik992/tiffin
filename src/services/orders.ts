@@ -193,7 +193,7 @@ export function createOrder(ctx: Ctx, actor: Actor, requestId: string, input: { 
   });
 }
 
-export interface AddLineInput { orderId: string; itemId: string; qtyMilli?: number; modifierIds?: string[]; note?: string | null }
+export interface AddLineInput { orderId: string; itemId: string; qtyMilli?: number; modifierIds?: string[]; note?: string | null; /** Online orders only (onlineBilling): the sales channel's item price instead of the menu price. HTTP refuses this field. */ channelPrice?: number }
 
 export function addLine(ctx: Ctx, actor: Actor, requestId: string, input: AddLineInput) {
   return cartCmd(ctx, requestId, 'order.add_line', actor, () => {
@@ -223,7 +223,8 @@ export function addLine(ctx: Ctx, actor: Actor, requestId: string, input: AddLin
     }
     picked.sort((a, b) => (a.id < b.id ? -1 : 1));
     const modsJson = JSON.stringify(picked.map((m) => ({ id: m.id, name: m.name, price: m.price })));
-    const unitPrice = item.price + picked.reduce((s, m) => s + m.price, 0);
+    if (input.channelPrice !== undefined && (!Number.isSafeInteger(input.channelPrice) || input.channelPrice < 0 || input.channelPrice > 100_000_000)) throw new AppError('VALIDATION', 'The channel price is not valid.');
+    const unitPrice = (input.channelPrice ?? item.price) + picked.reduce((s, m) => s + m.price, 0);
 
     const existing = get<{ id: string; qty_milli: number }>(ctx.db,
       `SELECT id, qty_milli FROM sale_order_line WHERE order_id = ? AND item_id = ? AND modifiers_json = ? AND ifnull(note,'') = ifnull(?, '')

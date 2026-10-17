@@ -13,7 +13,7 @@ import { createHubServer } from '../../../hub/src/http.ts';
 import { register } from '../backend/index.ts';
 import { saveOnlineConfig } from '../backend/onlineConfig.ts';
 import { saveServiceability } from '../backend/serviceability.ts';
-import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup } from '../backend/store.ts';
+import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup, saveMenuSync } from '../backend/store.ts';
 import { removeItemImage, setItemImage } from '../../../src/services/images.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 import type { Hours } from '../../../contract/src/serviceability.ts';
@@ -196,5 +196,43 @@ test('ODS connector: menu photos go to the hub once (checked against their conte
     removeItemImage(s.env.ctx, s.env.owner, rid(), s.burger);
     await s.conn.publish();
     assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 404);
+  } finally { await s.close(); }
+});
+
+test('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const id = (name: string) => get<{ id: string }>(s.env.ctx.db, 'SELECT id FROM item WHERE name = ?', name)!.id;
+    const brownie = id('Brownie');
+    s.env.ctx.db.prepare("UPDATE item SET description = 'Warm, with chocolate sauce' WHERE id = ?").run(brownie);
+    saveOnlineConfig(s.host, s.env.owner, rid(), { enabled: true, channels: { app: true, website: true, swiggy: false, zomato: false }, acceptMode: 'manual', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } });
+    // website: everything except the brownie; app: only burger and brownie, 10% dearer, brownie at its own price
+    saveMenuSync(s.host, s.env.owner, 'website', { mode: 'exclude', items: [brownie] });
+    saveMenuSync(s.host, s.env.owner, 'app', { mode: 'include', items: [s.burger, brownie], pricing: 'custom', markupBp: 1000, prices: { [brownie]: 9900 } });
+    assert.throws(() => saveMenuSync(s.host, s.env.manager, 'app', { mode: 'all' }), /permission|allowed|owner/i);
+    assert.throws(() => saveMenuSync(s.host, s.env.owner, 'app', { mode: 'include', items: [] }), /at least one/);
+    await s.conn.publish(true);
+    const web = (await s.call('GET', '/v1/stores/demo')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
+    const app = (await s.call('GET', '/v1/stores/demo?channel=app')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
+    assert.ok(!web.some((i) => i.id === brownie) && web.some((i) => i.id === s.burger));
+    assert.deepEqual(app.map((i) => [i.id, i.price]).sort(), [[brownie, 9900], [s.burger, 14200]].sort()); // 129 + 10% = 141.90 -> 142
+    assert.equal(app.find((i) => i.id === brownie)!.description, 'Warm, with chocolate sauce');
+    assert.ok(!('prices' in app[0]!) && !('channels' in app[0]!), 'customers see only their price');
+    // ordering the excluded brownie on the website is refused
+    const q = await s.call('POST', '/v1/stores/demo/quote', { fulfilment: 'PICKUP', lines: [{ itemId: brownie, qtyMilli: 1000 }] });
+    assert.equal(q.status, 409);
+    // an app order is priced and billed at the app price
+    const mobile = '9000000501';
+    const code = (await s.call('POST', '/v1/otp/send', { mobile })).json.devCode;
+    const { otpToken } = (await s.call('POST', '/v1/otp/verify', { mobile, otp: code })).json;
+    const lines = [{ itemId: s.burger, qtyMilli: 2000 }];
+    const aq = (await s.call('POST', '/v1/stores/demo/quote', { fulfilment: 'PICKUP', lines, channel: 'app' })).json;
+    assert.equal(aq.itemsTotal, 28400);
+    const placed = await s.call('POST', '/v1/stores/demo/orders', { fulfilment: 'PICKUP', payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, menuVersion: 1, expectedTotal: aq.total, channel: 'app' }, { 'idempotency-key': rid() });
+    assert.equal(placed.status, 201, JSON.stringify(placed.json));
+    await until(() => getOrder(s.host, placed.json.order.id) !== null, 'arrives');
+    const acc = s.conn.accept(s.env.cashier, placed.json.order.id, 10, rid());
+    assert.equal(acc.billTotal, aq.total, 'the GST bill equals what the app customer pays');
   } finally { await s.close(); }
 });

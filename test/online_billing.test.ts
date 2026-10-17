@@ -63,3 +63,24 @@ test('the online menu lists what customers may order: prices, GST, veg, availabi
     assert.ok(m.taxGroups.some((t) => t.rateBp === 500));
   } finally { env.cleanup(); }
 });
+
+test('a sales channel with its own prices: the online bill uses the channel price; screens cannot send a price', async () => {
+  const env = makeEnv(); try {
+    startShift(env);
+    const burger = itemId(env, 'Cheese Burger'); // Rs 129 on the POS menu
+    const r = billOnlineOrder(env.ctx, env.cashier, rid(), { channel: 'APP', externalId: 'A-7', lines: [{ itemId: burger, qtyMilli: 2000, channelPrice: 14900 }], fees: { delivery: 0, packaging: 0, taxGroupId: null }, paymentMode: 'CASH' } as never);
+    const line = get<{ unit_price: number; gross: number }>(env.ctx.db, 'SELECT unit_price, gross FROM invoice_line WHERE invoice_id = ?', r.invoiceId)!;
+    assert.deepEqual({ ...line }, { unit_price: 14900, gross: 29800 });
+    assert.equal(r.grandTotal, 29800);
+    assert.equal(code(() => billOnlineOrder(env.ctx, env.cashier, rid(), { channel: 'APP', externalId: 'A-8', lines: [{ itemId: burger, qtyMilli: 1000, channelPrice: -1 }], fees: { delivery: 0, packaging: 0, taxGroupId: null }, paymentMode: 'CASH' } as never)), 'VALIDATION');
+  } finally { env.cleanup(); }
+});
+
+test('channel prices: one rule for the POS and the hub (POS price, +percentage to the nearest rupee, or the item\'s own price)', async () => {
+  const { channelPrice } = await import('../contract/src/menu.ts');
+  assert.equal(channelPrice('a', 12900, { pricing: 'same', markupBp: 1500, prices: { a: 1 } }), 12900);
+  assert.equal(channelPrice('a', 12900, { pricing: 'custom', markupBp: 1500, prices: {} }), 14800); // 148.35 -> 148
+  assert.equal(channelPrice('a', 12900, { pricing: 'custom', markupBp: 1000, prices: {} }), 14200); // 141.90 -> 142
+  assert.equal(channelPrice('a', 12900, { pricing: 'custom', markupBp: 1500, prices: { a: 15900 } }), 15900);
+  assert.equal(channelPrice('b', 9900, { pricing: 'custom', markupBp: 0, prices: { a: 15900 } }), 9900);
+});

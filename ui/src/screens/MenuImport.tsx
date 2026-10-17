@@ -71,7 +71,7 @@ export function MenuImport({ canEdit, reload, onDone }: { canEdit: boolean; relo
     <div className="space-y-5">
       <ol className="grid gap-3 md:grid-cols-3">
         <Step n={1} title="Get the template">
-          <p>Columns: name, category, price in rupees, tax_percent, hsn, barcode, unit, veg.</p>
+          <p>Columns: name, category, price in rupees, tax_percent, hsn, barcode, unit, veg, description (optional, shown on the online menu).</p>
           <p className="mt-1">veg: write <b>veg</b>, <b>non-veg</b>, or leave it empty for items that are not food.</p>
           <button className="btn-ghost mt-3" onClick={downloadTemplate}><Download className="h-4 w-4" />Download template</button>
         </Step>

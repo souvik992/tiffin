@@ -125,6 +125,10 @@ test('HTTP: rejects unauthenticated, malformed, oversized, cross-site and rebind
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: 'channel=OTHER', headers: { 'content-type': 'text/plain' } })).status, 415); // "simple" cross-site form posts are refused
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: { surprise: 1 } })).json.error.code, 'VALIDATION'); // unknown fields rejected
     assert.equal((await call('POST', '/api/orders', { token: cashier, body: { channel: 5 } })).status, 400);
+    // a screen cannot set an item's price (channel prices come only from online-order billing inside the backend)
+    const anyOrder = (await call('POST', '/api/orders', { token: cashier, body: {} })).json.order;
+    const anyItem = (await call('GET', '/api/catalog', { token: cashier })).json.items[0];
+    assert.equal((await call('POST', `/api/orders/${anyOrder.id}/lines`, { token: cashier, body: { itemId: anyItem.id, channelPrice: 1 } })).json.error.code, 'VALIDATION');
     assert.equal((await call('POST', '/api/auth/login', { body: { userId: 'x', pin: '1' } })).json.error.code, 'BAD_PIN');
     const byMobile = await call('POST', '/api/auth/login', { body: { mobile: '9000000003', pin: '1111' } }); // the demo cashier
     assert.equal(byMobile.json.user.name, 'Cashier');

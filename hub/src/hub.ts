@@ -111,6 +111,10 @@ export class Hub {
     return s;
   }
   private menu(s: StoreRow): PublishedMenu | null { return s.menu_json ? JSON.parse(s.menu_json) as PublishedMenu : null; }
+  /** The menu as one channel sells it (menu sync): items listed for that channel only. */
+  private forChannel(m: PublishedMenu, channel: 'app' | 'website'): PublishedMenu {
+    return { ...m, items: m.items.filter((i) => !i.channels || i.channels.includes(channel)).map((i) => ({ ...i, price: i.prices?.[channel] ?? i.price })) };
+  }
 
   // ---------------------------------------------------------------- what a POS publishes
 
@@ -193,15 +197,16 @@ export class Hub {
   }
 
   /** The store page for customer apps. */
-  storePublic(slug: string) {
+  storePublic(slug: string, channel: 'app' | 'website' = 'website') {
     const s = this.store({ slug });
-    const m = this.menu(s);
+    const full = this.menu(s);
+    const m = full ? this.forChannel(full, channel) : null;
     const a = this.availability(s, m);
     if (!m) return { slug: s.slug, name: s.name, open: false, reason: a.reason, menu: null };
     const sv = m.serviceability;
     return {
       slug: s.slug, name: s.name, open: a.open, reason: a.reason,
-      menu: { version: m.version, categories: m.categories, items: m.items.filter((i) => i.available).map(({ rateBp: _r, cessBp: _c, priceIncludesTax: _p, ...i }) => i), modifierGroups: m.modifierGroups },
+      menu: { version: m.version, categories: m.categories, items: m.items.filter((i) => i.available).map(({ rateBp: _r, cessBp: _c, priceIncludesTax: _p, channels: _ch, prices: _pr, ...i }) => i), modifierGroups: m.modifierGroups },
       fulfilment: m.options.fulfilment, payments: { cod: m.options.payments.cod, online: m.options.payments.online && Boolean(this.opts.onlinePayments) },
       delivery: { location: sv.location ? { lat: sv.location.lat, lng: sv.location.lng } : null, zones: sv.zones, packagingFee: sv.packagingFee },
       pickup: sv.pickup, hours: sv.hours, acceptMode: m.options.acceptMode,
@@ -209,11 +214,11 @@ export class Hub {
   }
 
   /** Prices a cart with fees (for the app before ordering, and when placing). */
-  async quote(slug: string, body: { fulfilment: 'PICKUP' | 'DELIVERY'; location?: { lat: number; lng: number } | null; lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }> }) {
+  async quote(slug: string, body: { fulfilment: 'PICKUP' | 'DELIVERY'; location?: { lat: number; lng: number } | null; lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }>; channel?: 'app' | 'website' }) {
     const s = this.store({ slug });
     const m = this.menu(s);
     if (!m) throw new HubError('STORE_CLOSED', 'This store is not taking online orders yet.', 409);
-    return this.priceWithFees(m, body);
+    return this.priceWithFees(this.forChannel(m, body.channel === 'app' ? 'app' : 'website'), body);
   }
 
   private async priceWithFees(m: PublishedMenu, body: { fulfilment: 'PICKUP' | 'DELIVERY'; location?: { lat: number; lng: number } | null; lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }> }) {
@@ -289,7 +294,7 @@ export class Hub {
     if (!a.open) throw new HubError(req.payment === 'ONLINE' && /payment/i.test(a.reason ?? '') ? 'PAYMENT_NOT_AVAILABLE' : 'STORE_CLOSED', a.reason!, 409);
     const verified = this.verifiedMobile(req.otpToken);
     if (req.payment === 'COD' && verified !== req.customer.mobile) throw new HubError('OTP_REQUIRED', 'Verify your mobile number with the OTP to pay cash on delivery.', 400);
-    const priced = await this.priceWithFees(m!, { fulfilment: req.fulfilment, location: req.location, lines: req.lines });
+    const priced = await this.priceWithFees(this.forChannel(m!, channel), { fulfilment: req.fulfilment, location: req.location, lines: req.lines });
     if (priced.total !== req.expectedTotal) throw new HubError('PRICE_CHANGED', `The total is now Rs ${(priced.total / 100).toFixed(2)}. Please check and order again.`, 409, { total: priced.total, menuVersion: priced.menuVersion });
 
     const now = this.now();

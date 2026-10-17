@@ -5,7 +5,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## What is where
 | Folder | What |
 |---|---|
-| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 10, `printer_android`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
+| `src/` | Backend. Zero runtime dependencies, Node 24 type stripping, `node:sqlite`, local HTTP API on 127.0.0.1.<br>Key parts: `core/` (money, GST, GSTIN), `store/schema.ts` (migrations; latest is 11, `item_description`), `services/` (commands, invoices, shifts, stock, reports, store) and `services/printing/` (ESC/POS, queue, transports, receipt designs). |
 | `ui/` | React 19 + Vite + Tailwind billing UI. Hash routes; sidebar: Billing, Menu creation (items, categories, bulk upload, bulk photos), Stock, Purchase, Orders, Reports, Settings (Store, Printer setup, Receipt, Coupons, Users for the owner); with the ODS add-on also ODS, Settings > Online orders and Serviceability. |
 | `desktop/` | Electron 44 Windows app. The backend runs in a utility process; the UI is on `app://pos`; `/api` is forwarded with a per-launch `X-POS-Secret`. NSIS per-user installer goes to `desktop/release/`. See `desktop/README.md`. |
 | `android/` | Standalone Android app (`android/README.md`): the same backend on Node 24 for Android (Termux nodejs-lts, pinned in `node-runtime.json`, renamed to lib*.so by `scripts/prepare.ts`), a gatekeeper (`backend/front.ts`, private cookie) and a Java WebView shell (`app/src/main/java/com/tiffinpos/pos/`: `PosBackend` starts Node, `PrinterBridge` USB/Bluetooth printers incl. Sunmi "InnerPrinter", `BackupCopier` USB/SD backup copies, `AddonInstaller` .tiffinaddon files, `PosService` foreground service; `window.PosAndroid` for downloads, print, backups, add-ons, used via `ui/src/lib/android.ts`). APKs per ABI: arm64-v8a, armeabi-v7a, x86_64. |
@@ -18,7 +18,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (187 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (189 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `hub/` | `npm run dev` (local hub + demo store, prints a pairing code), `npm start`, `npm run admin -- create-store|pairing-code|list|revoke-device`, `npm test`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |

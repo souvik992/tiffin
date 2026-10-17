@@ -9,7 +9,7 @@ import { parsePaise } from '../core/money.ts';
 
 const MAX_PRICE = 1_000_000_000; // Rs 1 crore per unit
 
-interface ItemRow { id: string; category_id: string | null; name: string; short_name: string | null; sku: string | null; barcode: string | null; hsn_code: string | null; tax_group_id: string; price: number; unit: string; is_veg: number | null; image_file: string | null; active: number; version: number; updated_at: number; deleted_at: number | null }
+interface ItemRow { id: string; category_id: string | null; name: string; short_name: string | null; sku: string | null; barcode: string | null; hsn_code: string | null; tax_group_id: string; price: number; unit: string; is_veg: number | null; image_file: string | null; description: string | null; active: number; version: number; updated_at: number; deleted_at: number | null }
 
 function fail(msg: string): never { throw new AppError('VALIDATION', msg); }
 function clean(s: unknown, label: string, max: number, required = true): string | null {
@@ -26,7 +26,7 @@ export function getCatalog(ctx: Ctx) {
       (SELECT count(*) FROM item i WHERE i.category_id = c.id AND i.deleted_at IS NULL) AS item_count
     FROM category c WHERE c.deleted_at IS NULL ORDER BY c.sort_order, c.name`));
   const taxGroups = camelAll(all(ctx.db, 'SELECT id, name, rate_bp, cess_bp, price_includes_tax FROM tax_group WHERE deleted_at IS NULL ORDER BY rate_bp'));
-  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
+  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
   const links = all<{ item_id: string; group_id: string }>(ctx.db, 'SELECT item_id, group_id FROM item_modifier_group');
   const byItem = new Map<string, string[]>();
   for (const l of links) byItem.set(l.item_id, [...(byItem.get(l.item_id) ?? []), l.group_id]);
@@ -127,7 +127,7 @@ export function createTaxGroup(ctx: Ctx, actor: Actor, requestId: string, input:
   });
 }
 
-export interface ItemInput { name: string; categoryId?: string | null; shortName?: string | null; sku?: string | null; barcode?: string | null; hsnCode?: string | null; taxGroupId: string; price: number; unit?: string; isVeg?: boolean | null; imageFile?: string | null }
+export interface ItemInput { name: string; categoryId?: string | null; shortName?: string | null; sku?: string | null; barcode?: string | null; hsnCode?: string | null; taxGroupId: string; price: number; unit?: string; isVeg?: boolean | null; imageFile?: string | null; description?: string | null }
 
 function checkItem(ctx: Ctx, i: ItemInput, selfId: string | null) {
   const name = clean(i.name, 'Item name', 120)!;
@@ -144,7 +144,9 @@ function checkItem(ctx: Ctx, i: ItemInput, selfId: string | null) {
     if (dup && dup.id !== selfId) throw new AppError('DUPLICATE_BARCODE', 'Another item already uses this barcode.', 409);
   }
   const unit = clean(i.unit ?? 'pcs', 'Unit', 10)!;
-  return { name, hsn, barcode, unit, shortName: clean(i.shortName, 'Short name', 40, false), sku: clean(i.sku, 'SKU', 40, false) };
+  const description = typeof i.description === 'string' && i.description.trim() ? i.description.trim().replace(/\s+/g, ' ') : null;
+  if (description && description.length > 300) fail('Description can be at most 300 characters.');
+  return { description, name, hsn, barcode, unit, shortName: clean(i.shortName, 'Short name', 40, false), sku: clean(i.sku, 'SKU', 40, false) };
 }
 
 export function createItem(ctx: Ctx, actor: Actor, requestId: string, input: ItemInput) {
@@ -152,9 +154,9 @@ export function createItem(ctx: Ctx, actor: Actor, requestId: string, input: Ite
     assertPerm(actor, 'catalog.write');
     const c = checkItem(ctx, input, null);
     const id = ctx.ids.next();
-    run(ctx.db, `INSERT INTO item(id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.categoryId ?? null, c.name, c.shortName, c.sku, c.barcode, c.hsn, input.taxGroupId, input.price, c.unit,
-      input.isVeg === undefined || input.isVeg === null ? null : input.isVeg ? 1 : 0, input.imageFile ?? null, ctx.clock.now());
+    run(ctx.db, `INSERT INTO item(id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.categoryId ?? null, c.name, c.shortName, c.sku, c.barcode, c.hsn, input.taxGroupId, input.price, c.unit,
+      input.isVeg === undefined || input.isVeg === null ? null : input.isVeg ? 1 : 0, input.imageFile ?? null, c.description, ctx.clock.now());
     audit(ctx, actor.userId, 'item.create', 'item', id, { name: c.name, price: input.price });
     emit(ctx, 'item', id, 'upsert', { id, name: c.name, price: input.price });
     return { id };
@@ -173,11 +175,12 @@ export function updateItem(ctx: Ctx, actor: Actor, requestId: string, id: string
       taxGroupId: input.taxGroupId ?? cur.tax_group_id, price: input.price ?? cur.price, unit: input.unit ?? cur.unit,
       isVeg: input.isVeg === undefined ? (cur.is_veg === null ? null : cur.is_veg === 1) : input.isVeg,
       imageFile: input.imageFile === undefined ? cur.image_file : input.imageFile,
+      description: input.description === undefined ? cur.description : input.description,
     };
     const c = checkItem(ctx, merged, id);
-    run(ctx.db, `UPDATE item SET category_id=?, name=?, short_name=?, sku=?, barcode=?, hsn_code=?, tax_group_id=?, price=?, unit=?, is_veg=?, image_file=?, version=version+1, updated_at=? WHERE id=?`,
+    run(ctx.db, `UPDATE item SET category_id=?, name=?, short_name=?, sku=?, barcode=?, hsn_code=?, tax_group_id=?, price=?, unit=?, is_veg=?, image_file=?, description=?, version=version+1, updated_at=? WHERE id=?`,
       merged.categoryId ?? null, c.name, c.shortName, c.sku, c.barcode, c.hsn, merged.taxGroupId, merged.price, c.unit,
-      merged.isVeg === null || merged.isVeg === undefined ? null : merged.isVeg ? 1 : 0, merged.imageFile ?? null, ctx.clock.now(), id);
+      merged.isVeg === null || merged.isVeg === undefined ? null : merged.isVeg ? 1 : 0, merged.imageFile ?? null, c.description, ctx.clock.now(), id);
     audit(ctx, actor.userId, 'item.update', 'item', id, { price: merged.price });
     emit(ctx, 'item', id, 'upsert', { id, name: c.name, price: merged.price });
     return { id };
@@ -255,7 +258,7 @@ export function parseCsv(text: string): string[][] {
 export interface CsvPreview {
   rows: number; errors: Array<{ row: number; message: string }>;
   /** category: the existing category's saved name, or the new one as first written; newCategory: it will be created. */
-  items: Array<{ name: string; category: string; newCategory: boolean; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null }>;
+  items: Array<{ name: string; category: string; newCategory: boolean; price: number; taxPercent: number; hsn: string | null; barcode: string | null; unit: string; isVeg: boolean | null; description: string | null }>;
   /** Categories the import will create, in file order. */
   newCategories: string[];
 }
@@ -326,7 +329,9 @@ export function previewItemsCsv(ctx: Ctx, csv: string): CsvPreview {
       const ck = categoryKey(written);
       const found = existing.get(ck);
       if (!found && !fresh.has(ck)) { fresh.set(ck, written); newCategories.push(written); }
-      items.push({ name, category: found ? found.name : fresh.get(ck)!, newCategory: !found, price, taxPercent, hsn, barcode, unit: v('unit') || 'pcs', isVeg });
+      const description = v('description').replace(/\s+/g, ' ') || null;
+      if (description && description.length > 300) throw new Error('description is too long (300 characters at most)');
+      items.push({ name, category: found ? found.name : fresh.get(ck)!, newCategory: !found, price, taxPercent, hsn, barcode, unit: v('unit') || 'pcs', isVeg, description });
     } catch (e) {
       errors.push({ row: n, message: (e as Error).message });
     }
@@ -358,8 +363,8 @@ export function importItemsCsv(ctx: Ctx, actor: Actor, requestId: string, csv: s
         else { const id = ctx.ids.next(); run(ctx.db, 'INSERT INTO tax_group(id, name, rate_bp, updated_at) VALUES (?,?,?,?)', id, `GST ${it.taxPercent / 100}%`, it.taxPercent, now); taxes.set(it.taxPercent, id); }
       }
       const id = ctx.ids.next();
-      run(ctx.db, 'INSERT INTO item(id, category_id, name, barcode, hsn_code, tax_group_id, price, unit, is_veg, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        id, cats.get(ck)!, it.name, it.barcode, it.hsn, taxes.get(it.taxPercent)!, it.price, it.unit, it.isVeg === null ? null : it.isVeg ? 1 : 0, now);
+      run(ctx.db, 'INSERT INTO item(id, category_id, name, barcode, hsn_code, tax_group_id, price, unit, is_veg, description, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        id, cats.get(ck)!, it.name, it.barcode, it.hsn, taxes.get(it.taxPercent)!, it.price, it.unit, it.isVeg === null ? null : it.isVeg ? 1 : 0, it.description, now);
       emit(ctx, 'item', id, 'upsert', { id, name: it.name, price: it.price });
     }
     audit(ctx, actor.userId, 'item.import_csv', 'item', undefined, { count: p.items.length });

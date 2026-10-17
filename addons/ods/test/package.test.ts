@@ -10,7 +10,7 @@ const silent = { info() {}, warn() {}, error() {} };
 
 test('the signed package (npm run build) loads in a real POS with its built-in trusted key, and its routes answer', { skip: !existsSync(join(DIST, 'ods', 'manifest.json')) && 'run npm run build first' }, async () => {
   const data = mkdtempSync(join(tmpdir(), 'pos-oo-'));
-  const b = await startBackend({ dataDir: data, port: 0, logger: silent, scheduleBackups: false, addonsDir: DIST, posVersion: '0.3.0' });
+  const b = await startBackend({ dataDir: data, port: 0, logger: silent, scheduleBackups: false, addonsDir: DIST, posVersion: '0.3.4' });
   const base = `http://127.0.0.1:${b.port}`;
   const call = async (method: string, path: string, o: { token?: string; body?: unknown } = {}) => {
     const r = await fetch(base + path, { method, headers: { ...(o.token ? { authorization: `Bearer ${o.token}` } : {}), ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(method !== 'GET' ? { 'idempotency-key': crypto.randomUUID() } : {}) }, body: o.body === undefined ? undefined : JSON.stringify(o.body) });

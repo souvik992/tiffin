@@ -24,7 +24,8 @@ export interface OnlineBillInput {
   customerPhone?: string | null;
   customerName?: string | null;
   note?: string | null;
-  lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null }>;
+  /** channelPrice: the channel's own item price (menu sync pricing), worked out by the add-on from POS settings. */
+  lines: Array<{ itemId: string; qtyMilli: number; modifierIds?: string[]; note?: string | null; channelPrice?: number }>;
   /** Fees computed by the POS from its serviceability settings; taxGroupId may be null only when both are 0. */
   fees: { delivery: number; packaging: number; taxGroupId: string | null };
   /** COD is collected as CASH by the store's rider or at pickup; online-paid orders arrive as UPI (phase 3: gateway). */
@@ -56,7 +57,7 @@ export function billOnlineOrder(ctx: Ctx, actor: Actor, requestId: string, input
   if (!draft) ctx.db.prepare('UPDATE sale_order SET external_id = ? WHERE id = ?').run(input.externalId, orderId);
   try {
     if (!draft || getCart(ctx, orderId).lines.length === 0) {
-      input.lines.forEach((l, i) => addLine(ctx, actor, `${requestId}:line:${i}`, { orderId, itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifierIds ?? [], note: l.note ?? null }));
+      input.lines.forEach((l, i) => addLine(ctx, actor, `${requestId}:line:${i}`, { orderId, itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifierIds ?? [], note: l.note ?? null, ...(l.channelPrice !== undefined ? { channelPrice: l.channelPrice } : {}) }));
       if (fees.delivery > 0) addFeeLine(ctx, actor, `${requestId}:fee:delivery`, { orderId, kind: 'delivery', amount: fees.delivery, taxGroupId: fees.taxGroupId! });
       if (fees.packaging > 0) addFeeLine(ctx, actor, `${requestId}:fee:packaging`, { orderId, kind: 'packaging', amount: fees.packaging, taxGroupId: fees.taxGroupId! });
     }
@@ -93,7 +94,7 @@ export function onlineMenu(ctx: Ctx) {
     return {
       id: String(i.id), categoryId: (i.categoryId as string | null) ?? null, name: String(i.name), price: Number(i.price), unit: String(i.unit),
       isVeg: i.isVeg === null || i.isVeg === undefined ? null : Boolean(i.isVeg), rateBp: t?.rateBp ?? 0, cessBp: t?.cessBp ?? 0, priceIncludesTax: (t?.priceIncludesTax ?? 1) === 1,
-      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: true, image: (i.imageFile as string | null) ?? null,
+      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: true, image: (i.imageFile as string | null) ?? null, description: (i.description as string | null) ?? null,
     };
   });
   const categories = (c.categories as Array<{ id: string; name: string; sortOrder: number }>).map((x) => ({ id: x.id, name: x.name, sort: x.sortOrder }));
