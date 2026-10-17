@@ -51,6 +51,7 @@ final class PosBackend {
                 env.put("POS_APP_TOKEN", token);
                 env.put("POS_PORT_FILE", portFile.getPath());
                 env.put("POS_APP_VERSION", versionName(ctx));
+                env.put("POS_ADDONS_DIR", AddonInstaller.dir(ctx).getPath()); // add-ons installed from a .tiffinaddon file
                 synchronized (PosBackend.class) { if (bridge == null) bridge = new PrinterBridge(ctx); }
                 env.put("POS_ANDROID_BRIDGE", bridge.start()); // USB and Bluetooth printers through this app
                 pb.directory(new File(appDir, "app"));
@@ -87,6 +88,15 @@ final class PosBackend {
     }
 
     static synchronized boolean running() { return process != null && process.isAlive(); }
+
+    /** Stops the backend and waits until it is gone (up to 8 s), so it can start again with new add-ons. */
+    static void stopAndWait() {
+        Process p;
+        synchronized (PosBackend.class) { p = process; }
+        stop();
+        if (p == null) return;
+        try { if (!p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly().waitFor(); } catch (InterruptedException ignored) { }
+    }
 
     /** Unpacks assets/pos (backend + UI) into files/pos-app/<fingerprint> unless that version is already there. */
     private static File unpack(Context ctx) throws IOException {

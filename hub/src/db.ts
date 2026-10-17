@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS otp (
   sends INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS otp_token (token_hash TEXT PRIMARY KEY, mobile TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS image (store_id TEXT NOT NULL REFERENCES store(id), name TEXT NOT NULL, type TEXT NOT NULL, bytes BLOB NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (store_id, name));
 `;
 
 export type Db = DatabaseSync;

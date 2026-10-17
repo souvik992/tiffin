@@ -48,7 +48,7 @@ export function Settings() {
     ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
     ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
-    ...(onAndroid() ? [['device', 'This device', Smartphone, 'Backup copies on a USB stick or SD card'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(onAndroid() ? [['device', 'This device', Smartphone, 'Backup copies on a USB stick or SD card, add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(user?.role === 'owner' ? [
       ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],

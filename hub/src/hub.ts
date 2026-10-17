@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
 import { exec, hash, many, one, openHubDb, tx } from './db.ts';
 import type { Db } from './db.ts';
 import { canTransition, label, needsRefund } from '../../contract/src/order.ts';
@@ -123,7 +123,38 @@ export class Hub {
     const cur = this.store({ id: dev.storeId });
     if (m.version < cur.menu_version) return { version: cur.menu_version, stale: true }; // an older publish arriving late
     exec(this.db, 'UPDATE store SET menu_json = ?, menu_version = ?, name = ? WHERE id = ?', JSON.stringify({ ...m, serviceability: svc.value }), m.version, String(m.storeName || cur.name).slice(0, 80), dev.storeId);
+    const keep = new Set(m.items.map((i) => i.image).filter((x): x is string => typeof x === 'string'));
+    for (const r of many<{ name: string }>(this.db, 'SELECT name FROM image WHERE store_id = ?', dev.storeId)) if (!keep.has(r.name)) exec(this.db, 'DELETE FROM image WHERE store_id = ? AND name = ?', dev.storeId, r.name);
     return { version: m.version, stale: false };
+  }
+
+  // ---------------------------------------------------------------- menu photos
+
+  /** Photos this store already has here (the POS sends only the missing ones). */
+  imageNames(dev: DeviceRef): string[] {
+    return many<{ name: string }>(this.db, 'SELECT name FROM image WHERE store_id = ?', dev.storeId).map((r) => r.name);
+  }
+
+  /** A menu photo from the POS. Its name is the SHA-256 of its bytes, so a wrong or damaged file is refused. */
+  putImage(dev: DeviceRef, name: string, dataBase64: unknown) {
+    const m = /^([0-9a-f]{64})\.(jpg|png|webp)$/.exec(name);
+    if (!m) throw new HubError('VALIDATION', 'Unknown photo name.');
+    if (typeof dataBase64 !== 'string' || dataBase64.length > 2_000_000) throw new HubError('TOO_LARGE', 'The photo is too large.', 413);
+    const bytes = Buffer.from(dataBase64, 'base64');
+    if (createHash('sha256').update(bytes).digest('hex') !== m[1]) throw new HubError('VALIDATION', 'The photo does not match its name.');
+    const kind = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'jpg' : bytes.readUInt32BE(0) === 0x89504e47 ? 'png' : bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP' ? 'webp' : null;
+    if (kind !== m[2]) throw new HubError('VALIDATION', 'This is not a JPG, PNG or WebP photo.');
+    if ((one<{ n: number }>(this.db, 'SELECT COUNT(*) AS n FROM image WHERE store_id = ?', dev.storeId)?.n ?? 0) >= 3000) throw new HubError('TOO_MANY', 'Too many photos for one store.', 409);
+    exec(this.db, 'INSERT OR IGNORE INTO image(store_id, name, type, bytes, created_at) VALUES (?,?,?,?,?)', dev.storeId, name, { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[kind], bytes, this.now());
+    return { ok: true };
+  }
+
+  /** A store's photo for the ordering page. */
+  image(slug: string, name: string): { type: string; bytes: Uint8Array } {
+    const s = this.store({ slug });
+    const r = one<{ type: string; bytes: Uint8Array }>(this.db, 'SELECT type, bytes FROM image WHERE store_id = ? AND name = ?', s.id, name);
+    if (!r) throw new HubError('NOT_FOUND', 'Photo not found.', 404);
+    return r;
   }
 
   setStatus(dev: DeviceRef, s: { accepting: boolean; reason?: string | null }) {

@@ -9,6 +9,8 @@ import type { ServiceabilityConfig } from './serviceability.ts';
 export interface MenuItem {
   id: string; categoryId: string | null; name: string; price: number; unit: string; isVeg: boolean | null;
   rateBp: number; cessBp: number; priceIncludesTax: boolean; modifierGroupIds: string[]; available: boolean;
+  /** The item's photo: "<sha256 of the bytes>.<jpg|png|webp>"; the hub serves it at /v1/stores/<slug>/images/<image>. */
+  image?: string | null;
 }
 export interface MenuModifierGroup { id: string; name: string; minSelect: number; maxSelect: number; modifiers: Array<{ id: string; name: string; price: number }> }
 export interface StoreOptions {

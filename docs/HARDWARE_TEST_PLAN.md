@@ -107,6 +107,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
 | Settings > API keys with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google map shows, "empire brookfield" suggests the right place, picking it moves the pin | |
 | Place search screen: suggestions appear while typing, arrow keys + Enter, pasted Google Maps coordinates and link | |
+| Online-order buzzer through the shop PC's speakers (and the Android machine's): loud enough at the counter, rings on the Billing screen, Silence works | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
 
 Done on the dev PC (2026-10-16, ODS 1.0.0): the built signed package in a POS backend (temp folder) with a hub on the same PC: pair, website order, live on the ODS in under 0.2 s, accept = GST bill with 5% GST fee lines, customer sees accepted + bill number, through to delivered; online orders could not be switched off while the order was open. The ODS installer installed into a temp folder, its copy loaded in a POS 0.3.0 and was switched off on POS 0.2.0, and it uninstalled cleanly. No printer was used; the ODS screen itself was not opened in Electron.
@@ -123,6 +124,7 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 | Sunmi built-in printer (Printer setup > Bluetooth > Built-in printer), a paired Bluetooth printer, a USB printer with an OTG cable (allow it once), a LAN printer on port 9100 | |
 | Settings > This device: choose a folder on a USB stick, Copy now, check TiffinPOS-backups on a PC; restore one on Windows | |
 | Reports: Download CSV (Download folder) and Print / PDF (Android print screen, Save as PDF) | |
+| Install the ODS add-on from a .tiffinaddon file (Settings > This device > Add-ons), turn on online orders, pair with the hub, receive an order with the app in the background | |
 | Leave the app in the background for an hour, come back: the POS still answers | |
 
 Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages). Node 24 runs; 177/184 backend tests pass (the 2 failures are timing on the slow emulator); the app starts the POS and shows the setup screen.

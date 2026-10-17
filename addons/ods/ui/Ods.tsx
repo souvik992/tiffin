@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-react';
 import { BASE, host } from './host.ts';
+import { setSoundOn } from './buzzer.ts';
 import { CHANNEL_LABELS, useOnlineConfig } from './online.ts';
 import type { Order } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
@@ -22,15 +23,6 @@ const DONE_LABEL: Partial<Record<OrderState, string>> = { DELIVERED: 'Delivered'
 const REASONS: Array<[string, string]> = [['ITEM_UNAVAILABLE', 'An item is not available'], ['TOO_BUSY', 'Too busy right now'], ['CLOSING', 'Closing soon'], ['OUT_OF_DELIVERY_AREA', 'Address too far'], ['OTHER', 'Other reason']];
 const PREP = [10, 15, 20, 30, 45, 60];
 
-/** A short beep for new orders (no sound file needed). */
-function beep() {
-  try {
-    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AC();
-    [0, 0.25].forEach((t) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.15); });
-    setTimeout(() => void ctx.close(), 800);
-  } catch { /* no sound available */ }
-}
 const ago = (ms: number) => { const m = Math.max(0, Math.round((Date.now() - ms) / 60_000)); return m < 1 ? 'just now' : `${m} min ago`; };
 
 /** ODS: online orders live, by stage. */
@@ -41,18 +33,12 @@ export function Ods() {
   const [live, setLive] = useState(false);
   const [sound, setSound] = useState(() => { try { return localStorage.getItem('ods.sound') !== 'off'; } catch { return true; } });
   const [, tick] = useState(0);
-  const seen = useRef<Set<string> | null>(null);
-  const soundRef = useRef(sound);
-  soundRef.current = sound;
 
   useEffect(() => {
     if (!host.stream) { notify('error', 'Update the POS to use the live ODS.'); return; }
     return host.stream(`${BASE}/events`, (type, data) => {
       if (type !== 'ods') return;
       const v = data as View;
-      const fresh = v.orders.filter((o) => (o.state === 'SENT_TO_STORE' || o.state === 'RECEIVED') && !o.billInvoiceId).map((o) => o.id);
-      if (seen.current && fresh.some((id) => !seen.current!.has(id)) && soundRef.current) beep();
-      seen.current = new Set(fresh);
       setView(v);
     }, setLive);
   }, [notify]);
@@ -70,7 +56,7 @@ export function Ods() {
           {link?.state === 'connected' && live ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}{conn}
         </span>
         {channels.map((c) => <span key={c} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-primary">{c}</span>)}
-        <button className="btn-ghost ml-auto h-9" onClick={() => { const v = !sound; setSound(v); try { localStorage.setItem('ods.sound', v ? 'on' : 'off'); } catch { /* ignore */ } if (v) beep(); }} aria-label={sound ? 'Sound on' : 'Sound off'}>
+        <button className="btn-ghost ml-auto h-9" onClick={() => { const v = !sound; setSound(v); setSoundOn(v); }} aria-label={sound ? 'Sound on' : 'Sound off'}>
           {sound ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}{sound ? 'Sound on' : 'Sound off'}
         </button>
       </div>

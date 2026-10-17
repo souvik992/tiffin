@@ -175,6 +175,8 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Phase 0 contract written: contract/ (order life cycle, data shapes, order checks, OpenAPI v1, event catalogue); waiting for owner sign-off
 - [x] Order hub (hub/): stores, POS pairing (one-use code, device key kept as a hash, revoke), menu and status from the POS, customer quote / OTP / place / track / cancel, live POS event stream (SSE, resumes after a drop), auto-reject when not accepted in time, idempotent orders, demo ordering page; see hub/README.md
 - [x] POS connection (ODS add-on): pairs with the hub, publishes menu, serviceability and "accepting" (= a shift is open), receives orders live, sends answers through an outbox that survives restarts and internet drops
+- [x] Online-order buzzer on every screen (ODS 1.0.2): rings loudly and repeats while an order waits to be accepted, with a "New online order" banner (Silence, Open ODS); stops on accept/reject; the ODS Sound switch controls it; the desktop app lets it ring without a tap first
+- [x] Menu photos sent to the hub (only missing ones, checked against their content name; removed with the item's photo); `image` on published menu items
 - [x] Live ODS screen: New / Preparing / Ready / On the way, sound on new orders, accept countdown, accept with preparation time (bill + KOT print at once), reject with reason, rider name and phone, delivered / collected, cancel with manager approval (cancels the bill)
 - [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
 - [x] GST on delivery and packaging fees: billed as fee lines with the GST rate chosen in Serviceability; the hub's price equals the POS bill (same GST code). **Needs CA confirmation of the rate**
@@ -216,6 +218,8 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Android printers: Bluetooth (paired) including the built-in printer of Sunmi-type machines ("InnerPrinter"), USB printers through Android's USB host API (asks once to allow), shown in Printer setup and plug-and-play; LAN printers as on Windows (database step 10, transport `android`)
 - [x] Android: downloads saved to the Download folder; Print / PDF through Android's print screen; backup copies to a USB stick or SD card (Settings > This device); foreground service keeps the POS running in the background
 - [x] Android release signing key (outside the repo) and signed release APKs; GitHub builds signed releases once the key secrets are added
-- [ ] Android: printers that need a vendor SDK (PAX, some iMin); the ODS add-on on Android
+- [x] Android add-ons: the ODS build also makes a `.tiffinaddon` file; Settings > This device > Add-ons > Install from file / Remove (owner); the POS checks signature and fingerprints as on Windows
+- [x] GitHub signed Android builds: `android/scripts/github-secrets.ts` prepares the four secrets (outside the repo)
+- [ ] Android: printers that need a vendor SDK (PAX, some iMin)
 - [ ] Android: printing on a real Bluetooth / USB / Sunmi built-in printer, and the backup copy to a real USB stick (emulator: the print reached the app's printer service, which answered correctly; folder picker needs a person)
 - [ ] Android: tried on a real POS machine (speed, printer, power cut during a bill)

@@ -20,6 +20,8 @@ A separately installed module for Tiffin POS (0.3.0 or newer). It adds:
   * Reject with a reason; rider name and phone; Delivered / Collected;
   * Cancel needs a manager and cancels the bill too;
   * warnings when the price changed since the customer ordered, or when the customer cancelled first ("Cancel bill").
+* **Buzzer on every screen** (`ui/buzzer.ts`): while an online order waits to be accepted, the POS rings (loud, repeating) and shows a "New online order" banner on any screen, with Silence and Open ODS. The ODS screen's Sound switch turns it on or off.
+* **Menu photos** go to the hub with the menu (only the missing ones).
 * **GST on delivery and packaging fees:** billed as fee lines at the GST rate chosen in Serviceability (your CA should confirm it).
 * Online orders cannot be switched off while an order is still open.
 

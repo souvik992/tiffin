@@ -54,6 +54,12 @@ npm run admin -- revoke-device <deviceId>                           # a lost or 
 
 A pairing code gives the POS a device key that the hub keeps only as a hash. A revoked device is refused at once.
 
+## Menu photos
+
+The POS sends each menu item's photo once (`GET /v1/pos/images` lists what the hub has; `PUT /v1/pos/images/<sha256>.<ext>`
+with `{ dataBase64 }`). The hub refuses a photo whose bytes do not match its name or are not JPG/PNG/WebP, and deletes
+photos that are no longer on the menu. Customers' pages load them from `/v1/stores/<slug>/images/<name>`.
+
 ## What the hub already handles
 
 - Orders placed while the shop's internet is down wait on the hub. The POS collects them when it reconnects.

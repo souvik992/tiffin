@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { sha256hex, signManifest } from '../../../src/addons/manifest.ts';
+import { zip } from './zip.mjs';
 
 const here = join(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'));
@@ -67,3 +68,9 @@ const manifest = signManifest({
 writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
 const kb = (f) => `${Math.round(readFileSync(join(out, f)).length / 1024)} KB`;
 console.log(`ODS ${pkg.version} built and signed: ${out} (backend ${kb('backend.cjs')}, ui ${kb('ui.js')})`);
+// the same signed files as one file for the Android app (Settings > This device > Add-ons > Install from file)
+const installers = join(here, '..', 'dist', 'installers');
+mkdirSync(installers, { recursive: true });
+const addonFile = join(installers, `TiffinPOS-ODS-${pkg.version}.tiffinaddon`);
+writeFileSync(addonFile, zip(['manifest.json', 'backend.cjs', 'ui.js'].map((n) => [n, readFileSync(join(out, n))])));
+console.log(`Android add-on file: ${addonFile}`);

@@ -21,7 +21,7 @@ import type { LocalOrder } from './store.ts';
  *  - bills accepted orders through the POS billing code (HostApi.billing): GST bill + kitchen ticket.
  */
 
-const KEY = 'ods_hub_key', URL_KEY = 'ods_hub_url', STORE = 'ods_hub_store', SEQ = 'ods_last_seq', MENU_HASH = 'ods_menu_hash', MENU_VER = 'ods_menu_version';
+const KEY = 'ods_hub_key', URL_KEY = 'ods_hub_url', STORE = 'ods_hub_store', SEQ = 'ods_last_seq', MENU_HASH = 'ods_menu_hash', MENU_VER = 'ods_menu_version', IMAGES_SIG = 'ods_images_sig';
 export type ConnState = 'off' | 'not-paired' | 'connecting' | 'connected' | 'retrying';
 export interface ConnectorOptions { fetcher?: typeof fetch; retryMs?: number[]; tickMs?: number; prepDefault?: number }
 export interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: ConnState; lastError: string | null; lastEventAt: number | null; accepting: boolean }
@@ -237,8 +237,29 @@ export class Connector {
       this.host.setSetting(MENU_VER, String(version));
       this.host.setSetting(MENU_HASH, hash);
     }
+    await this.syncImages(m.items);
     const actor = this.host.billing.shiftActor(this.host.ctx);
     await this.f(this.url('/v1/pos/status'), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify(actor ? { accepting: true } : { accepting: false, reason: 'The store is not taking orders right now.' }), signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** Menu photos: only the ones the hub does not have yet (each is checked there against its content-named file). */
+  private async syncImages(items: Array<{ image?: string | null }>) {
+    const readImage = (this.host.billing as { image?: (ctx: unknown, f: string) => { bytes: Buffer; type: string } | null }).image;
+    if (!readImage) return; // a POS older than 0.3.3 cannot give the photos
+    const want = [...new Set(items.map((i) => i.image).filter((x): x is string => typeof x === 'string'))];
+    const sig = createHash('sha256').update(want.join(',')).digest('hex');
+    if (sig === this.host.getSetting(IMAGES_SIG)) return;
+    const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) return;
+    const have = new Set(((await r.json()) as { names?: string[] }).names ?? []);
+    for (const name of want) {
+      if (have.has(name) || !this.running) continue;
+      const img = readImage(this.host.ctx, name);
+      if (!img) continue;
+      const up = await this.f(this.url(`/v1/pos/images/${encodeURIComponent(name)}`), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ dataBase64: img.bytes.toString('base64') }), signal: AbortSignal.timeout(30_000) });
+      if (!up.ok) return; // tried again on the next publish
+    }
+    this.host.setSetting(IMAGES_SIG, sig);
   }
 
   /** Sends waiting changes to the hub, in order. Network trouble: try again later. A refusal (409): resolved locally. */

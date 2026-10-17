@@ -62,6 +62,9 @@ npm run installer    # -> addons/dist/installers/TiffinPOS-ODS-Setup-<version>.e
 ```
 
 * The add-on installer needs the POS installer to have been built once in `desktop/`, for the icon and the NSIS tool.
+* **Android:** `npm run build` also writes `addons/dist/installers/TiffinPOS-ODS-<version>.tiffinaddon` (the three signed
+  files, zipped). In the Android app: Settings > This device > Add-ons > Install from file (owner). The app only unpacks
+  it into its `pos-addons` folder and restarts the POS; the loader checks signature, fingerprints and version as on Windows.
 * `npm run dev` in the repo root loads add-ons from `addons/dist/packages`.
 * Loader tests: `test/addons.test.ts` (signature, changed files, versions, failures, database steps).
 

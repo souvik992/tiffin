@@ -14,6 +14,7 @@ import { register } from '../backend/index.ts';
 import { saveOnlineConfig } from '../backend/onlineConfig.ts';
 import { saveServiceability } from '../backend/serviceability.ts';
 import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup } from '../backend/store.ts';
+import { removeItemImage, setItemImage } from '../../../src/services/images.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 import type { Hours } from '../../../contract/src/serviceability.ts';
 
@@ -61,7 +62,7 @@ async function setup() {
   };
   const hubState = (id: string) => (hub.db.prepare('SELECT state FROM orders WHERE id = ?').get(id) as { state: string }).state;
   const close = async () => { await conn.stop(); for (const s of sink.stops) await s(); await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); }); hub.close(); env.cleanup(); rmSync(dir, { recursive: true, force: true }); };
-  return { env, host, conn, hub, call, order, hubState, close, burger, sink };
+  return { env, host, conn, hub, call, order, hubState, close, burger, sink, base };
 }
 
 test('ODS connector: pairs, publishes, receives orders live, bills on accept (GST bill + KOT), and moves them through to collected', async () => {
@@ -170,4 +171,30 @@ test('ODS connector: a POS that stops right after billing sends the accept on re
     assert.equal(getOrder(s.host, o.order.id)!.billInvoiceId, acc.billInvoiceId, 'same bill');
     assert.equal((s.env.ctx.db.prepare("SELECT COUNT(*) AS n FROM sale_order WHERE external_id = ?").get(o.order.number) as { n: number }).n, 1, 'billed once');
   } finally { await second?.stop(); await s.close(); }
+});
+
+test('ODS connector: menu photos go to the hub once (checked against their content name) and show on the ordering page; removed photos go away', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
+    await s.conn.publish();
+    const page = (await s.call('GET', '/v1/stores/demo')).json;
+    assert.equal(page.menu.items.find((i: { id: string }) => i.id === s.burger).image, imageFile);
+    const r = await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), Buffer.from(PNG1, 'base64'));
+    // a file that does not match its name, or no device key, is refused
+    const key = s.host.getSetting('ods_hub_key');
+    const fake = await s.call('PUT', `/v1/pos/images/${'0'.repeat(64)}.png`, { dataBase64: PNG1 }, { authorization: `Bearer ${key}` });
+    assert.equal(fake.status, 400);
+    assert.equal((await s.call('PUT', `/v1/pos/images/${imageFile}`, { dataBase64: PNG1 })).status, 401);
+    // sent once: publishing again uploads nothing new
+    assert.deepEqual((await s.call('GET', '/v1/pos/images', undefined, { authorization: `Bearer ${key}` })).json, { names: [imageFile] });
+    removeItemImage(s.env.ctx, s.env.owner, rid(), s.burger);
+    await s.conn.publish();
+    assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 404);
+  } finally { await s.close(); }
 });

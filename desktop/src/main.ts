@@ -122,7 +122,7 @@ function createWindow() {
   win = new BrowserWindow({
     title: PRODUCT, width: 1366, height: 820, minWidth: 1024, minHeight: 640, show: false, backgroundColor: '#f6f2ec',
     icon: join(__dirname, 'icon.png'),
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false, spellcheck: false, devTools: !app.isPackaged },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false, spellcheck: false, devTools: !app.isPackaged, autoplayPolicy: 'no-user-gesture-required' }, // the online-order buzzer must ring without a tap first
   });
   win.once('ready-to-show', () => { win?.maximize(); win?.show(); });
   win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {}); // no accidental pinch zoom on touch screens

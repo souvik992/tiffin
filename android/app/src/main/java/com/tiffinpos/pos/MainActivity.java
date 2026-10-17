@@ -44,6 +44,7 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private static final int PICK_FILES = 1;
     private static final int PICK_BACKUP_FOLDER = 2;
+    private static final int PICK_ADDON = 4;
     private BackupCopier backups;
 
     private WebView web;
@@ -151,6 +152,21 @@ public class MainActivity extends Activity {
             }
             return;
         }
+        if (requestCode == PICK_ADDON) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri file = data.getData();
+                new Thread(() -> {
+                    try {
+                        String what = AddonInstaller.install(this, file);
+                        runOnUiThread(() -> toast(what + " installed. The POS restarts to load it."));
+                        restartPos();
+                    } catch (Exception e) {
+                        runOnUiThread(() -> toast(e.getMessage() == null ? "The add-on could not be installed." : e.getMessage()));
+                    }
+                }).start();
+            }
+            return;
+        }
         if (requestCode != PICK_FILES || pendingFiles == null) return;
         Uri[] result = null;
         if (resultCode == RESULT_OK && data != null) {
@@ -172,6 +188,13 @@ public class MainActivity extends Activity {
     }
 
     private void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_LONG).show(); }
+
+    /** Restarts the POS (after installing or removing an add-on): the window shows "Starting" and reloads. */
+    private void restartPos() {
+        runOnUiThread(() -> { web.setVisibility(View.INVISIBLE); status.setVisibility(View.VISIBLE); statusText.setText("Restarting Tiffin POS…"); });
+        PosBackend.stopAndWait();
+        runOnUiThread(this::start);
+    }
 
     /** What the POS screens can ask of the Android app (window.PosAndroid). Only the POS's own pages load here. */
     private final class Bridge {
@@ -229,6 +252,22 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void forgetBackupFolder() { backups.clearFolder(); }
+
+        /** Add-ons: choose a .tiffinaddon file (the POS checks its signature when it loads it). */
+        @JavascriptInterface
+        public void installAddon() {
+            runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                try { startActivityForResult(i, PICK_ADDON); } catch (Exception e) { toast("This device cannot choose a file."); }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean removeAddon(String id) {
+            boolean removed = AddonInstaller.remove(MainActivity.this, id);
+            if (removed) new Thread(MainActivity.this::restartPos).start();
+            return removed;
+        }
     }
 
     @SuppressWarnings("deprecation")

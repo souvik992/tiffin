@@ -65,6 +65,8 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('PUT', '/v1/pos/menu', (c) => hub.publishMenu(device(c), c.body as PublishedMenu), { maxBody: 4 * 1024 * 1024 });
   add('PUT', '/v1/pos/status', (c) => hub.setStatus(device(c), c.body as { accepting: boolean; reason?: string }));
   add('GET', '/v1/pos/orders', (c) => hub.openOrders(device(c)));
+  add('GET', '/v1/pos/images', (c) => ({ names: hub.imageNames(device(c)) }));
+  add('PUT', '/v1/pos/images/:name', (c) => hub.putImage(device(c), c.params.name!, (c.body as { dataBase64?: unknown } | null)?.dataBase64), { maxBody: 2_100_000 });
   for (const action of ['received', 'accept', 'reject', 'state'] as const) {
     add('POST', `/v1/pos/orders/:id/${action}`, (c) => hub.posAction(device(c), c.params.id!, action, (c.body ?? {}) as Record<string, unknown>, idem(c)));
   }
@@ -86,6 +88,12 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
 
   // ---- customer
   add('GET', '/v1/stores/:slug', (c) => hub.storePublic(c.params.slug!), { cors: true });
+  add('GET', '/v1/stores/:slug/images/:name', (c) => {
+    const img = hub.image(c.params.slug!, c.params.name!);
+    c.res.writeHead(200, { 'Content-Type': img.type, 'Content-Length': img.bytes.length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', ...CORS });
+    c.res.end(Buffer.from(img.bytes));
+    return Symbol.for('handled');
+  }, { cors: true });
   add('POST', '/v1/stores/:slug/quote', (c) => hub.quote(c.params.slug!, c.body as Parameters<Hub['quote']>[1]), { cors: true });
   add('POST', '/v1/stores/:slug/orders', async (c) => { orderLimit(c.ip); return hub.placeOrder(c.params.slug!, c.body, idem(c)); }, { cors: true });
   add('POST', '/v1/otp/send', (c) => { otpLimit(c.ip); return hub.otpSend(String((c.body as { mobile?: string })?.mobile ?? '')); }, { cors: true });

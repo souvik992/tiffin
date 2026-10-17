@@ -8,6 +8,8 @@ interface PosAndroid {
   backupStatus(): string;
   copyBackupsNow(): number;
   forgetBackupFolder(): void;
+  installAddon(): void;
+  removeAddon(id: string): boolean;
 }
 declare global { interface Window { PosAndroid?: PosAndroid } }
 

@@ -11,7 +11,7 @@ import { getSetting, setSetting } from '../services/settings.ts';
 import { compareVersions, manifestProblem, sha256hex, signatureOk } from './manifest.ts';
 import type { AddonManifest } from './manifest.ts';
 import { TRUSTED_ADDON_KEYS } from './trust.ts';
-import { billOnlineOrder, cancelOnlineBill, onlineMenu, shiftActor } from '../services/onlineBilling.ts';
+import { billOnlineOrder, cancelOnlineBill, onlineImage, onlineMenu, shiftActor } from '../services/onlineBilling.ts';
 
 /**
  * Loads signed add-ons (e.g. ODS) at startup. Each add-on gets a small, stable toolbox (HostApi) instead of
@@ -45,7 +45,7 @@ export interface HostApi {
   migrations(list: AddonMigration[]): void;
   onStop(fn: () => void | Promise<void>): void;
   /** Online orders as ordinary GST bills (src/services/onlineBilling.ts). */
-  billing: { bill: typeof billOnlineOrder; cancel: typeof cancelOnlineBill; shiftActor: typeof shiftActor; menu: typeof onlineMenu };
+  billing: { bill: typeof billOnlineOrder; cancel: typeof cancelOnlineBill; shiftActor: typeof shiftActor; menu: typeof onlineMenu; /** POS 0.3.3: a menu photo's bytes. */ image: typeof onlineImage };
 }
 
 export interface AddonRoute { method: string; path: string; opts: AddonRouteOptions; handler: (c: AddonRequest) => unknown }
@@ -146,7 +146,7 @@ export function makeHost(ctx: Ctx, id: string, posVersion: string, sink: { route
     },
     migrations: (list) => { sink.migrations.push(...list); },
     onStop: (fn) => { sink.stops.push(fn); },
-    billing: { bill: billOnlineOrder, cancel: cancelOnlineBill, shiftActor, menu: onlineMenu },
+    billing: { bill: billOnlineOrder, cancel: cancelOnlineBill, shiftActor, menu: onlineMenu, image: onlineImage },
   };
 }
 

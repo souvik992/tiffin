@@ -5,6 +5,7 @@ import { cancelInvoice, finalizeInvoice } from './invoices.ts';
 import { getCatalog } from './catalog.ts';
 import type { Override } from './auth.ts';
 import { loadSettings } from './settings.ts';
+import { readImage } from './images.ts';
 
 /**
  * Online orders become ordinary GST bills here (used by the ODS add-on through HostApi.billing).
@@ -92,7 +93,7 @@ export function onlineMenu(ctx: Ctx) {
     return {
       id: String(i.id), categoryId: (i.categoryId as string | null) ?? null, name: String(i.name), price: Number(i.price), unit: String(i.unit),
       isVeg: i.isVeg === null || i.isVeg === undefined ? null : Boolean(i.isVeg), rateBp: t?.rateBp ?? 0, cessBp: t?.cessBp ?? 0, priceIncludesTax: (t?.priceIncludesTax ?? 1) === 1,
-      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: true,
+      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: true, image: (i.imageFile as string | null) ?? null,
     };
   });
   const categories = (c.categories as Array<{ id: string; name: string; sortOrder: number }>).map((x) => ({ id: x.id, name: x.name, sort: x.sortOrder }));
@@ -101,3 +102,8 @@ export function onlineMenu(ctx: Ctx) {
 }
 
 export const listOnlineChannels = () => [...ONLINE_CHANNELS];
+
+/** A menu photo's bytes, for publishing it with the online menu (null if the file is gone). */
+export function onlineImage(ctx: Ctx, file: string): { bytes: Buffer; type: string } | null {
+  try { return readImage(ctx, file); } catch { return null; }
+}
