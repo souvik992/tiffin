@@ -17,7 +17,7 @@ Then, in `desktop/`:
 | Command | What it does |
 |---|---|
 | `npm start` | builds, then opens the app (development; dev tools on Ctrl+Shift+I) |
-| `npm run dist` | builds the installer: `release/TiffinPOS-Setup-<version>.exe` (about 110 MB) |
+| `npm run dist` | builds the installer: `release/TiffinPOS-Setup-<version>.exe` (about 130 MB; packed for fast installs on low-end PCs, see below) |
 | `npm run dist:dir` | builds the unpacked app only: `release/win-unpacked/TiffinPOS.exe` (fast, for testing) |
 | `npm test` | unit tests (URL mapping, secret header, navigation rules) |
 | `npm run test:e2e` | builds, then drives the real app: sign-in, a bill with live print status, reports, lockdown, crash restart, single copy, clean close |
@@ -87,7 +87,9 @@ Never commit the certificate or its password.
    ```powershell
    $env:POS_UPDATE_URL = "https://updates.example.in/pos/"; npm run dist
    ```
-3. Upload `release/latest.yml`, `TiffinPOS-Setup-<version>.exe` and its `.blockmap` to that folder.
+3. Upload `release/latest.yml` and `TiffinPOS-Setup-<version>.exe` (and its `.blockmap` if one was built) to that folder.
+   Updates download the whole installer: it is packed as zip for installs about twice as fast on low-end PCs,
+   which rules out downloading only the changed parts (docs/DECISIONS.md).
 
 How shops receive it:
 * Installed apps check 1 minute after start, then every 6 hours. Being offline is fine.

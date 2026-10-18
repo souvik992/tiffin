@@ -83,6 +83,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Check | Result |
 |---|---|
 | Low-end shop PC (4 GB RAM, HDD): start-up time, memory, billing speed | |
+| Low-end shop PC: install and update time (zip installer; ~22 s on one core of the dev PC's SSD, HDD and antivirus not measured) | |
 | Windows 10 22H2 | |
 | A real receipt printer (USB driverless, USB Windows driver, Wi-Fi, Bluetooth) from inside the installed app | |
 | Posiflex PP8800 on WinUSB (dev PC): found and opened without admin; printing confirmed working by the owner on 2026-10-15. Still to check: cash drawer, out-of-paper and unplug while printing, long bills | Works (owner report) |

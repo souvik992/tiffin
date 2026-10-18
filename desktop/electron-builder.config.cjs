@@ -13,6 +13,10 @@ module.exports = {
   directories: { output: 'release', buildResources: 'build' },
   files: ['dist/**/*', '!dist/**/*.map', 'package.json'],
   asar: true,
+  // Smaller, faster installs on low-end PCs: only the English Chromium strings (the POS screens carry their own text)
+  // and no WebGPU shader compilers (scripts/after-pack.cjs).
+  electronLanguages: ['en-US'],
+  afterPack: './scripts/after-pack.cjs',
   // The backend runs in a utility process; it stays inside the asar archive (it only reads its own bundle).
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
@@ -31,6 +35,11 @@ module.exports = {
     runAfterFinish: true,
     deleteAppDataOnUninstall: false, // bills and backups (in %LOCALAPPDATA%\TiffinPOS) are never deleted by uninstalling
     artifactName: 'TiffinPOS-Setup-${version}.${ext}',
+    // zip (deflate) instead of LZMA: about twice as fast to install on one CPU core (measured 21-26 s against 41-53 s),
+    // for a ~131 MB instead of ~112 MB installer. zip needs differentialPackage off, so updates download the whole
+    // installer rather than only the changed blocks. See docs/DECISIONS.md.
+    useZip: true,
+    differentialPackage: false,
   },
   publish: updateUrl ? [{ provider: 'generic', url: updateUrl }] : null,
 };
