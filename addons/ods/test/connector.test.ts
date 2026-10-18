@@ -144,6 +144,17 @@ test('ODS connector: pairing needs a secure (https) hub address, except a hub on
   } finally { await t.close(); }
 });
 
+test('ODS connector: one connection link from the hub admin page (address + pairing code) connects the POS', async () => {
+  const t = await setup();
+  try {
+    const code = t.hub.pairingCodeForSlug('demo');
+    await assert.rejects(t.conn.pair(t.env.owner, 'http://orders.example.in/connect/ABCD-EFGH', ''), /https:\/\//); // the same https rule
+    await assert.rejects(t.conn.pair(t.env.owner, `${t.base}/somewhere/else`, ''), /connection link/);
+    const l = await t.conn.pair(t.env.owner, `  ${t.base}/connect/${code.toLowerCase()}/  `, '');
+    assert.deepEqual([l.paired, l.hubUrl, l.store?.slug], [true, t.base, 'demo']);
+  } finally { await t.close(); }
+});
+
 test('ODS connector: a POS that stops right after billing sends the accept on restart (F3); replayed events change nothing (F4); online orders cannot be switched off while orders are open (F15)', async () => {
   const s = await setup();
   let second: Awaited<ReturnType<typeof register>> | null = null;

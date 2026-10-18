@@ -176,8 +176,7 @@ interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: strin
 function HubCard({ isOwner }: { isOwner: boolean }) {
   const { api, notify, fail } = useSession();
   const [link, setLink] = useState<HubLink | null>(null);
-  const [hubUrl, setHubUrl] = useState('');
-  const [code, setCode] = useState('');
+  const [connectLink, setConnectLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
   useEffect(() => {
@@ -188,7 +187,7 @@ function HubCard({ isOwner }: { isOwner: boolean }) {
   }, [api]);
   const pair = async () => {
     setBusy(true);
-    try { const l = await api.request<HubLink>('POST', `${BASE}/hub/pair`, { hubUrl: hubUrl.trim(), code: code.trim().toUpperCase() }, newKey()); setLink(l); setCode(''); notify('success', `Connected to the order hub as ${l.store?.name ?? 'this store'}.`); }
+    try { const l = await api.request<HubLink>('POST', `${BASE}/hub/pair`, { hubUrl: connectLink.trim(), code: '' }, newKey()); setLink(l); setConnectLink(''); notify('success', `Connected to the order hub as ${l.store?.name ?? 'this store'}.`); }
     catch (e) { fail(e); } finally { setBusy(false); }
   };
   const unpair = async () => {
@@ -211,11 +210,10 @@ function HubCard({ isOwner }: { isOwner: boolean }) {
             : <button className="btn-ghost mt-3" onClick={() => setConfirm(true)}>Disconnect</button>)}
         </>
       ) : isOwner ? (
-        <div className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
-          <input className="field" placeholder="Hub address, e.g. https://orders.example.in" value={hubUrl} onChange={(e) => setHubUrl(e.target.value)} aria-label="Hub address" />
-          <input className="field font-mono uppercase" placeholder="Pairing code" maxLength={9} value={code} onChange={(e) => setCode(e.target.value)} aria-label="Pairing code" />
-          <button className="btn-primary" disabled={busy || !hubUrl.trim() || code.trim().length < 8} onClick={() => void pair()}>{busy ? 'Connecting…' : 'Connect'}</button>
-          <p className="text-xs text-muted-foreground sm:col-span-3">Get the address and a pairing code from whoever runs your order hub. The code works once, for 30 minutes.</p>
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <input className="field" placeholder="Connection link, e.g. https://orders.example.in/connect/ABCD-EFGH" value={connectLink} onChange={(e) => setConnectLink(e.target.value)} aria-label="Connection link" />
+          <button className="btn-primary" disabled={busy || !/\/connect\/[A-Za-z0-9-]{8,9}\/?$/.test(connectLink.trim())} onClick={() => void pair()}>{busy ? 'Connecting…' : 'Connect'}</button>
+          <p className="text-xs text-muted-foreground sm:col-span-2">Paste the connection link you got from whoever runs your order hub. It works once, for a short time; ask for a new one if it has expired.</p>
         </div>
       ) : <p className="text-sm text-muted-foreground">Not connected. The owner connects the hub.</p>}
     </section>

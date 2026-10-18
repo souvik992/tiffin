@@ -74,9 +74,16 @@ export class Connector {
     };
   }
 
-  async pair(actor: Actor, hubUrlIn: string, code: string) {
+  /** Pairs with the hub: a connection link from the hub admin page (<hub address>/connect/<code>), or an address and a code. */
+  async pair(actor: Actor, hubUrlIn: string, codeIn: string) {
     this.host.assertPerm(actor, 'settings.write');
-    const hubUrl = String(hubUrlIn ?? '').trim().replace(/\/+$/, '');
+    let hubUrl = String(hubUrlIn ?? '').trim().replace(/\/+$/, '');
+    let code = String(codeIn ?? '').trim();
+    if (!code) {
+      const m = /^(.+?)\/connect\/([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})$/.exec(hubUrl);
+      if (!m) throw new this.host.AppError('VALIDATION', 'Paste the whole connection link from the order hub, for example https://orders.example.in/connect/ABCD-EFGH');
+      hubUrl = m[1]!; code = m[2]!.toUpperCase();
+    }
     if (!/^https?:\/\/[^\s/]+(:\d+)?(\/[^\s]*)?$/.test(hubUrl)) throw new this.host.AppError('VALIDATION', 'Enter the hub address, for example https://orders.example.in');
     // the device key travels on this connection: plain http only to a hub on this same PC (testing)
     if (/^http:/.test(hubUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(hubUrl)) throw new this.host.AppError('VALIDATION', 'The hub address must start with https:// (a secure connection).');
