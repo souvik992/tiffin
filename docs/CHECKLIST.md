@@ -177,7 +177,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] POS connection (ODS add-on): pairs with the hub, publishes menu, serviceability and "accepting" (= a shift is open), receives orders live, sends answers through an outbox that survives restarts and internet drops
 - [x] Menu sync per sales channel (Settings > Online orders > Menu sync on each channel): all items, all except (search), only (search); prices same as the POS or different (+/- % to the nearest rupee, or an item's own price); Save and sync now. The hub shows each channel only its items at its prices and refuses others; online bills use the channel price (POS works it out itself; screens cannot send a price). Swiggy/Zomato choices are saved for when those connections exist
 - [x] Item descriptions (database step 11): Menu creation, bulk upload column `description`, sent to the hub with photos and prices
-- [x] Sales channel badges (Swiggy, Zomato, Website, App) on ODS tiles, the finished list and the channel row; globe icon with green/red dot in the side menu
+- [x] Sales channel badges (Swiggy, Zomato, Website, App) on ODS tiles, the finished list and the channel row; globe icon in the side menu: number of new orders waiting, else a green/red dot
 - [ ] Official Swiggy/Zomato logo files (their partner programmes provide them)
 - [x] Online-order buzzer on every screen (ODS 1.0.2): rings loudly and repeats while an order waits to be accepted, with a "New online order" banner (Silence, Open ODS); stops on accept/reject; the ODS Sound switch controls it; the desktop app lets it ring without a tap first
 - [x] Menu photos sent to the hub (only missing ones, checked against their content name; removed with the item's photo); `image` on published menu items

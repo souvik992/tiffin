@@ -20,14 +20,18 @@ function StatusDot() {
   const online = useOnlineConfig();
   const on = online?.enabled === true;
   useEffect(() => { if (on) startBuzzer(); }, [on]);
-  const { connected } = useBuzzer();
+  const { connected, waiting } = useBuzzer();
+  const count = on ? waiting.length : 0;
   const green = on && connected === true;
-  const label = !on ? 'Offline mode: online orders are off' : connected === true ? 'Online orders on: connected' : connected === null ? 'Online orders on: connecting…' : 'Online orders on, but not connected to the order hub';
+  const label = count > 0 ? `${count} new online order${count > 1 ? 's' : ''} waiting` : !on ? 'Offline mode: online orders are off' : connected === true ? 'Online orders on: connected' : connected === null ? 'Online orders on: connecting…' : 'Online orders on, but not connected to the order hub';
   return (
     <>
       <a href={on ? '#/ods' : '#/settings'} className="group relative mb-1 flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-secondary hover:text-primary" aria-label={label}>
         <Globe className="h-5 w-5" />
-        <span className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-card ${green ? 'bg-veg' : 'bg-destructive'}`} />
+        {count > 0
+          // new orders waiting: their number instead of the dot
+          ? <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-bold leading-none text-white ring-2 ring-card" aria-hidden>{count > 99 ? '99+' : count}</span>
+          : <span className={`absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-card ${green ? 'bg-veg' : 'bg-destructive'}`} />}
         <span aria-hidden className="rail-tip">{label}</span>
       </a>
       {on && <OrderAlert />}
