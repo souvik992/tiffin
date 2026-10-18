@@ -1,6 +1,6 @@
 {
   "name": "tiffin-pos-desktop",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "Windows desktop app for the offline-first POS: Electron host around the backend and the React UI.",
   "author": "Tiffin POS",

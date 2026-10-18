@@ -60,6 +60,22 @@ The POS sends each menu item's photo once (`GET /v1/pos/images` lists what the h
 with `{ dataBase64 }`). The hub refuses a photo whose bytes do not match its name or are not JPG/PNG/WebP, and deletes
 photos that are no longer on the menu. Customers' pages load them from `/v1/stores/<slug>/images/<name>`.
 
+## Online backups (the Tiffin backup server)
+
+The same hub stores the POS's online backups (Settings > Backups > Online backup, `src/backups.ts`). A shop that only
+wants backups needs a store here too: `npm run admin -- create-store <slug> "<Store name>"` prints a pairing code; the
+owner types the hub address and the code into the POS.
+
+| Endpoint (POS device key) | What |
+|---|---|
+| `GET /v1/pos/backups` | this store's backups, newest first: `{name, bytes, uploadedAt, sha256}` |
+| `PUT /v1/pos/backups/<kind>-<time>.db.gz` | raw gzip body with `X-Content-SHA256`; streamed to disk, refused (and not kept) if the hash differs or it is larger than 1 GB |
+| `GET /v1/pos/backups/<name>` | the file, with `X-Content-SHA256` |
+| `GET /v1/pos/backup-images`, `PUT`/`GET /v1/pos/backup-images/<sha256>.<ext>` | menu photos the backups use, checked against their name |
+
+Files live in `backups/<storeId>/` next to `hub.db` (never in the database); the newest 30 backups per store are kept.
+They are not encrypted (the owner's choice, docs/DECISIONS.md), so secure the server and its disk.
+
 ## What the hub already handles
 
 - Orders placed while the shop's internet is down wait on the hub. The POS collects them when it reconnects.
@@ -76,7 +92,7 @@ See `docs/ONLINE_ORDERS_PLAN.md` for the failure cases (F1 to F13).
 
 - SMS for OTP.
 - The payment gateway (online payment).
-- Hosting and backups of the hub database.
+- Hosting the hub (and backups of the hub database itself, including the shops' online backups).
 - The store apps (the demo page stands in for them).
 - Swiggy/Zomato.
 - More than one hub process: one process per database for now.

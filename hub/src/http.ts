@@ -17,7 +17,7 @@ export interface HttpOptions { adminKey?: string; heartbeatMs?: number; publicDi
 
 interface Ctx { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; query: URLSearchParams; body: unknown; ip: string }
 type Handler = (c: Ctx) => unknown | Promise<unknown>;
-interface Route { method: string; re: RegExp; keys: string[]; cors: boolean; maxBody: number; handler: Handler }
+interface Route { method: string; re: RegExp; keys: string[]; cors: boolean; maxBody: number; raw: boolean; handler: Handler }
 
 const json = (res: ServerResponse, status: number, body: unknown, cors = false) => {
   const text = JSON.stringify(body);
@@ -38,10 +38,10 @@ function limiter(perMinute: number) {
 
 export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   const routes: Route[] = [];
-  const add = (method: string, path: string, handler: Handler, opt: { cors?: boolean; maxBody?: number } = {}) => {
+  const add = (method: string, path: string, handler: Handler, opt: { cors?: boolean; maxBody?: number; raw?: boolean } = {}) => {
     const keys: string[] = [];
     const re = new RegExp('^' + path.replace(/:([a-zA-Z]+)/g, (_, k: string) => { keys.push(k); return '([^/]+)'; }) + '$');
-    routes.push({ method, re, keys, cors: opt.cors ?? false, maxBody: opt.maxBody ?? 64 * 1024, handler });
+    routes.push({ method, re, keys, cors: opt.cors ?? false, maxBody: opt.maxBody ?? 64 * 1024, raw: opt.raw ?? false, handler });
   };
   const admin = (c: Ctx) => {
     const got = Buffer.from(String(c.req.headers['x-admin-key'] ?? ''));
@@ -70,6 +70,23 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   for (const action of ['received', 'accept', 'reject', 'state'] as const) {
     add('POST', `/v1/pos/orders/:id/${action}`, (c) => hub.posAction(device(c), c.params.id!, action, (c.body ?? {}) as Record<string, unknown>, idem(c)));
   }
+  // online backups (src/backups.ts): binary bodies, streamed to and from disk
+  const readRaw = async (c: Ctx, max: number) => {
+    const chunks: Buffer[] = []; let size = 0;
+    for await (const ch of c.req) { size += (ch as Buffer).length; if (size > max) throw new HubError('TOO_LARGE', 'Request too large.', 413); chunks.push(ch as Buffer); }
+    return Buffer.concat(chunks);
+  };
+  const sendFile = (c: Ctx, type: string, bytes: number, stream: NodeJS.ReadableStream, extra: Record<string, string> = {}) => {
+    c.res.writeHead(200, { 'Content-Type': type, 'Content-Length': bytes, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra });
+    stream.pipe(c.res);
+    return Symbol.for('handled');
+  };
+  add('GET', '/v1/pos/backups', (c) => ({ backups: hub.backups.list(device(c)) }));
+  add('PUT', '/v1/pos/backups/:name', (c) => hub.backups.put(device(c), c.params.name!, c.req, String(c.req.headers['x-content-sha256'] ?? '').toLowerCase(), c.req.headers['content-length'] ? Number(c.req.headers['content-length']) : undefined), { raw: true });
+  add('GET', '/v1/pos/backups/:name', (c) => { const f = hub.backups.open(device(c), c.params.name!); return sendFile(c, 'application/gzip', f.bytes, f.stream, f.sha256 ? { 'X-Content-SHA256': f.sha256 } : {}); });
+  add('GET', '/v1/pos/backup-images', (c) => ({ names: hub.backups.imageNames(device(c)) }));
+  add('PUT', '/v1/pos/backup-images/:name', async (c) => { const dev = device(c); return hub.backups.putImage(dev, c.params.name!, await readRaw(c, 2_000_000)); }, { raw: true });
+  add('GET', '/v1/pos/backup-images/:name', (c) => { const b = hub.backups.image(device(c), c.params.name!); c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': b.length, 'Cache-Control': 'no-store' }); c.res.end(b); return Symbol.for('handled'); });
   add('GET', '/v1/pos/events', (c) => {
     const dev = device(c);
     const after = Number(c.req.headers['last-event-id'] ?? c.query.get('after') ?? 0) || 0;
@@ -137,7 +154,7 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
       }
       if (!route) throw new HubError(pathOk ? 'METHOD_NOT_ALLOWED' : 'NOT_FOUND', pathOk ? 'Method not allowed.' : 'Not found.', pathOk ? 405 : 404);
       let body: unknown = null;
-      if (req.method !== 'GET') {
+      if (req.method !== 'GET' && !route.raw) {
         const chunks: Buffer[] = [];
         let size = 0;
         for await (const ch of req) { size += (ch as Buffer).length; if (size > route.maxBody) throw new HubError('TOO_LARGE', 'Request too large.', 413); chunks.push(ch as Buffer); }

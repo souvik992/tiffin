@@ -107,6 +107,17 @@ export interface PaymentCheck { total: number; paid: number; remaining: number; 
 export interface CreditOption { invoiceLineId: string; name: string; unit: string; soldQtyMilli: number; returnedQtyMilli: number; remainingQtyMilli: number; lineTotal: number }
 export interface CreditPreview { lines: Array<{ invoiceLineId: string; name: string; qtyMilli: number; amount: number }>; roundOff: number; total: number }
 export interface Override { userId: string; pin: string }
+export interface BackupFile { file: string; bytes: number; kind: string; at: number }
+export interface OnlineBackup { name: string; bytes: number; uploadedAt: number }
+export interface CloudBackupStatus { connected: boolean; on: boolean; url: string | null; store: string | null; everyHours: number; lastAt: number | null; lastFile: string | null; error: string | null; busy: boolean }
+export interface LastRestore { ok: boolean; at: number; label: string; error?: string; report?: { images: { missing: string[] }; journal: { replayed: number; errors: unknown[]; keptAside: boolean }; stockOk: boolean; aside: string | null } }
+export interface BackupOverview {
+  status: { lastBackupAt: number | null; ageHours: number | null; warn: boolean };
+  files: BackupFile[];
+  copy: { dir: string | null; lastAt: number | null; error: string | null; files: BackupFile[] };
+  cloud: CloudBackupStatus; everyHoursChoices: number[]; lastRestore: LastRestore | null; canRestartItself: boolean;
+}
+export type RestoreSource = 'device' | 'folder' | 'online';
 export interface ItemInput { name: string; categoryId: string | null; taxGroupId: string; price: number; isVeg: boolean | null; unit?: string; hsnCode?: string | null; shortName?: string | null; barcode?: string | null }
 export interface SetupInput {
   outlet: { name: string; gstin: string | null; fssaiNo: string | null; stateCode: string; address: string | null; phone: string | null };
@@ -252,6 +263,19 @@ export function createApi(o: ApiOptions) {
     printSample: (id: string, key?: string) => change<{ jobId: string | null }>('POST', `/printers/${enc(id)}/sample`, {}, key),
     testDrawer: (id: string, key?: string) => change<{ jobId: string | null }>('POST', `/printers/${enc(id)}/drawer`, {}, key),
     retryFailed: (id: string) => request<{ printerId: string; requeued: number }>('POST', `/printers/${enc(id)}/retry-failed`, {}),
+    // Settings > Backups (owner)
+    backupOverview: () => get<BackupOverview>('/backup/overview'),
+    backupNow: () => request<{ file: string }>('POST', '/backup', {}),
+    setBackupCopyFolder: (dir: string | null) => request<BackupOverview>('PUT', '/backup/copy', { dir }),
+    copyBackupNow: () => request<BackupOverview>('POST', '/backup/copy/now', {}),
+    backupsInFolder: (path: string) => get<{ folder: string; files: BackupFile[] }>(`/backup/folder?path=${enc(path)}`),
+    pairCloudBackup: (url: string, code: string) => request<BackupOverview>('POST', '/backup/cloud/pair', { url, code }),
+    setCloudBackup: (o: { on?: boolean; everyHours?: number }) => request<BackupOverview>('PATCH', '/backup/cloud', o),
+    disconnectCloudBackup: () => request<BackupOverview>('DELETE', '/backup/cloud', {}),
+    cloudBackupNow: () => request<BackupOverview>('POST', '/backup/cloud/now', {}),
+    onlineBackups: () => get<{ backups: OnlineBackup[] }>('/backup/cloud/list'),
+    restoreBackup: (source: RestoreSource, name: string, pin: string, folder?: string) => request<{ restarting: boolean }>('POST', '/restore', { source, name, pin, ...(folder ? { folder } : {}) }),
+    dismissRestore: () => request<{ ok: boolean }>('POST', '/restore/dismiss', {}),
     settings: () => get<Record<string, string>>('/settings'),
     saveSettings: (values: Record<string, string>, key?: string) => change<Record<string, string>>('PUT', '/settings', values, key),
     dismissDetected: (key: string) => change<{ key: string }>('POST', '/printers/detected/dismiss', { key }),

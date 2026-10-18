@@ -79,6 +79,11 @@ export function requireApproval(ctx: Ctx, actor: Actor, perm: Permission, overri
   return u.id;
 }
 
+/** The signed-in user types their PIN again before a step that cannot be undone from the screen (restoring a backup). */
+export function confirmPin(ctx: Ctx, actor: Actor, pin: string): void {
+  checkPin(ctx, userRow(ctx, actor.userId), pin, false);
+}
+
 export function login(ctx: Ctx, userId: string, pin: string): { token: string; user: Actor } {
   const u = checkPin(ctx, userRow(ctx, userId), pin, false);
   const token = randomBytes(32).toString('hex');

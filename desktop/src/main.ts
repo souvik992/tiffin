@@ -85,6 +85,13 @@ async function onBackendCrash(code: number) {
 }
 
 async function serve(req: Request): Promise<Response> {
+  // Settings > Backups: Windows' own folder picker for the backup copies (a USB drive). The page has no Node access,
+  // so it asks here; only the chosen path comes back.
+  if (req.method === 'POST' && new URL(req.url).pathname === '/__desktop/choose-folder') {
+    const opts = { title: 'Choose a folder for the backup copies (for example a USB drive)', properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> };
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    return Response.json({ path: r.canceled ? null : r.filePaths[0] ?? null });
+  }
   const r = resolveRequest(req.url, uiDir);
   if (r.kind === 'api') {
     if (!port) return Response.json({ error: { code: 'NETWORK', message: 'The billing service is starting. Try again in a moment.' } }, { status: 503 });

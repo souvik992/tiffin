@@ -137,7 +137,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] End-to-end test of the real app (dev build, packaged build and installed build): bill with live print status, reports, lockdown, crash restart, single copy, closing backup
 - [ ] Encryption at rest: SQLCipher-compatible build plus a recovery key
 - [ ] Raster printing for Hindi and other scripts, and the rupee sign
-- [ ] Backup and restore screen for the owner (today: automatic backups plus the `npm run restore` command)
+- [x] Backup and restore screen for the owner (Settings > Backups): back up now, list, restore with the PIN (the POS restarts itself), copies to a USB drive or folder (Windows folder picker), online backups to the Tiffin backup server; restore from this device, a folder or online. Tested end to end in the browser and in the desktop app (dev build)
 - [ ] Sessions that survive an app restart (today a restart signs everyone out; bills are safe)
 
 ### Then: distribution
@@ -168,7 +168,8 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Reports screen (sidebar): 16 reports in 5 groups. Sales: summary, payment modes, by hour, channels, by cashier, discounts. Items: item sales, category sales. Tax: GST by rate, HSN summary, bill register. Controls: cancellations and refunds, shifts and cash. Inventory: stock on hand, stock movement, purchases
 - [x] Reports show on screen (summary cards, table, totals row), date presets (today, yesterday, last 7 days, this month, last month, custom), Download CSV for Excel, Print / PDF (A4 landscape)
 - [ ] Reports follow-ups: GSTR-1 B2B/B2CS JSON export, XLSX download, profit report (needs recipe costing), scheduled email of the daily report, reports for a single shift (X-report)
-- [ ] Settings screen for backups (store, users, printers, receipt footer and bill design done)
+- [x] Settings screen for backups (Settings > Backups, owner only)
+- [ ] Backups follow-ups: restore from a USB stick or SD card inside the Android app (today: online or this device's backups; the USB copy works), hosting the backup server, optional encryption of online backups, an admin view of stores' online backups
 - [x] Settings > Online orders: master switch (off = offline mode, the default) and sales channels App, Website, Swiggy, Zomato; ODS appears in the side menu only when on; online/offline dot at the bottom of the side menu
 - [x] Add-ons: POS 0.2.0+ loads signed add-ons (Ed25519, file fingerprints, minimum POS version, own database steps, own routes, failures switch the add-on off with a reason); screens plug into the side menu, routes and Settings; desktop offers a restart when an add-on is installed
 - [x] ODS add-on (separate installer TiffinPOS-ODS-Setup): online orders settings and ODS moved out of the POS core; Serviceability: store location on a map (search, draggable pin), up to 6 distance bands with delivery fee / minimum order / free above / delivery time, packaging fee, pickup minimum and time, opening hours (2 a day, past midnight)

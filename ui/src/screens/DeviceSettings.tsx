@@ -7,16 +7,14 @@ import type { BackupCopyStatus } from '../lib/android.ts';
 
 const when = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-/** Settings > This device (Android app only): backup copies on a USB stick or SD card, and add-ons. */
-export function DeviceSettings() {
-  const { api, user, notify } = useSession();
-  const [addons, setAddons] = useState<AddonInfo[] | null>(null);
-  useEffect(() => { api.addons().then(setAddons).catch(() => setAddons([])); }, [api]);
+/** Settings > Backups on Android: backup copies on a USB stick or SD card (the app copies them; the folder picker is Android's). */
+export function AndroidBackupCopies() {
+  const { notify } = useSession();
   const [st, setSt] = useState<BackupCopyStatus | null>(backupCopyStatus);
   const [busy, setBusy] = useState(false);
   useEffect(() => { const t = setInterval(() => setSt(backupCopyStatus()), 3000); return () => clearInterval(t); }, []); // the folder picker answers later
   const a = androidApp();
-  if (!a) return <p className="text-sm text-muted-foreground">This page is for the Android app.</p>;
+  if (!a) return null;
 
   const copy = () => {
     setBusy(true);
@@ -28,9 +26,6 @@ export function DeviceSettings() {
   };
 
   return (
-    <>
-      <h2 className="mb-1 font-display text-2xl">This device</h2>
-      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">The POS keeps verified backups on this device (every hour and every day). Also keep copies on a USB stick or SD card, so the bills survive if this device is lost or broken.</p>
       <section className="max-w-2xl rounded-2xl border border-border bg-card p-4" aria-label="Backup copies">
         <h3 className="mb-2 flex items-center gap-2 font-semibold"><HardDriveDownload className="h-4 w-4 text-primary" />Backup copies on a USB stick or SD card</h3>
         {st?.folder ? (
@@ -50,10 +45,23 @@ export function DeviceSettings() {
             <button className="btn-primary mt-3" onClick={() => a.chooseBackupFolder()}><FolderOpen className="h-4 w-4" />Choose folder</button>
           </>
         )}
-        <p className="mt-3 text-xs text-muted-foreground">To restore on another device or PC, copy the newest .db file from TiffinPOS-backups and use the restore steps in the guide.</p>
+        <p className="mt-3 text-xs text-muted-foreground">To restore on a PC, choose the TiffinPOS-backups folder in Settings &gt; Backups &gt; Restore from a USB drive or folder.</p>
       </section>
+  );
+}
 
-      <section className="mt-4 max-w-2xl rounded-2xl border border-border bg-card p-4" aria-label="Add-ons">
+/** Settings > This device (Android app only): add-ons. Backup copies are on Settings > Backups. */
+export function DeviceSettings() {
+  const { api, user } = useSession();
+  const [addons, setAddons] = useState<AddonInfo[] | null>(null);
+  useEffect(() => { api.addons().then(setAddons).catch(() => setAddons([])); }, [api]);
+  const a = androidApp();
+  if (!a) return <p className="text-sm text-muted-foreground">This page is for the Android app.</p>;
+
+  return (
+    <>
+      <h2 className="mb-4 font-display text-2xl">This device</h2>
+      <section className="max-w-2xl rounded-2xl border border-border bg-card p-4" aria-label="Add-ons">
         <h3 className="mb-1 flex items-center gap-2 font-semibold"><PackagePlus className="h-4 w-4 text-primary" />Add-ons</h3>
         <p className="mb-3 text-sm text-muted-foreground">Extra modules such as ODS (online orders and serviceability), installed from a <b>.tiffinaddon</b> file. The POS checks each add-on's signature before using it, as on Windows.</p>
         {addons?.length === 0 && <p className="text-sm text-muted-foreground">No add-ons installed.</p>}

@@ -47,7 +47,7 @@ on the run's page.
   * Not covered: brands whose printer has no Bluetooth or USB side (PAX, some iMin models need their own SDK).
 * **Downloads** (CSV reports, the menu template) go to the device's Download folder; **Print / PDF** (reports, bill
   copies) opens Android's print screen, which includes Save as PDF. Screens use `ui/src/lib/android.ts`.
-* **Backup copies** on a USB stick or SD card: Settings > This device > Choose folder (`BackupCopier.java`); new
+* **Backup copies** on a USB stick or SD card: Settings > Backups > Choose folder (`BackupCopier.java`); new
   backup files are copied every 15 minutes while the app runs, and on "Copy now".
 * **Add-ons** (ODS): `npm run build` in `addons/ods` also writes `addons/dist/installers/TiffinPOS-ODS-<version>.tiffinaddon`
   (the signed package files, zipped). Settings > This device > Add-ons > Install from file (owner) unpacks it into the

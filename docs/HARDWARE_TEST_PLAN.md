@@ -83,6 +83,8 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Check | Result |
 |---|---|
 | Low-end shop PC (4 GB RAM, HDD): start-up time, memory, billing speed | |
+| Settings > Backups in the installed app: Windows folder picker, copies to a real USB drive (pull it out: error shown, billing unaffected), restore from it on a second PC | |
+| Online backups against a hosted backup server over https: upload on shop internet, a large database (100 MB+), restore on a new PC | |
 | Low-end shop PC: install and update time (zip installer; ~22 s on one core of the dev PC's SSD, HDD and antivirus not measured) | |
 | Windows 10 22H2 | |
 | A real receipt printer (USB driverless, USB Windows driver, Wi-Fi, Bluetooth) from inside the installed app | |

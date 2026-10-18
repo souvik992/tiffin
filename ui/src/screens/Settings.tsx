@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  Banknote, Bluetooth, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
+  Banknote, Bluetooth, DatabaseBackup, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
 } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Printer, PrinterInput, ReceiptDesign, ReceiptDesignPreview, SerialPortInfo, Transport, UsbDevice, WindowsPrinter } from '../lib/api.ts';
@@ -12,6 +12,7 @@ import { StoreSettings } from './StoreSettings.tsx';
 import { UsersSettings } from './UsersSettings.tsx';
 import { CouponsSettings } from './CouponsSettings.tsx';
 import { DeviceSettings } from './DeviceSettings.tsx';
+import { BackupSettings } from './BackupSettings.tsx';
 import { onAndroid } from '../lib/android.ts';
 import { useAddons } from '../lib/addons.ts';
 
@@ -48,8 +49,9 @@ export function Settings() {
     ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
     ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
-    ...(onAndroid() ? [['device', 'This device', Smartphone, 'Backup copies on a USB stick or SD card, add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(onAndroid() ? [['device', 'This device', Smartphone, 'Add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(user?.role === 'owner' ? [
+      ['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
     ] : []),
@@ -70,7 +72,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : <ReceiptSettings />}</div>
         </div>
       )}
     </PageShell>

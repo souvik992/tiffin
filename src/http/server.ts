@@ -6,7 +6,7 @@ import type { LoadedAddons } from '../addons/host.ts';
 import { AppError } from '../store/db.ts';
 import type { Actor, Ctx } from '../services/ctx.ts';
 import { assertPerm } from '../services/permissions.ts';
-import { authenticate, changePin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
+import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
 import { addLine, applyBillDiscount, applyCoupon, removeCoupon, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
 import { cancelInvoice, checkPayments, createCreditNote, creditNoteOptions, finalizeInvoice, getInvoice, listInvoices, previewCreditNote, reprintInvoice } from '../services/invoices.ts';
@@ -20,7 +20,12 @@ import { discoverNetworkPrinters, listSerialPorts, listWindowsPrinters } from '.
 import { detectPrinters, dismissDetected, listUsbDevices, quickAddPrinter } from '../services/printing/detect.ts';
 import { listJobs, queueCounts, retryFailed } from '../services/printing/queue.ts';
 import type { PrintQueue } from '../services/printing/queue.ts';
-import { listBackups, runBackup, backupStatus } from '../services/backup.ts';
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { BACKUP_FILE, copyDirOf, copyToFolder, listBackups, runBackup, backupStatus } from '../services/backup.ts';
+import { backupOnlineNow, cloudStatus, deviceName, disconnectCloud, downloadToStage, listOnline, pairCloud, setCloudOptions, EVERY_HOURS } from '../services/cloudBackup.ts';
+import { dismissLastRestore, lastRestore, stageRestore } from '../services/restore.ts';
+import { getSetting } from '../services/settings.ts';
 import { getHealth } from '../services/health.ts';
 import { listAudit, verifyAuditChain } from '../services/audit.ts';
 import { allSettings, setSetting, SETTING_KEYS } from '../services/settings.ts';
@@ -42,9 +47,9 @@ interface Route { method: string; re: RegExp; keys: string[]; auth: boolean; ide
 
 const MAX_BODY = 2_000_000;
 
-export interface ServerOptions { port?: number; host?: string; queue?: PrintQueue | null; /** Desktop app: required in X-POS-Secret on every request. */ secret?: string; /** Signed add-ons loaded at startup (src/addons/host.ts). */ addons?: LoadedAddons }
+export interface ServerOptions { port?: number; host?: string; queue?: PrintQueue | null; /** Desktop app: required in X-POS-Secret on every request. */ secret?: string; /** Signed add-ons loaded at startup (src/addons/host.ts). */ addons?: LoadedAddons; /** Restarts the backend in place (startBackend): applies a staged restore. */ restart?: () => void }
 
-export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAddons }): Route[] {
+export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAddons; restart?: () => void }): Route[] {
   const routes: Route[] = [];
   const add = (method: string, path: string, o: { auth?: boolean; idem?: boolean; format?: Route['format'] }, handler: Handler) => {
     const keys: string[] = [];
@@ -238,6 +243,75 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('GET', '/api/health', {}, (c) => { assertPerm(c.actor, 'health.read'); return getHealth(c.ctx, { deep: c.query.get('deep') === '1' }); });
   add('POST', '/api/backup', { idem: false }, async (c) => { assertPerm(c.actor, 'backup.run'); return runBackup(c.ctx, 'manual'); });
   add('GET', '/api/backups', {}, (c) => { assertPerm(c.actor, 'backup.run'); return { status: backupStatus(c.ctx), files: listBackups(c.ctx.backupDir) }; });
+  // ---- Settings > Backups (owner): this device, a copy folder (USB drive), the online backup server, restore ----
+  const copyDir = (c: RC) => getSetting(c.ctx, 'backup_copy_dir') || null;
+  /** A folder with backups: the folder itself, or the TiffinPOS-backups folder inside it. */
+  const backupFolder = (raw: string) => {
+    const p = raw.trim();
+    if (!p || !existsSync(p) || !statSync(p).isDirectory()) throw new AppError('FOLDER_NOT_FOUND', 'That folder was not found. Is the USB drive plugged in?', 404);
+    return existsSync(copyDirOf(p)) ? copyDirOf(p) : p;
+  };
+  const backupOverview = (c: RC) => {
+    const dir = copyDir(c);
+    return {
+      status: backupStatus(c.ctx), files: listBackups(c.ctx.backupDir),
+      copy: { dir, lastAt: Number(getSetting(c.ctx, 'backup_copy_last_at')) || null, error: dir ? getSetting(c.ctx, 'backup_copy_error') || null : null, files: dir ? listBackups(copyDirOf(dir)) : [] },
+      cloud: cloudStatus(c.ctx), everyHoursChoices: EVERY_HOURS, lastRestore: lastRestore(c.ctx), canRestartItself: Boolean(opts.restart),
+    };
+  };
+  const copyNewest = async (c: RC) => {
+    const newest = listBackups(c.ctx.backupDir)[0];
+    if (newest) await copyToFolder(c.ctx, join(c.ctx.backupDir, newest.file));
+    else await runBackup(c.ctx, 'manual'); // the first backup is copied as it is made
+  };
+  add('GET', '/api/backup/overview', {}, (c) => { assertPerm(c.actor, 'backup.run'); return backupOverview(c); });
+  add('PUT', '/api/backup/copy', { idem: false }, async (c) => {
+    assertPerm(c.actor, 'backup.run');
+    const { dir } = body(c, obj({ dir: nullable(str({ max: 500 })) }));
+    if (dir) {
+      const p = dir.trim();
+      if (!existsSync(p) || !statSync(p).isDirectory()) throw new AppError('FOLDER_NOT_FOUND', 'That folder was not found. Is the USB drive plugged in?', 404);
+      setSetting(c.ctx, 'backup_copy_dir', p);
+      audit(c.ctx, c.actor.userId, 'backup.copy_folder', 'settings', undefined, { dir: p });
+      try { await copyNewest(c); } catch { /* shown as the copy error */ }
+    } else {
+      setSetting(c.ctx, 'backup_copy_dir', ''); setSetting(c.ctx, 'backup_copy_error', '');
+      audit(c.ctx, c.actor.userId, 'backup.copy_folder', 'settings', undefined, { dir: null });
+    }
+    return backupOverview(c);
+  });
+  add('POST', '/api/backup/copy/now', { idem: false }, async (c) => { assertPerm(c.actor, 'backup.run'); await copyNewest(c); return backupOverview(c); });
+  add('GET', '/api/backup/folder', {}, (c) => { assertPerm(c.actor, 'backup.run'); const folder = backupFolder(c.query.get('path') ?? ''); return { folder, files: listBackups(folder) }; });
+  add('POST', '/api/backup/cloud/pair', { idem: false }, async (c) => {
+    assertPerm(c.actor, 'backup.run');
+    const b = body(c, obj({ url: str({ min: 1, max: 300 }), code: str({ min: 1, max: 20 }) }));
+    const st = await pairCloud(c.ctx, b.url, b.code, deviceName(c.ctx));
+    audit(c.ctx, c.actor.userId, 'backup.cloud_pair', 'settings', undefined, { url: st.url, store: st.store });
+    return backupOverview(c);
+  });
+  add('PATCH', '/api/backup/cloud', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); setCloudOptions(c.ctx, body(c, obj({ on: opt(bool), everyHours: opt(int({ min: 1, max: 24 })) }))); return backupOverview(c); });
+  add('DELETE', '/api/backup/cloud', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); disconnectCloud(c.ctx); audit(c.ctx, c.actor.userId, 'backup.cloud_disconnect', 'settings'); return backupOverview(c); });
+  add('POST', '/api/backup/cloud/now', { idem: false }, async (c) => { assertPerm(c.actor, 'backup.run'); await backupOnlineNow(c.ctx); return backupOverview(c); });
+  add('GET', '/api/backup/cloud/list', {}, async (c) => { assertPerm(c.actor, 'backup.run'); return { backups: await listOnline(c.ctx) }; });
+  // Restore: the owner's PIN again, the backup is checked and staged, then the POS restarts itself and applies it.
+  add('POST', '/api/restore', { idem: false }, async (c) => {
+    assertPerm(c.actor, 'backup.run');
+    const b = body(c, obj({ source: oneOf('device', 'folder', 'online'), name: str({ min: 1, max: 80 }), folder: opt(str({ max: 500 })), pin: str({ min: 1, max: 12 }) }));
+    confirmPin(c.ctx, c.actor, b.pin);
+    let file: string;
+    if (b.source === 'online') file = await downloadToStage(c.ctx, b.name);
+    else {
+      if (!BACKUP_FILE.test(b.name)) throw new AppError('VALIDATION', 'Unknown backup name.', 400);
+      file = join(b.source === 'device' ? c.ctx.backupDir : backupFolder(b.folder ?? ''), b.name);
+      if (!existsSync(file)) throw new AppError('NOT_FOUND', 'That backup is no longer there.', 404);
+    }
+    stageRestore(c.ctx, file, b.source + ' ' + b.name, c.actor.userId);
+    audit(c.ctx, c.actor.userId, 'backup.restore', 'backup', b.name, { source: b.source });
+    const restart = opts.restart;
+    if (restart) c.res.once('finish', () => setTimeout(restart, 300));
+    return { restarting: Boolean(restart) };
+  });
+  add('POST', '/api/restore/dismiss', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); dismissLastRestore(c.ctx); return { ok: true }; });
   add('POST', '/api/journal/repair', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); return { repaired: repairJournal(c.ctx) }; });
   add('GET', '/api/audit', {}, (c) => { assertPerm(c.actor, 'audit.read'); return listAudit(c.ctx, num(c.query, 'limit') ?? 100, num(c.query, 'offset') ?? 0); });
   add('GET', '/api/audit/verify', {}, (c) => { assertPerm(c.actor, 'audit.read'); return verifyAuditChain(c.ctx.db); });
@@ -298,7 +372,7 @@ function sameSecret(got: string | string[] | undefined, want: Buffer): boolean {
 }
 
 export function createServer(ctx: Ctx, opts: ServerOptions = {}): http.Server {
-  const routes = buildRoutes({ queue: opts.queue ?? null, addons: opts.addons });
+  const routes = buildRoutes({ queue: opts.queue ?? null, addons: opts.addons, restart: opts.restart });
   const secret = opts.secret ? Buffer.from(opts.secret) : null;
   const server = http.createServer(async (req, res) => {
     try {

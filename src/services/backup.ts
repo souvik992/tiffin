@@ -1,7 +1,8 @@
 import { backup } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { copyFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { all, openDb, quickCheck, currentSchemaVersion, AppError } from '../store/db.ts';
 import { IMAGE_FILE, imagesDir } from './images.ts';
 import { SCHEMA_VERSION } from '../store/schema.ts';
@@ -88,7 +89,51 @@ export async function runBackup(ctx: Ctx, kind: BackupKind = 'manual', destDir: 
   const images = backupImages(ctx, file, destDir);
   setSetting(ctx, 'last_backup_at', String(started));
   pruneBackups(destDir);
+  // the offline copy (USB drive or another folder) follows each backup; a missing drive is reported, never fatal
+  if (destDir === ctx.backupDir && getSetting(ctx, 'backup_copy_dir')) await copyToFolder(ctx, file).catch(() => { /* recorded in backup_copy_error */ });
   return { file, bytes: statSync(file).size, verified: true, kind, images };
+}
+
+// ---------- offline copy: a USB drive, an external disk or any other folder ----------
+
+/** The folder the copies go into, inside the folder the owner chose. */
+export const COPY_FOLDER = 'TiffinPOS-backups';
+export const copyDirOf = (chosen: string) => join(chosen, COPY_FOLDER);
+
+/**
+ * Copies one verified backup (and the photos it uses) into the chosen folder. The copy is checked again on the drive
+ * (a USB stick can fail silently), old copies are pruned like the backups folder, and the outcome is recorded.
+ */
+export async function copyToFolder(ctx: Ctx, backupFile: string): Promise<{ file: string; images: number }> {
+  const chosen = getSetting(ctx, 'backup_copy_dir');
+  try {
+    if (!chosen) throw new AppError('NO_COPY_FOLDER', 'Choose a folder for the backup copies first.', 400);
+    if (!existsSync(chosen)) throw new AppError('COPY_FOLDER_MISSING', `The folder ${chosen} is not available. Is the USB drive plugged in?`, 409);
+    const dest = copyDirOf(chosen);
+    mkdirSync(join(dest, 'images'), { recursive: true });
+    const name = basename(backupFile);
+    const tmp = join(dest, `${name}.${process.pid}.tmp`);
+    await copyFile(backupFile, tmp);
+    const v = verifyBackup(tmp);
+    removeSidecars(tmp);
+    if (!v.ok) { try { unlinkSync(tmp); } catch { /* ignore */ } throw new AppError('COPY_FAILED', 'The copy on the drive failed its check. The drive may be faulty.', 500); }
+    renameSync(tmp, join(dest, name));
+    let images = 0;
+    for (const n of referencedImages(join(dest, name))) {
+      const dst = join(dest, 'images', n);
+      if (fingerprintOk(dst, n)) continue;
+      if (copyPhoto(join(ctx.backupDir, 'images', n), dst, n) || copyPhoto(join(imagesDir(ctx), n), dst, n)) images++;
+    }
+    pruneBackups(dest);
+    setSetting(ctx, 'backup_copy_last_at', String(ctx.clock.now()));
+    setSetting(ctx, 'backup_copy_error', '');
+    return { file: join(dest, name), images };
+  } catch (e) {
+    const msg = e instanceof AppError ? e.message : `The backup could not be copied: ${String((e as Error).message ?? e)}`;
+    setSetting(ctx, 'backup_copy_error', msg);
+    ctx.logger.warn('backup copy failed', msg);
+    throw e instanceof AppError ? e : new AppError('COPY_FAILED', msg, 500);
+  }
 }
 
 export function pruneBackups(dir: string): number {
@@ -124,12 +169,22 @@ export function pruneBackupImages(dir: string): number {
   return removed;
 }
 
-export function listBackups(dir: string) {
-  return readdirSync(dir).filter((f) => f.endsWith('.db')).sort().reverse().map((f) => ({ file: f, bytes: statSync(join(dir, f)).size }));
+/** Backup file names: "<kind>-<UTC time stamp>.db", e.g. hourly-20261018T091500123Z.db. */
+export const BACKUP_FILE = /^([a-z]+)-(\d{8}T\d{9}Z)\.db$/;
+const stampTime = (s: string) => Date.parse(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(9, 11)}:${s.slice(11, 13)}:${s.slice(13, 15)}.${s.slice(15, 18)}Z`);
+
+/** The backups in a folder, newest first, with their kind and time. */
+export function listBackups(dir: string): Array<{ file: string; bytes: number; kind: string; at: number }> {
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { return []; }
+  return names.map((f) => [f, BACKUP_FILE.exec(f)] as const).filter((x): x is readonly [string, RegExpExecArray] => x[1] !== null)
+    .map(([f, m]) => ({ file: f, bytes: statSync(join(dir, f)).size, kind: m[1]!, at: stampTime(m[2]!) }))
+    .sort((a, b) => b.at - a.at);
 }
 
 export function backupStatus(ctx: Ctx) {
-  const last = Number(getSetting(ctx, 'last_backup_at')) || null;
+  // the setting comes back with a restored database, so the newest file in the backups folder counts too
+  const last = Math.max(Number(getSetting(ctx, 'last_backup_at')) || 0, listBackups(ctx.backupDir)[0]?.at ?? 0) || null;
   const ageHours = last === null ? null : (ctx.clock.now() - last) / 3_600_000;
   return { lastBackupAt: last, ageHours, warn: last === null || (ageHours ?? 0) > 24 };
 }

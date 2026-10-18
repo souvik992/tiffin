@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import { exec, hash, many, one, openHubDb, tx } from './db.ts';
+import { BackupStore } from './backups.ts';
 import type { Db } from './db.ts';
 import { canTransition, label, needsRefund } from '../../contract/src/order.ts';
 import type { OrderFacts, OrderState } from '../../contract/src/order.ts';
@@ -35,6 +37,11 @@ export interface HubOptions {
   /** A store is "offline" this long after its last POS event stream closed (F8). */
   offlineAfterMs?: number;
   log?: { info(m: string, d?: unknown): void; warn(m: string, d?: unknown): void };
+  /** Online backups from the POS (default: a "backups" folder next to the hub database). */
+  backupDir?: string;
+  /** Backups kept per store (default 30) and the largest accepted upload in bytes (default 1 GB). */
+  backupKeep?: number;
+  backupMaxBytes?: number;
 }
 export interface DeviceRef { deviceId: string; storeId: string; slug: string }
 
@@ -49,6 +56,7 @@ export class Hub {
   db: Db;
   now: () => number;
   bus = new EventEmitter();
+  backups: BackupStore;
   private opts: HubOptions;
   /** open POS event streams per store, and when the last one closed */
   private streams = new Map<string, number>();
@@ -59,6 +67,7 @@ export class Hub {
     this.db = openHubDb(opts.dbPath);
     this.now = opts.now ?? Date.now;
     this.bus.setMaxListeners(0);
+    this.backups = new BackupStore({ dir: opts.backupDir ?? join(dirname(opts.dbPath), 'backups'), keep: opts.backupKeep, maxBytes: opts.backupMaxBytes, now: this.now });
   }
   close() { this.db.close(); }
 
