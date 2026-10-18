@@ -9,6 +9,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { sha256hex, signManifest } from '../../../src/addons/manifest.ts';
 import { zip } from './zip.mjs';
+import { weakenUtilities } from './weaken-css.mjs';
+import { transform } from 'lightningcss';
 
 const here = join(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'));
@@ -49,6 +51,10 @@ writeFileSync(cssIn, [
 const cssOut = join(here, '.build', 'addon.css');
 execFileSync(process.execPath, [join(here, 'node_modules', '@tailwindcss', 'cli', 'dist', 'index.mjs'), '-i', cssIn, '-o', cssOut, '--minify'], { cwd: here, stdio: ['ignore', 'ignore', 'inherit'] });
 rmSync(cssIn);
+// add-on rules must never override the POS's own (see weaken-css.mjs); then check the result is still valid CSS
+const weak = weakenUtilities(readFileSync(cssOut, 'utf8'));
+transform({ filename: 'addon.css', code: Buffer.from(weak), errorRecovery: false });
+writeFileSync(cssOut, weak);
 
 await build({
   entryPoints: [join(here, 'ui', 'index.tsx')], outfile: join(out, 'ui.js'),

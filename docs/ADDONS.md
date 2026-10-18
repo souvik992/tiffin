@@ -33,6 +33,7 @@ The steps, in order:
 * **Screens** may use `host.stream(path, onEvent, onStatus)` (POS 0.3.0) for a live feed; check it exists first.
   * Importing POS code directly would create a second copy of it inside the add-on: `instanceof AppError` would fail and state would split.
 * **Screens:** write normal React. The build maps `react` and `react/jsx-runtime` to the POS's copy (`window.__POS__`). Use `host.useSession()` for `api`, `user` and `notify`, `host.PageShell`/`host.Modal` for layout, and `host.money` to format and parse rupees. The UI never calculates money.
+* **Styles must never outrank the POS:** the add-on's sheet is injected after the POS's, so its build wraps every utility selector in `:where()` (`addons/ods/scripts/weaken-css.mjs`). Otherwise a plain add-on rule such as `.flex-col` beats a POS screen-size rule such as `lg:flex-row` and breaks POS screens (it once stacked Settings and narrowed Billing).
 * **Styles:** the POS's Tailwind only contains classes used by the POS itself. Each add-on builds **its own** style sheet from its own source, with the POS theme copied from `ui/src/styles.css` (see `addons/ods/scripts/build.mjs`), and injects it.
 * **Offline first:** anything that connects to the internet must check the add-on's own switch first (ODS: `isOnlineMode`).
 * **Secrets:** name a setting `<id>_..._key` for anything secret (API keys, device keys). The POS never lists such settings to the screens; keep them out of responses and audit details too.
