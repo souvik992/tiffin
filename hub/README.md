@@ -51,8 +51,9 @@ Open `https://<hub address>/admin` and enter the admin key (kept only in that br
 from one address are refused for the rest of the minute).
 
 - **Orders:** the latest 100 of all stores or one store, filtered Open / Delivered / Cancelled / Failed / All. Each row:
-  order number, sales channel (Swiggy and Zomato in their colours, Website, App), date and time (India time), status,
-  pickup or delivery, payment mode, total. Status is one of Placed, Accepted, Preparing, In transit, Delivered,
+  order number, date and time (India time), status, type (the sales channel's logo: Swiggy, Zomato, the store's app or
+  website, then pickup or delivery), payment mode, total. The Swiggy and Zomato logos are built into the page (from
+  Wikimedia Commons; trademarks of their owners). Status is one of Placed, Accepted, Preparing, In transit, Delivered,
   Cancelled by store, Cancelled by customer or Failed, with what happened (reject reason, rider, "did not reach the
   store: its POS was offline", "the store did not accept in time", payment not completed). **Failed** also lists order
   attempts that never became orders (store offline or closed, changed price, outside the area, missing OTP, technical

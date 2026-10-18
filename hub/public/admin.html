@@ -58,11 +58,9 @@
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; } .seg button.on { background: var(--primary); color: #fff; }
   .storecard { cursor: pointer; } .storecard:hover { border-color: #dcc5ad; }
-  .ch { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-  .ch svg { width: 13px; height: 13px; }
-  .ch.swiggy { background: #FC8019; color: #fff; font-weight: 800; letter-spacing: -.2px; }
-  .ch.zomato { background: #E23744; color: #fff; font-weight: 800; font-style: italic; letter-spacing: -.2px; }
-  .ch.website, .ch.app { background: #ffedd5; color: var(--primary); }
+  .type { display: inline-flex; align-items: center; gap: 8px; }
+  .logo { width: 24px; height: 24px; border-radius: 6px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+  .logo.own { background: #ffedd5; color: var(--primary); } .logo.own svg { width: 15px; height: 15px; }
   .chip.st-placed { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
   .chip.st-accepted, .chip.st-preparing { color: var(--ok); border-color: #bbe5c8; background: #f0fdf4; }
   .chip.st-in_transit { color: #7c3aed; border-color: #ddd6fe; background: #f5f3ff; }
@@ -191,6 +189,11 @@
   const IST = { timeZone: 'Asia/Kolkata' };
   const day = (t) => new Date(t).toLocaleDateString('en-IN', { ...IST, day: '2-digit', month: 'short', year: 'numeric' });
   const clock = (t) => new Date(t).toLocaleTimeString('en-IN', { ...IST, hour: '2-digit', minute: '2-digit' });
+  // Swiggy and Zomato marks (Wikimedia Commons, trademarks of their owners; used to show where an order came from)
+  const LOGO = {
+    swiggy: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kABAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAAAwoAMABAAAAAEAAAAwAAAAANs3bAwAAAHJaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9leGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj45NjwvZXhpZjpQaXhlbFhEaW1lbnNpb24+CiAgICAgICAgIDxleGlmOlBpeGVsWURpbWVuc2lvbj45NjwvZXhpZjpQaXhlbFlEaW1lbnNpb24+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgomMvFNAAAFmklEQVRYCe2YXWxURRTHz5l777aLNKFARdCIKZSQFIFo4kc0QdSoDwZFEkPEBx71SeOLQiRRExOiMTEBfcEHQyDGrxhFgTQCwUpaYqrIZyuwLRBrC2xLSul+3Dsz/mc33e5uu/fObnnggZOlzJ2PM797zpkzM5dTWxfSrSTiVoIxLLeBojxy20JRFnKjOkS1a2V6aE3M5kf4TUtqBNIqIOmTcNiLk+sSC/MY+OSnNAt2Yjm4WsiqB1K+lgHNaRaLn+J7HqHGZhGfaaYHzWhSD54MEof0pd85fYPc+hqwuKrEqP0xPbdFPPxabOnzIt44pQXgQn/wBHXtVCe+YZgN1qpGrIG0VirNy9Z7q98RDfPDg0UjqIjk2Ta/bQtf62N3Rq7Cistu2WvgZPmxN+vWfOo2zMeY8NBFK/q4Lc94L++i+SsRWFYsuU5WQKDRj75et2qTiCApmRdYblOL+9IO3bSYZLakrfKDBVCQFkuei63abNG1fB7DNOte8exW7daZ1GAhUbNoKeONYtUmV4Stx3zQTDkdmGL3PU4PbNRBesoOZZVRQEFGtL7oNC0pG1b2KInShz7M/rW7rD7/CCbnwY3UMI+QvaIkCig201u+HhrDRcAdiYOq90ilbl7jQm5ebRJYlIQCIRLntjhNS8OB4C/kRceLcWW3QoNYtFoL/B+uLPw8pHyat4wQjzdDxF33c30D5fe+ygpDLMRIPqJhbsQbTajG5iqKF1JxpKOs8M+pjwQKWzuYS4joxA9iBUc49Xr032wy4WJVslBa6cwIBWmVHqaRgaC/i84f4tQw9uOJV5iqFAGkCAvITmCenn364lF/RgNiCrmd0ikKUqTShAMAwgubWuUgK8wRBgQfqNEhWDrSa+igV2wQc1oZBhiPEibBLGTmsrzSrQd7GEemwrSVCyFAmoSnkwnSkjjCztDvta6l1rVlIYmXQY0r/aB7r2zbzJnr5uQUKmHN2nFoOKHHhkI1mEa8OhRN1pWvdxzPa31BLHrCJllPVjIxO7NL1/tl/7HcKXWivoaScRYsbSFhQBjOMtDnD1joiegi/Rv6ytmQzFkYHwGEpREkDqux4cKAGgomCV3toaFzCMrI4VFAwtXDieBc23S8Bn+pRLvOpmyO2FFAyK4k9PGvNU7HNQnMI3ES795j4y/MEA1k9rKLndmT39dsJL+vnQdPm7uRhYTkoYnRyG8Kxx2oxF47nvcmmlFi5tnN7NWXVOYecIOTXV8KrcxCsxArIKR8kbqmf3kj49Zp5bOSXFjDQBGeVMpbs81rXVc2I4yavdDh9LXbHxnsgDAPLqlaYGKes0TcuZxmLTC7BJJLNqUuddLFI5wdLaMxj9LXHZ+xlOZ2aye2/Yw2FfDdK+KvfEfejOINLkhdC754crIrYZ7M6R+o9zC5VtGTB7YI6sKbCZeTF2SyFxUYhpjI/wSyiwlYQJaIHkvqju3Y6HMdS5pCHqoBQriMXc0c/RxbQPHk5sND5oZWJTsDzBN0bKPLZ2ySYTFfNUAYh3XU/bP8Z38ByBS8OrFyg1jwUF5vvkn2/qa6dgo3XjyZTdn6bl9QJjO4icZe/dGJzy7UFRcA5KeGgt3rxOAZ8wGkSqnSQtCOc/HA6Wz7x5XypELwH3yfB07VQAP11QPhQOrdof7clenZVxI1OUsY8xz7iv/+lqt3Vt6UNQBh0QiBxHjgPTXyX15L/i9o5MAJffADxgnTfN6rRWoCMkgxGu4Lft0ix2/HoFGpZHbvW5QeibxahJDWCASNxiln9gR/7EAwGRqZDfa/zf3H2JnWxbJ2IMMk6lT7J/JSB4LJP/yROvUTwivk7W2anHefnmXTb+o+CBQ/LQeOU2pUdW5nx8XNaeqe1rXV56FJqnFHZR3om0ED3dVsrpNQ8hX4Lo1sPV3LjCv/H6MPCLwmF2rOAAAAAElFTkSuQmCC',
+    zomato: 'data:image/png;base64,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',
+  };
   const STATUS = { placed: 'Placed', accepted: 'Accepted', preparing: 'Preparing', in_transit: 'In transit', delivered: 'Delivered', cancelled_store: 'Cancelled by store', cancelled_customer: 'Cancelled by customer', failed: 'Failed' };
   const statusChip = (o) => chip(`st-${o.status}`, STATUS[o.status] || o.status);
   const payMode = (o) => !o.payment ? '-' : o.payment === 'COD' ? (o.fulfilment === 'PICKUP' ? 'Cash at pickup' : 'Cash on delivery') : `Online${o.kind === 'order' ? (o.paid ? ' (paid)' : ' (not paid)') : ''}`;
@@ -200,13 +203,15 @@
     for (const d of paths) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); el.append(p); }
     return el;
   }
-  /** Sales channel badge in the channel's own colours (as on the POS ODS): Swiggy, Zomato, the store's website or app. */
-  function channelBadge(c) {
-    if (c === 'swiggy') return h('span', { class: 'ch swiggy', title: 'Swiggy' }, 'Swiggy');
-    if (c === 'zomato') return h('span', { class: 'ch zomato', title: 'Zomato' }, 'zomato');
-    if (c === 'app') return h('span', { class: 'ch app', title: "The store's app" }, svg(['M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z', 'M12 18h.01']), 'App');
-    if (c === 'website') return h('span', { class: 'ch website', title: "The store's website" }, svg(['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z', 'M2 12h20', 'M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z']), 'Website');
-    return h('span', { class: 'chip plain' }, c || '-');
+
+  /** The order's sales channel as a logo: Swiggy, Zomato, or the store's own app or website. */
+  const CHANNEL_NAME = { swiggy: 'Swiggy', zomato: 'Zomato', app: "Store's app", website: "Store's website" };
+  function channelLogo(c) {
+    const name = CHANNEL_NAME[c] || c || 'Unknown';
+    if (LOGO[c]) return h('img', { class: 'logo', src: LOGO[c], alt: name, title: name });
+    if (c === 'app') return h('span', { class: 'logo own', title: name, 'aria-label': name }, svg(['M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z', 'M12 18h.01']));
+    if (c === 'website') return h('span', { class: 'logo own', title: name, 'aria-label': name }, svg(['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z', 'M2 12h20', 'M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z']));
+    return h('span', { class: 'logo own', title: name }, '?');
   }
   const REJECT = { ITEM_UNAVAILABLE: 'Item not available', TOO_BUSY: 'Too busy', CLOSING: 'Closing', OUT_OF_DELIVERY_AREA: 'Outside delivery area', OTHER: 'Other' };
 
@@ -278,15 +283,15 @@
       const EMPTY = { open: 'No open orders right now.', delivered: 'No delivered orders yet.', cancelled: 'No cancelled orders.', failed: 'No failed orders.', all: 'No orders yet.' };
       if (!orders.length) { list.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, EMPTY[ui.orderStatus])); return; }
       const showStore = !ui.orderStore;
-      const cols = 8 + (showStore ? 1 : 0);
+      const cols = 7 + (showStore ? 1 : 0);
       list.replaceChildren(h('table', {},
-        h('thead', {}, h('tr', {}, h('th', {}, 'Order'), h('th', {}, 'Channel'), showStore ? h('th', {}, 'Store') : null, h('th', {}, 'Date'), h('th', {}, 'Time'), h('th', {}, 'Status'), h('th', {}, 'Type'), h('th', {}, 'Payment mode'), h('th', { class: 'num' }, 'Total'))),
+        h('thead', {}, h('tr', {}, h('th', {}, 'Order'), showStore ? h('th', {}, 'Store') : null, h('th', {}, 'Date'), h('th', {}, 'Time'), h('th', {}, 'Status'), h('th', {}, 'Type'), h('th', {}, 'Payment mode'), h('th', { class: 'num' }, 'Total'))),
         h('tbody', {}, orders.map((o) => [
           h('tr', { class: 'order', onclick: () => { ui.expanded.has(o.id) ? ui.expanded.delete(o.id) : ui.expanded.add(o.id); renderOrders(); } },
-            h('td', {}, o.number ? h('b', {}, o.number) : h('span', { class: 'muted' }, 'Not placed')), h('td', {}, channelBadge(o.channel)), showStore ? h('td', {}, o.store.name) : null,
+            h('td', {}, o.number ? h('b', {}, o.number) : h('span', { class: 'muted' }, 'Not placed')), showStore ? h('td', {}, o.store.name) : null,
             h('td', {}, day(o.placedAt)), h('td', {}, clock(o.placedAt)),
             h('td', {}, statusChip(o), o.statusDetail ? h('div', { class: 'sub' }, o.statusDetail) : null),
-            h('td', {}, o.fulfilment === 'DELIVERY' ? 'Delivery' : o.fulfilment === 'PICKUP' ? 'Pickup' : '-'),
+            h('td', {}, h('span', { class: 'type' }, channelLogo(o.channel), o.fulfilment === 'DELIVERY' ? 'Delivery' : o.fulfilment === 'PICKUP' ? 'Pickup' : '-')),
             h('td', {}, payMode(o)), h('td', { class: 'num' }, o.total == null ? '-' : rupees(o.total))),
           ui.expanded.has(o.id) ? h('tr', { class: 'detail' }, h('td', { colspan: String(cols) }, orderDetail(o))) : null,
         ]))));
@@ -310,7 +315,7 @@
         kv('Name', o.customerName || '-'), kv('Mobile', [o.mobile, ' ', o.verified ? chip('ok', 'OTP verified') : chip('plain', 'Not verified')]),
         addr ? kv('Address', addr) : null, o.distanceKm != null ? kv('Distance', `${o.distanceKm} km`) : null,
         h('h3', { style: 'margin-top:12px' }, 'Store'),
-        kv('Store', o.store.name), kv('Status', [statusChip(o), o.statusDetail ? ` ${o.statusDetail}` : '']), kv('Order step', o.label), kv('Payment mode', payMode(o)), kv('POS bill', o.posBillNo || '-'), o.prepMinutes ? kv('Preparation time', `${o.prepMinutes} min`) : null,
+        kv('Store', o.store.name), kv('Channel', h('span', { class: 'type' }, channelLogo(o.channel), CHANNEL_NAME[o.channel] || o.channel)), kv('Status', [statusChip(o), o.statusDetail ? ` ${o.statusDetail}` : '']), kv('Order step', o.label), kv('Payment mode', payMode(o)), kv('POS bill', o.posBillNo || '-'), o.prepMinutes ? kv('Preparation time', `${o.prepMinutes} min`) : null,
         o.rider ? kv('Rider', `${o.rider.name}${o.rider.phone ? ` (${o.rider.phone})` : ''}`) : null,
         o.rejectReason ? kv('Reject reason', REJECT[o.rejectReason] || o.rejectReason) : null, o.reasonText ? kv('Reason', o.reasonText) : null,
         kv('Last change', when(o.updatedAt))));
