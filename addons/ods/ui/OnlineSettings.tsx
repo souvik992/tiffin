@@ -30,10 +30,10 @@ function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: 
     </button>
   );
 }
-function Row({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+function Row({ title, hint, children }: { title: ReactNode; hint: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-4 py-3">
-      <div className="flex-1"><p className="text-sm font-semibold">{title}</p><p className="text-xs text-muted-foreground">{hint}</p></div>
+      <div className="flex-1"><div className="mb-1 text-sm font-semibold">{title}</div><p className="text-xs text-muted-foreground">{hint}</p></div>
       {children}
     </div>
   );
@@ -92,8 +92,7 @@ export function OnlineSettings() {
               <p className="text-sm text-muted-foreground">Where online orders come from. Turn on at least one.</p>
               <div className="divide-y divide-border">
                 {(Object.keys(CHANNEL_LABELS) as Channel[]).map((c) => (
-                  <Row key={c} title={CHANNEL_LABELS[c]} hint={HINTS[c]}>
-                    <ChannelBadge channel={c} />
+                  <Row key={c} title={<ChannelBadge channel={c} size="md" />} hint={HINTS[c]}>
                     <button type="button" className="btn-ghost h-9 px-3" onClick={() => setSyncing(c)} aria-label={`${CHANNEL_LABELS[c]} menu sync settings`} title="Menu sync: items and prices for this channel">
                       <Settings2 className="h-4 w-4" />Menu sync
                     </button>
