@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Hub admin</title>
+<style>
+  :root { --bg: #f6f2ec; --card: #fff; --text: #3a2a1f; --muted: #8a7b6e; --primary: #ea580c; --line: #eadfd3; --ok: #16a34a; --bad: #b91c1c; --warn: #b45309; --soft: #fffaf5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+  header .in { max-width: 1040px; margin: 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 19px; flex: 1; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a { text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; font-size: 14px; }
+  nav a.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+  main { max-width: 1040px; margin: 0 auto; padding: 8px 16px 60px; }
+  h2 { font-size: 17px; margin: 18px 0 8px; } h3 { margin: 0 0 6px; font-size: 15px; }
+  a { color: var(--primary); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .banner { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: #fee2e2; color: #7f1d1d; }
+  .banner.info { background: #fef3c7; color: #78350f; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 10px 0; }
+  button { font: inherit; font-size: 14px; border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; background: #fff; color: var(--text); cursor: pointer; }
+  button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  button.danger { color: var(--bad); border-color: #f3c4c4; }
+  button.link { border: 0; background: none; color: var(--primary); padding: 0; }
+  button:disabled { opacity: .5; cursor: default; }
+  label { display: block; font-size: 13px; margin: 10px 0 3px; font-weight: 600; }
+  input, select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .err { color: var(--bad); font-size: 13px; margin-top: 4px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .between { justify-content: space-between; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 16px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 12px; }
+  .chip { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid; white-space: nowrap; }
+  .chip.ok { color: var(--ok); border-color: #bbe5c8; background: #f0fdf4; }
+  .chip.bad { color: var(--bad); border-color: #f3c4c4; background: #fef2f2; }
+  .chip.warn { color: var(--warn); border-color: #f5d9a8; background: #fffbeb; }
+  .chip.plain { color: var(--muted); border-color: var(--line); background: #fff; }
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 10px 0; font-size: 13px; color: var(--muted); }
+  .stats b { display: block; font-size: 18px; color: var(--text); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; background: var(--soft); }
+  .linkbox { display: flex; gap: 8px; margin-top: 6px; } .linkbox input { font: 14px ui-monospace, Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  tr.order { cursor: pointer; } tr.order:hover td { background: var(--soft); }
+  tr.detail td { background: var(--soft); white-space: normal; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .kv:last-child { border-bottom: 0; } .kv > span:last-child { text-align: right; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; } .filters > div { min-width: 180px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; } .seg button.on { background: var(--primary); color: #fff; }
+  .storecard { cursor: pointer; } .storecard:hover { border-color: #dcc5ad; }
+  .ch { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ch svg { width: 13px; height: 13px; }
+  .ch.swiggy { background: #FC8019; color: #fff; font-weight: 800; letter-spacing: -.2px; }
+  .ch.zomato { background: #E23744; color: #fff; font-weight: 800; font-style: italic; letter-spacing: -.2px; }
+  .ch.website, .ch.app { background: #ffedd5; color: var(--primary); }
+  .chip.st-placed { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+  .chip.st-accepted, .chip.st-preparing { color: var(--ok); border-color: #bbe5c8; background: #f0fdf4; }
+  .chip.st-in_transit { color: #7c3aed; border-color: #ddd6fe; background: #f5f3ff; }
+  .chip.st-delivered { color: #166534; border-color: #86efac; background: #dcfce7; font-weight: 600; }
+  .chip.st-cancelled_store, .chip.st-cancelled_customer { color: var(--bad); border-color: #f3c4c4; background: #fef2f2; }
+  .chip.st-failed { color: #fff; border-color: #991b1b; background: #b91c1c; }
+  td .sub { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: normal; max-width: 280px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header><div class="in">
+  <h1>Hub admin</h1>
+  <nav id="nav" class="hidden">
+    <a href="#orders" data-tab="orders">Orders</a>
+    <a href="#stores" data-tab="stores">Stores</a>
+    <a href="#settings" data-tab="settings">Hub settings</a>
+    <a href="#" id="signout">Sign out</a>
+  </nav>
+</div></header>
+<main>
+  <div id="insecure" class="banner hidden">This page is open over plain http. The admin key can be read on the network: use the hub's https:// address.</div>
+
+  <section id="login" class="card hidden" style="max-width:420px;margin:40px auto">
+    <h3>Sign in</h3>
+    <p class="muted">Enter the hub's admin key (HUB_ADMIN_KEY). It is kept only in this browser tab.</p>
+    <form id="loginForm">
+      <label for="key">Admin key</label>
+      <input id="key" type="password" autocomplete="current-password" required>
+      <div id="loginErr" class="err"></div>
+      <div class="actions"><button class="primary" type="submit">Sign in</button></div>
+    </form>
+  </section>
+
+  <div id="hubWarn"></div>
+
+  <!-- ===================================================== orders -->
+  <section id="orders" class="hidden">
+    <div class="row between"><h2>Online orders</h2><span class="muted" data-updated></span></div>
+    <div class="card filters">
+      <div><label for="orderStore">Store</label><select id="orderStore"></select></div>
+      <div><label>Show</label><div class="seg" id="orderStatus"><button data-v="open">Open</button><button data-v="delivered">Delivered</button><button data-v="cancelled">Cancelled</button><button data-v="failed">Failed</button><button data-v="all">All</button></div></div>
+    </div>
+    <div class="card scroll" id="orderList"></div>
+    <p class="muted">The latest 100. Click an order for its items, customer and address. Mobile numbers are partly hidden. "Failed" includes orders that could not be placed at all (store offline, price changed, technical errors); those are kept 30 days. Times are India time.</p>
+  </section>
+
+  <!-- ===================================================== stores -->
+  <section id="stores" class="hidden">
+    <div class="row between"><h2>Stores</h2><span class="muted" data-updated></span></div>
+    <div id="storeList"></div>
+    <div class="card">
+      <h3>Add a store</h3>
+      <p class="muted" style="margin:0">You get a connection link. The shop pastes it into its POS (Settings &gt; Online orders &gt; Order hub) and is connected.</p>
+      <form id="addForm" class="grid">
+        <div><label for="newName">Store name</label><input id="newName" maxlength="80" required placeholder="Tiffin Kalyan Nagar"></div>
+        <div><label for="newSlug">Store address</label><input id="newSlug" maxlength="41" required placeholder="kalyan-nagar" pattern="[a-z0-9][a-z0-9\-]{2,40}">
+          <div class="hint">Lowercase letters, digits and dashes. Used in the ordering link; cannot be changed later.</div></div>
+      </form>
+      <div id="addErr" class="err"></div>
+      <div class="actions"><button class="primary" type="submit" form="addForm">Add store</button></div>
+      <div id="addResult"></div>
+    </div>
+  </section>
+
+  <section id="store" class="hidden"></section>
+
+  <!-- ===================================================== settings -->
+  <section id="settings" class="hidden">
+    <h2>Hub settings</h2>
+    <div class="card">
+      <form id="settingsForm">
+        <label for="routingUrl">Road-routing server</label>
+        <input id="routingUrl" placeholder="https://osrm.example.com">
+        <div class="hint">An OSRM-compatible server for real road distances. Empty: straight line × each store's road factor.</div>
+        <div class="err" data-err="routingUrl"></div>
+        <div class="grid">
+          <div><label for="offlineAfterSec">Store offline after (seconds)</label><input id="offlineAfterSec" type="number" min="15" max="3600" required>
+            <div class="hint">How long after its POS loses connection a store stops taking orders.</div><div class="err" data-err="offlineAfterSec"></div></div>
+          <div><label for="pairingCodeMinutes">Connection links valid for (minutes)</label><input id="pairingCodeMinutes" type="number" min="5" max="1440" required>
+            <div class="hint">Applies to new links.</div><div class="err" data-err="pairingCodeMinutes"></div></div>
+        </div>
+        <h3 style="margin-top:18px">Request limits</h3>
+        <div class="hint">Per minute, per customer internet address. Protects against abuse; too low blocks real customers.</div>
+        <div class="grid">
+          <div><label for="otpPerMinute">OTP requests</label><input id="otpPerMinute" type="number" min="1" max="100" required><div class="err" data-err="otpPerMinute"></div></div>
+          <div><label for="ordersPerMinute">Orders placed</label><input id="ordersPerMinute" type="number" min="1" max="1000" required><div class="err" data-err="ordersPerMinute"></div></div>
+          <div><label for="pairPerMinute">POS connection attempts</label><input id="pairPerMinute" type="number" min="1" max="100" required><div class="err" data-err="pairPerMinute"></div></div>
+        </div>
+        <div id="settingsErr" class="err"></div>
+        <div class="actions"><button class="primary" type="submit">Save settings</button><span id="settingsSaved" class="muted"></span></div>
+      </form>
+    </div>
+    <h2>Set when the hub starts</h2>
+    <div class="card" id="fixed"></div>
+    <p class="muted">These change only by restarting the hub with different environment variables (see hub/README.md), so the admin key alone can never switch them on.</p>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const keyStore = { get: () => { try { return sessionStorage.getItem('hubAdminKey') || ''; } catch { return ''; } },
+    set: (v) => { try { v ? sessionStorage.setItem('hubAdminKey', v) : sessionStorage.removeItem('hubAdminKey'); } catch { /* private window */ } } };
+  let key = keyStore.get(), overview = null, timer = null, settingsDirty = false;
+  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false };
+
+  if (location.protocol === 'http:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) $('insecure').classList.remove('hidden');
+
+  /** DOM helper: text only, never HTML (store, item and customer names come from shops and customers). */
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else if (k === 'class') el.className = v; else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const k of kids.flat(3)) if (k !== null && k !== undefined && k !== false) el.append(k instanceof Node ? k : document.createTextNode(String(k)));
+    return el;
+  }
+  const when = (t) => t ? new Date(t).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
+  const ago = (t) => { if (!t) return 'never'; const s = Math.round((Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : when(t); };
+  const rupees = (paise) => '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const qty = (milli) => String(milli / 1000);
+  const chip = (cls, text) => h('span', { class: `chip ${cls}` }, text);
+  const yesNo = (on, yes = 'On', no = 'Off') => chip(on ? 'ok' : 'plain', on ? yes : no);
+  const kv = (k, v) => h('div', { class: 'kv' }, h('span', {}, k), h('span', {}, v));
+  const IST = { timeZone: 'Asia/Kolkata' };
+  const day = (t) => new Date(t).toLocaleDateString('en-IN', { ...IST, day: '2-digit', month: 'short', year: 'numeric' });
+  const clock = (t) => new Date(t).toLocaleTimeString('en-IN', { ...IST, hour: '2-digit', minute: '2-digit' });
+  const STATUS = { placed: 'Placed', accepted: 'Accepted', preparing: 'Preparing', in_transit: 'In transit', delivered: 'Delivered', cancelled_store: 'Cancelled by store', cancelled_customer: 'Cancelled by customer', failed: 'Failed' };
+  const statusChip = (o) => chip(`st-${o.status}`, STATUS[o.status] || o.status);
+  const payMode = (o) => !o.payment ? '-' : o.payment === 'COD' ? (o.fulfilment === 'PICKUP' ? 'Cash at pickup' : 'Cash on delivery') : `Online${o.kind === 'order' ? (o.paid ? ' (paid)' : ' (not paid)') : ''}`;
+  function svg(paths) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    el.setAttribute('viewBox', '0 0 24 24'); el.setAttribute('fill', 'none'); el.setAttribute('stroke', 'currentColor'); el.setAttribute('stroke-width', '2'); el.setAttribute('stroke-linecap', 'round');
+    for (const d of paths) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); el.append(p); }
+    return el;
+  }
+  /** Sales channel badge in the channel's own colours (as on the POS ODS): Swiggy, Zomato, the store's website or app. */
+  function channelBadge(c) {
+    if (c === 'swiggy') return h('span', { class: 'ch swiggy', title: 'Swiggy' }, 'Swiggy');
+    if (c === 'zomato') return h('span', { class: 'ch zomato', title: 'Zomato' }, 'zomato');
+    if (c === 'app') return h('span', { class: 'ch app', title: "The store's app" }, svg(['M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z', 'M12 18h.01']), 'App');
+    if (c === 'website') return h('span', { class: 'ch website', title: "The store's website" }, svg(['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z', 'M2 12h20', 'M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z']), 'Website');
+    return h('span', { class: 'chip plain' }, c || '-');
+  }
+  const REJECT = { ITEM_UNAVAILABLE: 'Item not available', TOO_BUSY: 'Too busy', CLOSING: 'Closing', OUT_OF_DELIVERY_AREA: 'Outside delivery area', OTHER: 'Other' };
+
+  async function api(method, path, body) {
+    const r = await fetch(path, { method, headers: { 'X-Admin-Key': key, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const j = await r.json().catch(() => null);
+    if (r.status === 403) { signOut('The admin key is wrong.'); throw new Error('The admin key is wrong.'); }
+    if (!r.ok) { const e = new Error(j?.error?.message || `Request failed (${r.status}).`); e.fields = j?.error?.details?.fields; throw e; }
+    return j;
+  }
+
+  // ------------------------------------------------------------ routing (#orders, #stores, #stores/<slug>, #settings)
+  function route() {
+    const [tab, slug] = location.hash.replace(/^#/, '').split('/');
+    return { tab: ['orders', 'stores', 'settings'].includes(tab) ? tab : 'orders', slug: tab === 'stores' && slug ? decodeURIComponent(slug) : null };
+  }
+  function show() {
+    const signedIn = Boolean(key), r = route();
+    $('login').classList.toggle('hidden', signedIn);
+    $('nav').classList.toggle('hidden', !signedIn);
+    $('hubWarn').classList.toggle('hidden', !signedIn);
+    $('orders').classList.toggle('hidden', !signedIn || r.tab !== 'orders');
+    $('stores').classList.toggle('hidden', !signedIn || r.tab !== 'stores' || Boolean(r.slug));
+    $('store').classList.toggle('hidden', !signedIn || !r.slug);
+    $('settings').classList.toggle('hidden', !signedIn || r.tab !== 'settings');
+    for (const a of document.querySelectorAll('nav [data-tab]')) a.classList.toggle('on', a.dataset.tab === r.tab);
+  }
+  window.addEventListener('hashchange', () => { ui.pausing = false; show(); refresh(); });
+
+  function signOut(msg) { key = ''; keyStore.set(''); overview = null; clearInterval(timer); timer = null; $('loginErr').textContent = msg || ''; show(); }
+  const typing = () => document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName) && document.activeElement.closest('#store, #storeList');
+
+  async function refresh() {
+    if (!key) return;
+    try {
+      overview = await api('GET', '/v1/admin/overview');
+      renderWarnings(); fillStoreFilter();
+      const r = route();
+      if (r.tab === 'orders') await renderOrders();
+      else if (r.slug) { if (!typing()) await renderStore(r.slug); }
+      else if (r.tab === 'stores') renderStores();
+      if (!settingsDirty) fillSettings();
+      for (const el of document.querySelectorAll('[data-updated]')) el.textContent = `Updated ${new Date().toLocaleTimeString('en-IN')}`;
+    } catch (e) { for (const el of document.querySelectorAll('[data-updated]')) el.textContent = e.message; }
+  }
+
+  function renderWarnings() {
+    const hub = overview.hub;
+    $('hubWarn').replaceChildren(...(hub.devOtp ? [h('div', { class: 'banner' }, 'OTP codes are shown to customers (HUB_DEV_OTP=1). Use this only for development and testing.')] : []),
+      ...(!hub.smsProvider ? [h('div', { class: 'banner info' }, 'No SMS provider is set up yet: customers cannot receive OTP codes by SMS.')] : []));
+  }
+
+  // ------------------------------------------------------------ orders
+  function fillStoreFilter() {
+    const sel = $('orderStore');
+    const want = [['', 'All stores'], ...overview.stores.map((s) => [s.slug, s.name])];
+    if (sel.options.length !== want.length || [...sel.options].some((o, i) => o.value !== want[i][0])) sel.replaceChildren(...want.map(([v, t]) => h('option', { value: v }, t)));
+    sel.value = ui.orderStore;
+    for (const b of $('orderStatus').children) b.classList.toggle('on', b.dataset.v === ui.orderStatus);
+  }
+  $('orderStore').addEventListener('change', (e) => { ui.orderStore = e.target.value; renderOrders(); });
+  for (const b of $('orderStatus').children) b.addEventListener('click', () => { ui.orderStatus = b.dataset.v; fillStoreFilter(); renderOrders(); });
+
+  async function renderOrders() {
+    const q = new URLSearchParams({ status: ui.orderStatus, limit: '100', ...(ui.orderStore ? { store: ui.orderStore } : {}) });
+    const list = $('orderList');
+    try {
+      const { orders } = await api('GET', `/v1/admin/orders?${q}`);
+      const EMPTY = { open: 'No open orders right now.', delivered: 'No delivered orders yet.', cancelled: 'No cancelled orders.', failed: 'No failed orders.', all: 'No orders yet.' };
+      if (!orders.length) { list.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, EMPTY[ui.orderStatus])); return; }
+      const showStore = !ui.orderStore;
+      const cols = 8 + (showStore ? 1 : 0);
+      list.replaceChildren(h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Order'), h('th', {}, 'Channel'), showStore ? h('th', {}, 'Store') : null, h('th', {}, 'Date'), h('th', {}, 'Time'), h('th', {}, 'Status'), h('th', {}, 'Type'), h('th', {}, 'Payment mode'), h('th', { class: 'num' }, 'Total'))),
+        h('tbody', {}, orders.map((o) => [
+          h('tr', { class: 'order', onclick: () => { ui.expanded.has(o.id) ? ui.expanded.delete(o.id) : ui.expanded.add(o.id); renderOrders(); } },
+            h('td', {}, o.number ? h('b', {}, o.number) : h('span', { class: 'muted' }, 'Not placed')), h('td', {}, channelBadge(o.channel)), showStore ? h('td', {}, o.store.name) : null,
+            h('td', {}, day(o.placedAt)), h('td', {}, clock(o.placedAt)),
+            h('td', {}, statusChip(o), o.statusDetail ? h('div', { class: 'sub' }, o.statusDetail) : null),
+            h('td', {}, o.fulfilment === 'DELIVERY' ? 'Delivery' : o.fulfilment === 'PICKUP' ? 'Pickup' : '-'),
+            h('td', {}, payMode(o)), h('td', { class: 'num' }, o.total == null ? '-' : rupees(o.total))),
+          ui.expanded.has(o.id) ? h('tr', { class: 'detail' }, h('td', { colspan: String(cols) }, orderDetail(o))) : null,
+        ]))));
+    } catch (e) { list.replaceChildren(h('span', { class: 'err' }, e.message)); }
+  }
+
+  function orderDetail(o) {
+    if (o.kind === 'attempt') return h('div', { class: 'cols' },
+      h('div', {}, h('h3', {}, 'Why it failed'), h('p', { style: 'margin:0' }, o.statusDetail), h('p', { class: 'muted' }, `Error code: ${o.errorCode}. The order was not placed and nothing reached the store; the customer was shown this message.`)),
+      h('div', {}, h('h3', {}, 'Customer'), kv('Name', o.customerName || '-'), kv('Mobile', o.mobile || '-'), kv('Store', o.store.name), kv('Attempted at', `${day(o.placedAt)}, ${clock(o.placedAt)}`)));
+    const addr = o.address ? [o.address.line1, o.address.line2, o.address.landmark, `${o.address.city} ${o.address.pincode}`].filter(Boolean).join(', ') : null;
+    return h('div', { class: 'cols' },
+      h('div', {}, h('h3', {}, 'Items'),
+        h('table', {}, h('tbody', {}, o.lines.map((l) => h('tr', {}, h('td', {}, `${qty(l.qtyMilli)} ×`), h('td', { style: 'white-space:normal' }, l.name, l.modifiers.length ? h('div', { class: 'muted' }, l.modifiers.join(', ')) : null, l.note ? h('div', { class: 'muted' }, `Note: ${l.note}`) : null), h('td', { class: 'num' }, rupees(l.lineTotal)))),
+          h('tr', {}, h('td', {}), h('td', {}, 'Items'), h('td', { class: 'num' }, rupees(o.itemsTotal))),
+          o.deliveryFee ? h('tr', {}, h('td', {}), h('td', {}, 'Delivery fee'), h('td', { class: 'num' }, rupees(o.deliveryFee))) : null,
+          o.packagingFee ? h('tr', {}, h('td', {}), h('td', {}, 'Packaging'), h('td', { class: 'num' }, rupees(o.packagingFee))) : null,
+          h('tr', {}, h('td', {}), h('td', {}, h('b', {}, 'Total')), h('td', { class: 'num' }, h('b', {}, rupees(o.total)))))),
+        o.note ? h('p', { class: 'muted' }, `Order note: ${o.note}`) : null),
+      h('div', {}, h('h3', {}, 'Customer'),
+        kv('Name', o.customerName || '-'), kv('Mobile', [o.mobile, ' ', o.verified ? chip('ok', 'OTP verified') : chip('plain', 'Not verified')]),
+        addr ? kv('Address', addr) : null, o.distanceKm != null ? kv('Distance', `${o.distanceKm} km`) : null,
+        h('h3', { style: 'margin-top:12px' }, 'Store'),
+        kv('Store', o.store.name), kv('Status', [statusChip(o), o.statusDetail ? ` ${o.statusDetail}` : '']), kv('Order step', o.label), kv('Payment mode', payMode(o)), kv('POS bill', o.posBillNo || '-'), o.prepMinutes ? kv('Preparation time', `${o.prepMinutes} min`) : null,
+        o.rider ? kv('Rider', `${o.rider.name}${o.rider.phone ? ` (${o.rider.phone})` : ''}`) : null,
+        o.rejectReason ? kv('Reject reason', REJECT[o.rejectReason] || o.rejectReason) : null, o.reasonText ? kv('Reason', o.reasonText) : null,
+        kv('Last change', when(o.updatedAt))));
+  }
+
+  // ------------------------------------------------------------ stores list
+  function statusChips(s) {
+    return [s.connected ? chip('ok', 'POS online') : chip('bad', 'POS offline'), s.pausedReason ? chip('bad', 'Paused by hub') : null,
+      s.accepting ? chip('ok', 'Shift open') : chip('warn', 'Not accepting'), s.open.open ? chip('ok', 'Customers can order') : null];
+  }
+  function renderStores() {
+    const list = $('storeList');
+    if (!overview.stores.length) { list.replaceChildren(h('div', { class: 'card muted' }, 'No stores yet. Add the first one below.')); return; }
+    list.replaceChildren(...overview.stores.map((s) => h('div', { class: 'card storecard', onclick: () => { location.hash = `#stores/${encodeURIComponent(s.slug)}`; } },
+      h('div', { class: 'row between' }, h('div', {}, h('h3', { style: 'margin:0' }, s.name), h('div', { class: 'muted' }, `/order/${s.slug}`)), h('div', { class: 'row' }, statusChips(s))),
+      h('div', { class: 'stats' }, h('div', {}, h('b', {}, s.openOrders), 'open orders'), h('div', {}, h('b', {}, s.ordersLastDay), 'orders in 24 h'),
+        h('div', {}, h('b', {}, s.menuVersion ? `v${s.menuVersion}` : '-'), `menu, ${s.menuItems} items`), h('div', {}, h('b', {}, s.devices.filter((d) => !d.revokedAt).length), 'POS connected'),
+        h('div', {}, h('b', {}, ago(s.lastSeenAt)), 'POS last seen')))));
+  }
+
+  function linkBox(l, title) {
+    const input = h('input', { readonly: true, value: l.connectUrl, 'aria-label': 'Connection link', onfocus: (e) => e.target.select() });
+    const btn = h('button', { class: 'primary', onclick: async () => {
+      try { await navigator.clipboard.writeText(l.connectUrl); } catch { input.focus(); input.select(); document.execCommand && document.execCommand('copy'); }
+      btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    } }, 'Copy');
+    return h('div', { class: 'box' }, h('div', {}, title), h('div', { class: 'linkbox' }, input, btn),
+      h('div', { class: 'hint' }, `Paste it in the POS: Settings > Online orders > Order hub > Connect. Works once, until ${when(l.expiresAt)}.`));
+  }
+
+  $('addForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('addErr').textContent = '';
+    try {
+      const s = await api('POST', '/v1/admin/stores', { slug: $('newSlug').value.trim(), name: $('newName').value.trim() });
+      $('addForm').reset();
+      ui.links.set(s.slug, s);
+      $('addResult').replaceChildren(linkBox(s, `Store "${s.name}" added. Send this connection link to the shop:`));
+      await refresh();
+    } catch (e) { $('addErr').textContent = e.message; }
+  });
+
+  // ------------------------------------------------------------ one store
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  async function renderStore(slug) {
+    const box = $('store');
+    let s;
+    try { s = await api('GET', `/v1/admin/stores/${encodeURIComponent(slug)}`); }
+    catch (e) { box.replaceChildren(h('p', {}, h('a', { href: '#stores' }, '← All stores')), h('div', { class: 'card err' }, e.message)); return; }
+    const p = s.published, link = ui.links.get(slug);
+    const err = h('div', { class: 'err' });
+    const pauseInput = h('input', { maxlength: '200', placeholder: 'This store is not taking online orders right now.' });
+    box.replaceChildren(
+      h('p', { style: 'margin:14px 0 0' }, h('a', { href: '#stores' }, '← All stores')),
+      h('div', { class: 'row between' }, h('div', {}, h('h2', { style: 'margin-bottom:0' }, s.name), h('div', { class: 'muted' }, `Ordering page: `, h('a', { href: `/order/${encodeURIComponent(s.slug)}`, target: '_blank', rel: 'noopener' }, `/order/${s.slug}`))), h('div', { class: 'row' }, statusChips(s))),
+      !s.open.open && s.open.reason ? h('div', { class: 'banner info' }, `Customers see: "${s.open.reason}"`) : null,
+      h('div', { class: 'card' },
+        h('div', { class: 'stats', style: 'margin-top:0' }, h('div', {}, h('b', {}, s.openOrders), 'open orders'), h('div', {}, h('b', {}, s.ordersLastDay), 'orders in 24 h'),
+          h('div', {}, h('b', {}, ago(s.lastSeenAt)), 'POS last seen'), h('div', {}, h('b', {}, when(s.createdAt)), 'added')),
+        h('div', { class: 'actions' },
+          h('button', { onclick: () => { ui.orderStore = slug; location.hash = '#orders'; } }, 'View orders'),
+          h('button', { onclick: async () => { try { ui.links.set(slug, await api('POST', `/v1/admin/stores/${encodeURIComponent(slug)}/pairing-code`)); renderStore(slug); } catch (e) { err.textContent = e.message; } } }, 'New connection link'),
+          s.pausedReason ? h('button', { class: 'primary', onclick: () => pause(slug, false, '', err) }, 'Resume online orders')
+            : h('button', { class: 'danger', onclick: () => { ui.pausing = !ui.pausing; renderStore(slug); } }, 'Pause online orders')),
+        err,
+        ui.pausing && !s.pausedReason ? h('div', { class: 'box' }, h('label', {}, 'Message for customers'), pauseInput,
+          h('div', { class: 'hint' }, 'Customers cannot order until you resume, even if the shop opens a shift. The shop’s POS is not told, so let the shop know.'),
+          h('div', { class: 'actions' }, h('button', { class: 'danger', onclick: () => pause(slug, true, pauseInput.value, err) }, 'Pause now'), h('button', { onclick: () => { ui.pausing = false; renderStore(slug); } }, 'Cancel'))) : null,
+        s.pausedReason ? h('div', { class: 'box' }, 'Paused. Customers see: ', h('b', {}, s.pausedReason)) : null,
+        link ? linkBox(link, 'Connection link for this store:') : null),
+
+      h('h2', {}, 'POS devices'),
+      h('div', { class: 'card scroll' }, s.devices.length ? h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Device'), h('th', {}, 'Connected on'), h('th', {}, ''))),
+        h('tbody', {}, s.devices.map((d) => h('tr', {}, h('td', {}, d.name), h('td', {}, when(d.createdAt)),
+          h('td', { class: 'num' }, d.revokedAt ? h('span', { class: 'muted' }, `Revoked ${when(d.revokedAt)}`) : h('button', { class: 'danger', onclick: () => revoke(s, d) }, 'Revoke'))))))
+        : h('p', { class: 'muted', style: 'margin:0' }, 'No POS connected yet. Make a connection link and send it to the shop.')),
+
+      h('h2', {}, 'Store settings'),
+      p ? storeSettings(p) : h('div', { class: 'card muted' }, 'Nothing published yet. The settings appear here once the shop’s POS connects and turns on online orders.'),
+      p ? h('p', { class: 'muted' }, `Set by the shop in its POS (Settings > Online orders and Serviceability) and sent here with menu version ${s.menuVersion}. Change them there.`) : null);
+  }
+
+  function storeSettings(p) {
+    const o = p.options, sv = p.serviceability;
+    const channels = Object.entries(o.channels).filter(([, on]) => on).map(([c]) => ({ app: 'App', website: 'Website', swiggy: 'Swiggy', zomato: 'Zomato' })[c] || c);
+    let from = 0;
+    return h('div', { class: 'cols' },
+      h('div', { class: 'card' }, h('h3', {}, 'Orders'),
+        kv('Accepting orders', o.acceptMode === 'auto' ? 'Automatically' : `By staff, within ${o.acceptTimeoutMin} min`),
+        kv('Sales channels', channels.length ? channels.join(', ') : 'None'),
+        kv('Pickup', yesNo(o.fulfilment.pickup)), kv('Delivery', yesNo(o.fulfilment.delivery)),
+        kv('Cash on delivery', yesNo(o.payments.cod)), kv('Online payment', yesNo(o.payments.online && overview.hub.onlinePayments, 'On', o.payments.online ? 'On in POS; not on this hub yet' : 'Off'))),
+      h('div', { class: 'card' }, h('h3', {}, 'Pickup and charges'),
+        kv('Pickup minimum order', rupees(sv.pickup.minOrder)), kv('Pickup ready in', `${sv.pickup.etaMinutes} min`),
+        kv('Packaging charge', sv.packagingFee ? rupees(sv.packagingFee) : 'None'),
+        kv('GST on charges', p.feeTax ? `${p.feeTax.rateBp / 100}%${p.feeTax.cessBp ? ` + cess ${p.feeTax.cessBp / 100}%` : ''}${p.feeTax.priceIncludesTax ? ' (included)' : ''}` : 'Not set: no fees charged'),
+        kv('Round bills to the rupee', yesNo(p.roundToRupee, 'Yes', 'No'))),
+      h('div', { class: 'card' }, h('h3', {}, 'Delivery area'),
+        kv('Store location', sv.location ? [sv.location.label || 'Set', ' ', h('a', { href: `https://www.openstreetmap.org/?mlat=${sv.location.lat}&mlon=${sv.location.lng}#map=16/${sv.location.lat}/${sv.location.lng}`, target: '_blank', rel: 'noopener noreferrer' }, 'map')] : chip('warn', 'Not set: no delivery')),
+        kv('Road factor', overview.hub.routingOverridden || overview.settings.routingUrl ? 'Road distances from the routing server' : `× ${sv.roadFactor ?? 1.3}`),
+        sv.zones.length ? h('table', { style: 'margin-top:8px' }, h('thead', {}, h('tr', {}, h('th', {}, 'Distance'), h('th', { class: 'num' }, 'Fee'), h('th', { class: 'num' }, 'Min order'), h('th', { class: 'num' }, 'Free above'), h('th', { class: 'num' }, 'Time'))),
+          h('tbody', {}, sv.zones.map((z) => { const r = h('tr', {}, h('td', {}, `${from}–${z.upToKm} km`), h('td', { class: 'num' }, rupees(z.deliveryFee)), h('td', { class: 'num' }, rupees(z.minOrder)), h('td', { class: 'num' }, z.freeDeliveryAbove == null ? '-' : rupees(z.freeDeliveryAbove)), h('td', { class: 'num' }, `${z.etaMinutes} min`)); from = z.upToKm; return r; })))
+          : h('p', { class: 'muted' }, 'No delivery areas.')),
+      h('div', { class: 'card' }, h('h3', {}, 'Opening hours'),
+        [1, 2, 3, 4, 5, 6, 0].map((d) => kv(DAYS[d], (sv.hours[String(d)] || []).length ? sv.hours[String(d)].map((x) => `${x.open}–${x.close}`).join(', ') : chip('plain', 'Closed')))),
+      h('div', { class: 'card' }, h('h3', {}, 'Menu'),
+        kv('Items', `${p.menu.items}${p.menu.unavailable ? ` (${p.menu.unavailable} not available now)` : ''}`),
+        p.menu.categories.map((c) => kv(c.name, `${c.items} items`))));
+  }
+
+  async function pause(slug, paused, reason, err) {
+    try { await api('PUT', `/v1/admin/stores/${encodeURIComponent(slug)}/pause`, { paused, reason }); ui.pausing = false; await refresh(); }
+    catch (e) { err.textContent = e.message; }
+  }
+  async function revoke(s, d) {
+    if (!confirm(`Revoke "${d.name}" of ${s.name}? That POS stops receiving online orders at once and must connect again with a new link.`)) return;
+    try { await api('POST', `/v1/admin/devices/${encodeURIComponent(d.id)}/revoke`); await refresh(); } catch (e) { alert(e.message); }
+  }
+
+  // ------------------------------------------------------------ hub settings
+  const FIELDS = ['routingUrl', 'offlineAfterSec', 'pairingCodeMinutes', 'otpPerMinute', 'ordersPerMinute', 'pairPerMinute'];
+  $('settingsForm').addEventListener('input', () => { settingsDirty = true; $('settingsSaved').textContent = ''; });
+  function fillSettings() {
+    for (const f of FIELDS) $(f).value = overview.settings[f];
+    const hub = overview.hub;
+    $('fixed').replaceChildren(
+      kv('Show OTP codes on screen (HUB_DEV_OTP)', hub.devOtp ? chip('warn', 'On: development only') : chip('ok', 'Off')),
+      kv('Online payment (HUB_ONLINE_PAYMENTS)', chip('warn', hub.onlinePayments ? 'On' : 'Off: needs a payment gateway')),
+      kv('SMS provider for OTP', hub.smsProvider ? chip('ok', 'Set up') : chip('warn', 'Not built yet')),
+      hub.routingOverridden ? kv('Road routing', chip('warn', 'Fixed by the hub program; the setting above is ignored')) : null);
+  }
+  $('settingsForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    for (const el of document.querySelectorAll('[data-err]')) el.textContent = '';
+    $('settingsErr').textContent = '';
+    const body = Object.fromEntries(FIELDS.map((f) => [f, f === 'routingUrl' ? $(f).value.trim() : Number($(f).value)]));
+    try {
+      const { settings } = await api('PUT', '/v1/admin/settings', body);
+      overview.settings = settings; settingsDirty = false; fillSettings();
+      $('settingsSaved').textContent = 'Saved. In use now.';
+    } catch (e) {
+      if (e.fields) for (const [k, m] of Object.entries(e.fields)) { const el = document.querySelector(`[data-err="${k}"]`); if (el) el.textContent = m; }
+      else $('settingsErr').textContent = e.message;
+    }
+  });
+
+  // ------------------------------------------------------------ start
+  $('signout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  $('loginForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    key = $('key').value.trim(); $('loginErr').textContent = '';
+    try { await api('GET', '/v1/admin/overview'); keyStore.set(key); $('key').value = ''; start(); }
+    catch (e) { if (key) { key = ''; $('loginErr').textContent = e.message; } show(); }
+  });
+  function start() { show(); refresh(); clearInterval(timer); timer = setInterval(refresh, 15000); }
+  key ? start() : show();
+})();
+</script>
+</body>
+</html>

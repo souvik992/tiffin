@@ -13,7 +13,7 @@ A separately installed module for Tiffin POS (0.3.4 or newer). It adds:
   * up to 6 delivery areas by distance, each with delivery fee, minimum order, free-delivery amount and delivery time
   * packaging fee, pickup minimum and ready time
   * opening hours per weekday (up to 2 times a day, past midnight allowed)
-* **Order hub connection** (Settings > Online orders > Order hub): pair once with the hub address and a pairing code. Orders then arrive live. See `hub/README.md`.
+* **Order hub connection** (Settings > Online orders > Order hub): paste the connection link from the hub admin page once (`<hub address>/connect/<code>`). Orders then arrive live. See `hub/README.md`.
 * **ODS** (order display screen) in the side menu, only while online orders are on:
   * columns New / Preparing / Ready / On the way, a sound on new orders, and the time left to accept;
   * **Accept** with a preparation time: a normal GST bill and the kitchen ticket print at once;

@@ -8,12 +8,16 @@ import type { PublishedMenu } from '../../contract/src/menu.ts';
 
 /**
  * The hub's HTTP API (contract/openapi.yaml). Three kinds of callers:
- *   admin    X-Admin-Key header          create stores, pairing codes
+ *   admin    X-Admin-Key header          stores, pairing codes, devices, pause, hub settings (the /admin page)
  *   POS      Authorization: Bearer <device key>   publish menu/status, event stream (SSE), order actions
  *   customer open (CORS), rate limited   store page, quote, OTP, place/track/cancel orders, demo page
  */
 
-export interface HttpOptions { adminKey?: string; heartbeatMs?: number; publicDir?: string }
+export interface HttpOptions {
+  adminKey?: string; heartbeatMs?: number; publicDir?: string;
+  /** The hub's address as shops reach it (HUB_PUBLIC_URL), for connection links. Not set: taken from the admin's request. */
+  publicUrl?: string;
+}
 
 interface Ctx { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; query: URLSearchParams; body: unknown; ip: string }
 type Handler = (c: Ctx) => unknown | Promise<unknown>;
@@ -26,15 +30,17 @@ const json = (res: ServerResponse, status: number, body: unknown, cors = false) 
 };
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key, X-Order-Token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Max-Age': '600' };
 
-/** Requests per minute per IP and kind (simple fixed window). */
-function limiter(perMinute: number) {
+/** Requests per minute per IP and kind (simple fixed window). The limit is read on each request (admin settings). */
+function limiter(perMinute: () => number) {
   const seen = new Map<string, { n: number; start: number }>();
   return (ip: string) => {
     const now = Date.now(), s = seen.get(ip);
     if (!s || now - s.start > 60_000) { seen.set(ip, { n: 1, start: now }); return; }
-    if (++s.n > perMinute) throw new HubError('TOO_MANY_REQUESTS', 'Too many requests. Wait a minute and try again.', 429);
+    if (++s.n > perMinute()) throw new HubError('TOO_MANY_REQUESTS', 'Too many requests. Wait a minute and try again.', 429);
   };
 }
+
+const PAGE_HEADERS = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' };
 
 export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   const routes: Route[] = [];
@@ -43,22 +49,39 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
     const re = new RegExp('^' + path.replace(/:([a-zA-Z]+)/g, (_, k: string) => { keys.push(k); return '([^/]+)'; }) + '$');
     routes.push({ method, re, keys, cors: opt.cors ?? false, maxBody: opt.maxBody ?? 64 * 1024, handler });
   };
+  // wrong admin keys: 10 per minute per IP, then refused for the rest of the minute (guessing is slowed down)
+  const adminFails = new Map<string, { n: number; start: number }>();
   const admin = (c: Ctx) => {
+    const now = Date.now(), f = adminFails.get(c.ip);
+    if (f && now - f.start <= 60_000 && f.n >= 10) throw new HubError('TOO_MANY_REQUESTS', 'Too many wrong admin keys. Wait a minute and try again.', 429);
     const got = Buffer.from(String(c.req.headers['x-admin-key'] ?? ''));
     const want = Buffer.from(o.adminKey ?? '');
-    if (!o.adminKey || got.length !== want.length || !timingSafeEqual(got, want)) throw new HubError('FORBIDDEN', 'Admin key required.', 403);
+    if (!o.adminKey || got.length !== want.length || !timingSafeEqual(got, want)) {
+      if (!f || now - f.start > 60_000) adminFails.set(c.ip, { n: 1, start: now }); else f.n++;
+      throw new HubError('FORBIDDEN', o.adminKey ? 'Admin key required.' : 'Admin over the internet is off: start the hub with HUB_ADMIN_KEY set.', 403);
+    }
   };
   const device = (c: Ctx) => hub.device(/^Bearer (.+)$/.exec(String(c.req.headers.authorization ?? ''))?.[1]);
   const idem = (c: Ctx) => (typeof c.req.headers['idempotency-key'] === 'string' ? c.req.headers['idempotency-key'] : undefined);
   const orderToken = (c: Ctx) => (typeof c.req.headers['x-order-token'] === 'string' ? c.req.headers['x-order-token'] : c.query.get('token') ?? undefined);
-  const otpLimit = limiter(5), orderLimit = limiter(20), pairLimit = limiter(10);
+  const otpLimit = limiter(() => hub.settings().otpPerMinute), orderLimit = limiter(() => hub.settings().ordersPerMinute), pairLimit = limiter(() => hub.settings().pairPerMinute);
   const heartbeat = o.heartbeatMs ?? 15_000;
 
   add('GET', '/health', () => ({ ok: true }));
 
   // ---- admin
-  add('POST', '/v1/admin/stores', (c) => { admin(c); const b = c.body as { slug?: string; name?: string }; return hub.createStore(String(b?.slug ?? ''), String(b?.name ?? '')); });
-  add('POST', '/v1/admin/stores/:slug/pairing-code', (c) => { admin(c); return { pairingCode: hub.pairingCodeForSlug(c.params.slug!) }; });
+  // A connection link carries the hub address and a one-use pairing code: the shop pastes only this into its POS.
+  const base = (c: Ctx) => (o.publicUrl ?? `${String(c.req.headers['x-forwarded-proto'] ?? 'http').split(',')[0]!.trim()}://${String(c.req.headers['x-forwarded-host'] ?? c.req.headers.host ?? 'localhost')}`).replace(/\/+$/, '');
+  const withLink = <T extends { pairingCode: string }>(c: Ctx, r: T) => ({ ...r, connectUrl: `${base(c)}/connect/${r.pairingCode}` });
+  add('POST', '/v1/admin/stores', (c) => { admin(c); const b = c.body as { slug?: string; name?: string }; return withLink(c, hub.createStore(String(b?.slug ?? ''), String(b?.name ?? ''))); });
+  add('POST', '/v1/admin/stores/:slug/pairing-code', (c) => { admin(c); return withLink(c, hub.pairingCodeWithExpiry(c.params.slug!)); });
+  add('GET', '/v1/admin/stores/:slug', (c) => { admin(c); return hub.adminStore(c.params.slug!); });
+  add('GET', '/v1/admin/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.query.get('store') || undefined, status: c.query.get('status') ?? 'all', limit: Number(c.query.get('limit') ?? 100) }); });
+  add('GET', '/v1/admin/overview', (c) => { admin(c); return hub.adminOverview(); });
+  add('PUT', '/v1/admin/settings', (c) => { admin(c); return { settings: hub.saveSettings(c.body) }; });
+  add('PUT', '/v1/admin/stores/:slug/pause', (c) => { admin(c); const b = (c.body ?? {}) as { paused?: unknown; reason?: unknown }; return hub.pauseStore(c.params.slug!, b.paused === true, b.reason); });
+  add('GET', '/v1/admin/stores/:slug/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.params.slug!, limit: Number(c.query.get('limit') ?? 50) }); });
+  add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
 
   // ---- POS
   add('POST', '/v1/pos/pair', (c) => { pairLimit(c.ip); const b = c.body as { code?: string; deviceName?: string }; return hub.pair(String(b?.code ?? ''), String(b?.deviceName ?? 'POS')); });
@@ -111,11 +134,27 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
     return Symbol.for('handled');
   }, { cors: true });
 
-  // ---- demo ordering page (phase 2 replaces it with the store apps)
   const pub = o.publicDir ?? join(import.meta.dirname, '..', 'public');
+
+  // ---- admin page (no secrets inside: it asks for the admin key and sends it with each call)
+  add('GET', '/admin', (c) => {
+    c.res.writeHead(200, { ...PAGE_HEADERS, 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'none'" });
+    c.res.end(readFileSync(join(pub, 'admin.html')));
+    return Symbol.for('handled');
+  });
+
+  // ---- a connection link opened in a browser: says where to paste it (the code is not used up here)
+  add('GET', '/connect/:code', (c) => {
+    const code = c.params.code!.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 9);
+    c.res.writeHead(200, { ...PAGE_HEADERS, 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+    c.res.end(readFileSync(join(pub, 'connect.html'), 'utf8').replace('__CODE__', code));
+    return Symbol.for('handled');
+  });
+
+  // ---- demo ordering page (phase 2 replaces it with the store apps)
   add('GET', '/order/:slug', (c) => {
     const html = readFileSync(join(pub, 'order.html'), 'utf8').replace('__STORE__', JSON.stringify(decodeURIComponent(c.params.slug!)));
-    c.res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:" });
+    c.res.writeHead(200, { ...PAGE_HEADERS, 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:" });
     c.res.end(html);
     return Symbol.for('handled');
   });

@@ -1,7 +1,8 @@
 // Store admin on the hub machine (works without the admin key: it opens the hub database directly).
 // Usage (from hub/):
-//   npm run admin -- create-store <slug> "<Store name>"   -> prints a pairing code for the POS
-//   npm run admin -- pairing-code <slug>                  -> a new pairing code (30 minutes, one use)
+//   npm run admin -- create-store <slug> "<Store name>"   -> prints a connection link for the POS
+//   npm run admin -- pairing-code <slug>                  -> a new connection link (one use, 30 minutes by default)
+// Links use HUB_PUBLIC_URL (the hub's https address), else http://localhost:<HUB_PORT>.
 //   npm run admin -- list
 //   npm run admin -- revoke-device <deviceId>
 import { join } from 'node:path';
@@ -13,12 +14,14 @@ const dir = process.env.HUB_DATA_DIR ?? './hub-data';
 mkdirSync(dir, { recursive: true });
 const hub = new Hub({ dbPath: join(dir, 'hub.db') });
 const [cmd, a, b] = process.argv.slice(2);
+const link = (code: string) => `${(process.env.HUB_PUBLIC_URL ?? `http://localhost:${process.env.HUB_PORT ?? 4900}`).replace(/\/+$/, '')}/connect/${code}`;
+const valid = `one use, ${hub.settings().pairingCodeMinutes} minutes`;
 try {
   if (cmd === 'create-store' && a && b) {
     const s = hub.createStore(a, b);
-    console.log(`Store "${s.name}" created (${s.slug}).\nPairing code for the POS: ${s.pairingCode}  (valid 30 minutes, one use)`);
+    console.log(`Store "${s.name}" created (${s.slug}).\nConnection link for its POS: ${link(s.pairingCode)}  (${valid})`);
   } else if (cmd === 'pairing-code' && a) {
-    console.log(`Pairing code for ${a}: ${hub.pairingCodeForSlug(a)}  (valid 30 minutes, one use)`);
+    console.log(`Connection link for ${a}: ${link(hub.pairingCodeForSlug(a))}  (${valid})`);
   } else if (cmd === 'list') {
     for (const s of many<{ id: string; slug: string; name: string; menu_version: number; accepting: number }>(hub.db, 'SELECT id, slug, name, menu_version, accepting FROM store ORDER BY slug')) {
       console.log(`${s.slug}  ${s.name}  menu v${s.menu_version}  ${s.accepting ? 'accepting' : 'not accepting'}`);

@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS otp (
 );
 CREATE TABLE IF NOT EXISTS otp_token (token_hash TEXT PRIMARY KEY, mobile TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS image (store_id TEXT NOT NULL REFERENCES store(id), name TEXT NOT NULL, type TEXT NOT NULL, bytes BLOB NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (store_id, name));
+CREATE INDEX IF NOT EXISTS event_order ON event(order_id);
+CREATE TABLE IF NOT EXISTS order_attempt (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT NOT NULL REFERENCES store(id), at INTEGER NOT NULL, channel TEXT, fulfilment TEXT, payment TEXT,
+  customer_name TEXT, mobile_masked TEXT, total INTEGER, code TEXT NOT NULL, message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS order_attempt_at ON order_attempt(store_id, at);
+CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
 `;
 
 export type Db = DatabaseSync;
@@ -44,6 +51,9 @@ export function openHubDb(path: string): Db {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  // columns added after the first release (CREATE TABLE IF NOT EXISTS does not add them to an existing database)
+  const storeCols = new Set((db.prepare('PRAGMA table_info(store)').all() as Array<{ name: string }>).map((c) => c.name));
+  if (!storeCols.has('paused_reason')) db.exec('ALTER TABLE store ADD COLUMN paused_reason TEXT'); // set: paused by the hub admin
   return db;
 }
 

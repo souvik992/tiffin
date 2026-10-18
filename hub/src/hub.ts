@@ -10,6 +10,9 @@ import { checkPlaceOrder, MOBILE_RE, normaliseMobile } from '../../contract/src/
 import { checkServiceability, isOpen, quote } from '../../contract/src/serviceability.ts';
 import { priceOrder } from '../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
+import { checkSettings, SETTING_DEFAULTS } from './settings.ts';
+import type { HubSettings } from './settings.ts';
+import { osrmRoadKm } from './routing.ts';
 
 /**
  * The online order hub: stores and their paired POS devices, published menus, customer orders, and the numbered event
@@ -28,21 +31,53 @@ export interface HubOptions {
   /** Return OTP codes in the API response (development and the demo page only). */
   devOtp?: boolean;
   sendSms?: (mobile: string, text: string) => Promise<void>;
-  /** Road distance in km from a routing service, or null to use the store's road factor. */
+  /** Road distance in km from a routing service, or null to use the store's road factor. Set: used instead of the routingUrl setting (tests). */
   roadKm?: (from: { lat: number; lng: number }, to: { lat: number; lng: number }) => Promise<number | null>;
   /** Online payment (phase 3) is off until a payment gateway is set up. */
   onlinePayments?: boolean;
-  /** A store is "offline" this long after its last POS event stream closed (F8). */
-  offlineAfterMs?: number;
+  /** Defaults for settings never saved from the admin page (e.g. HUB_ROUTING_URL). */
+  settingDefaults?: Partial<HubSettings>;
   log?: { info(m: string, d?: unknown): void; warn(m: string, d?: unknown): void };
 }
 export interface DeviceRef { deviceId: string; storeId: string; slug: string }
 
-interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null }
+interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null }
 interface OrderRow { id: string; store_id: string; number: string; state: OrderState; data_json: string; access_hash: string; accept_by: number | null }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{2,40}$/;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** Orders the store still has to act on (sent, being made, on the way). */
+const OPEN_STATES = "'SENT_TO_STORE','RECEIVED','ACCEPTED','PREPARING','READY','OUT_FOR_DELIVERY'";
+/** Admin page filters: which order states each one shows (failed and all also show failed order attempts). */
+const ADMIN_FILTER: Record<string, string | null> = {
+  open: `'PLACED','PAYMENT_PENDING',${OPEN_STATES}`, delivered: "'DELIVERED','PICKED_UP'", cancelled: "'REJECTED','CANCELLED'", failed: "'AUTO_REJECTED','PAYMENT_FAILED'", all: null,
+};
+const REJECT_LABEL: Record<string, string> = { ITEM_UNAVAILABLE: 'Item not available', TOO_BUSY: 'Too busy', CLOSING: 'Closing', OUT_OF_DELIVERY_AREA: 'Outside the delivery area', OTHER: 'Other' };
+const ATTEMPT_DAYS = 30;
+const mask = (mobile: string) => mobile.slice(0, 2) + '******' + mobile.slice(-2);
+
+export type AdminStatus = 'placed' | 'accepted' | 'preparing' | 'in_transit' | 'delivered' | 'cancelled_store' | 'cancelled_customer' | 'failed';
+
+/** One status for people (admin page): the order state, who cancelled it, and why it failed. */
+function adminStatus(o: Order, f: { byCustomer: boolean; wasReceived: boolean }): { status: AdminStatus; statusDetail: string | null } {
+  switch (o.state) {
+    case 'PLACED': return { status: 'placed', statusDetail: 'Being placed' };
+    case 'PAYMENT_PENDING': return { status: 'placed', statusDetail: 'Waiting for online payment' };
+    case 'SENT_TO_STORE': return { status: 'placed', statusDetail: 'Not yet seen by the store' };
+    case 'RECEIVED': return { status: 'placed', statusDetail: 'Seen by the store, waiting for it to accept' };
+    case 'ACCEPTED': return { status: 'accepted', statusDetail: o.prepMinutes ? `Ready in about ${o.prepMinutes} min` : null };
+    case 'PREPARING': return { status: 'preparing', statusDetail: null };
+    case 'READY': return { status: 'preparing', statusDetail: o.fulfilment === 'PICKUP' ? 'Ready for pickup' : 'Ready, waiting for the rider' };
+    case 'OUT_FOR_DELIVERY': return { status: 'in_transit', statusDetail: o.rider ? `Rider: ${o.rider.name}${o.rider.phone ? ` (${o.rider.phone})` : ''}` : null };
+    case 'DELIVERED': return { status: 'delivered', statusDetail: null };
+    case 'PICKED_UP': return { status: 'delivered', statusDetail: 'Picked up by the customer' };
+    case 'REJECTED': return { status: 'cancelled_store', statusDetail: [o.rejectReason ? REJECT_LABEL[o.rejectReason] ?? o.rejectReason : null, o.reasonText].filter(Boolean).join(': ') || null };
+    case 'CANCELLED': return { status: f.byCustomer ? 'cancelled_customer' : 'cancelled_store', statusDetail: o.reasonText };
+    case 'AUTO_REJECTED': return { status: 'failed', statusDetail: f.wasReceived ? 'The store did not accept in time. Rejected automatically.' : 'The order did not reach the store: its POS was offline or had no internet. Rejected automatically.' };
+    case 'PAYMENT_FAILED': return { status: 'failed', statusDetail: 'Online payment was not completed in time.' };
+  }
+}
+
 const OTP_TTL = 5 * 60_000, OTP_TOKEN_TTL = 30 * 86_400_000, PAYMENT_TTL = 15 * 60_000;
 
 export class Hub {
@@ -53,6 +88,8 @@ export class Hub {
   /** open POS event streams per store, and when the last one closed */
   private streams = new Map<string, number>();
   private closedAt = new Map<string, number>();
+  private cachedSettings: HubSettings | null = null;
+  private routing: { url: string; fn: NonNullable<HubOptions['roadKm']> } | null = null;
 
   constructor(opts: HubOptions) {
     this.opts = opts;
@@ -73,15 +110,18 @@ export class Hub {
     return { storeId: id, slug, name: name.trim(), pairingCode: this.newPairingCode(id) };
   }
 
-  /** A one-time code (valid 30 minutes) the store types into its POS to connect it. */
-  newPairingCode(storeId: string): string {
+  /** A one-time code (valid pairingCodeMinutes, 30 by default) the store types into its POS to connect it. */
+  newPairingCode(storeId: string): string { return this.issuePairingCode(storeId).pairingCode; }
+  private issuePairingCode(storeId: string) {
     if (!one(this.db, 'SELECT 1 FROM store WHERE id = ?', storeId)) throw new HubError('NOT_FOUND', 'No such store.', 404);
     const raw = Array.from({ length: 8 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join('');
-    exec(this.db, 'INSERT INTO pairing_code (code_hash, store_id, expires_at) VALUES (?,?,?)', hash(raw), storeId, this.now() + 30 * 60_000);
-    return `${raw.slice(0, 4)}-${raw.slice(4)}`;
+    const expiresAt = this.now() + this.settings().pairingCodeMinutes * 60_000;
+    exec(this.db, 'INSERT INTO pairing_code (code_hash, store_id, expires_at) VALUES (?,?,?)', hash(raw), storeId, expiresAt);
+    return { pairingCode: `${raw.slice(0, 4)}-${raw.slice(4)}`, expiresAt };
   }
 
   pairingCodeForSlug(slug: string): string { return this.newPairingCode(this.store({ slug }).id); }
+  pairingCodeWithExpiry(slug: string) { return this.issuePairingCode(this.store({ slug }).id); }
 
   pair(code: string, deviceName: string) {
     const raw = String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -103,7 +143,141 @@ export class Hub {
     return { deviceId: d.id, storeId: d.store_id, slug: d.slug };
   }
 
-  revokeDevice(deviceId: string) { exec(this.db, 'UPDATE device SET revoked_at = ? WHERE id = ?', this.now(), deviceId); }
+  revokeDevice(deviceId: string) {
+    if (!one(this.db, 'SELECT 1 FROM device WHERE id = ?', deviceId)) throw new HubError('NOT_FOUND', 'No such device.', 404);
+    exec(this.db, 'UPDATE device SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?', this.now(), deviceId);
+  }
+
+  // ---------------------------------------------------------------- admin: settings, pause, overview
+
+  settings(): HubSettings {
+    if (!this.cachedSettings) {
+      const saved = Object.fromEntries(many<{ key: string; value_json: string }>(this.db, 'SELECT key, value_json FROM setting').map((r) => [r.key, JSON.parse(r.value_json)]));
+      const merged: Record<string, unknown> = { ...SETTING_DEFAULTS, ...this.opts.settingDefaults, ...saved };
+      this.cachedSettings = Object.fromEntries(Object.keys(SETTING_DEFAULTS).map((k) => [k, merged[k]])) as unknown as HubSettings;
+    }
+    return { ...this.cachedSettings };
+  }
+
+  saveSettings(input: unknown): HubSettings {
+    const c = checkSettings(input);
+    if (!c.ok) throw new HubError('VALIDATION', Object.values(c.errors)[0]!, 400, { fields: c.errors });
+    tx(this.db, () => {
+      for (const [k, v] of Object.entries(c.value)) exec(this.db, 'INSERT INTO setting (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at', k, JSON.stringify(v), this.now());
+    });
+    this.cachedSettings = null;
+    this.opts.log?.info('hub settings changed', c.value);
+    return this.settings();
+  }
+
+  /** Stops (or restarts) a store's online orders from the hub, whatever its POS says. */
+  pauseStore(slug: string, paused: boolean, reason?: unknown) {
+    const s = this.store({ slug });
+    const text = typeof reason === 'string' && reason.trim() ? reason.trim() : 'This store is not taking online orders right now.';
+    if (text.length > 200) throw new HubError('VALIDATION', 'Keep the message for customers under 200 characters.');
+    exec(this.db, 'UPDATE store SET paused_reason = ? WHERE id = ?', paused ? text : null, s.id);
+    return { slug, pausedReason: paused ? text : null };
+  }
+
+  private storeSummary(s: StoreRow) {
+    const dayAgo = this.now() - 86_400_000;
+    const m = this.menu(s);
+    const count = (sql: string, ...p: Array<string | number>) => one<{ n: number }>(this.db, sql, ...p)?.n ?? 0;
+    return {
+      slug: s.slug, name: s.name, createdAt: s.created_at, menuVersion: s.menu_version, menuItems: m?.items.length ?? 0,
+      connected: this.connected(s.id), accepting: Boolean(s.accepting), acceptingReason: s.accepting_reason, lastSeenAt: s.last_seen_at,
+      pausedReason: s.paused_reason, open: this.availability(s, m),
+      openOrders: count(`SELECT COUNT(*) AS n FROM orders WHERE store_id = ? AND state IN (${OPEN_STATES})`, s.id),
+      ordersLastDay: count('SELECT COUNT(*) AS n FROM orders WHERE store_id = ? AND created_at >= ?', s.id, dayAgo),
+      devices: many<{ id: string; name: string; created_at: number; revoked_at: number | null }>(this.db, 'SELECT id, name, created_at, revoked_at FROM device WHERE store_id = ? ORDER BY created_at', s.id)
+        .map((d) => ({ id: d.id, name: d.name, createdAt: d.created_at, revokedAt: d.revoked_at })),
+    };
+  }
+
+  adminOverview() {
+    const stores = many<StoreRow>(this.db, 'SELECT * FROM store ORDER BY slug').map((s) => this.storeSummary(s));
+    return {
+      hub: { devOtp: Boolean(this.opts.devOtp), onlinePayments: Boolean(this.opts.onlinePayments), smsProvider: Boolean(this.opts.sendSms), routingOverridden: Boolean(this.opts.roadKm), now: this.now() },
+      settings: this.settings(), stores,
+    };
+  }
+
+  /** One store with the settings its POS published (read-only here: the POS is where they are changed). */
+  adminStore(slug: string) {
+    const s = this.store({ slug });
+    const m = this.menu(s);
+    const perCategory = new Map<string | null, number>();
+    for (const i of m?.items ?? []) perCategory.set(i.categoryId, (perCategory.get(i.categoryId) ?? 0) + 1);
+    return {
+      ...this.storeSummary(s),
+      published: m ? {
+        options: m.options, serviceability: m.serviceability, feeTax: m.feeTax, roundToRupee: m.roundToRupee,
+        menu: { items: m.items.length, unavailable: m.items.filter((i) => !i.available).length, categories: [...[...m.categories].sort((a, b) => a.sort - b.sort).map((c) => ({ name: c.name, items: perCategory.get(c.id) ?? 0 })), ...(perCategory.has(null) ? [{ name: 'No category', items: perCategory.get(null)! }] : [])] },
+      } : null,
+    };
+  }
+
+  /** Latest orders and failed order attempts, of one store or all, for the admin page (customer mobile masked). */
+  adminOrders(o: { slug?: string; status?: string; limit?: number } = {}) {
+    const filter = (o.status && o.status in ADMIN_FILTER) ? o.status : 'all';
+    const limit = Math.min(Math.max(1, Math.trunc(o.limit ?? 100) || 100), 500);
+    const storeId = o.slug ? this.store({ slug: o.slug }).id : null;
+    const where: string[] = [], p: Array<string | number> = [];
+    if (storeId) { where.push('o.store_id = ?'); p.push(storeId); }
+    if (ADMIN_FILTER[filter]) where.push(`o.state IN (${ADMIN_FILTER[filter]})`);
+    const orders = many<{ data_json: string; updated_at: number; slug: string; name: string; by_customer: number; was_received: number }>(this.db,
+      `SELECT o.data_json, o.updated_at, s.slug, s.name,
+         EXISTS (SELECT 1 FROM event e WHERE e.order_id = o.id AND e.type = 'order.cancelled') AS by_customer,
+         EXISTS (SELECT 1 FROM event e WHERE e.order_id = o.id AND e.type = 'order.updated' AND json_extract(e.data_json, '$.state') = 'RECEIVED') AS was_received
+       FROM orders o JOIN store s ON s.id = o.store_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY o.created_at DESC LIMIT ?`, ...p, limit)
+      .map((r) => {
+        const x = JSON.parse(r.data_json) as Order;
+        return { kind: 'order' as const, id: x.id, number: x.number, store: { slug: r.slug, name: r.name }, state: x.state, label: label(x.state),
+          ...adminStatus(x, { byCustomer: Boolean(r.by_customer), wasReceived: Boolean(r.was_received) }), errorCode: null,
+          channel: x.channel, fulfilment: x.fulfilment, payment: x.payment, paid: x.paid,
+          customerName: x.customer.name, mobile: mask(x.customer.mobile), verified: x.customer.verified,
+          lines: x.lines.map((l) => ({ name: l.name, qtyMilli: l.qtyMilli, modifiers: l.modifiers.map((m) => m.name), note: l.note, lineTotal: l.lineTotal })),
+          address: x.address, distanceKm: x.distanceKm, note: x.note, itemsTotal: x.itemsTotal, deliveryFee: x.deliveryFee, packagingFee: x.packagingFee, total: x.total,
+          posBillNo: x.posBillNo, prepMinutes: x.prepMinutes, rider: x.rider, rejectReason: x.rejectReason, reasonText: x.reasonText, placedAt: x.placedAt, updatedAt: r.updated_at };
+      });
+    const attempts = filter === 'all' || filter === 'failed'
+      ? many<{ id: number; at: number; channel: string | null; fulfilment: string | null; payment: string | null; customer_name: string | null; mobile_masked: string | null; total: number | null; code: string; message: string; slug: string; name: string }>(this.db,
+        `SELECT a.*, s.slug, s.name FROM order_attempt a JOIN store s ON s.id = a.store_id ${storeId ? 'WHERE a.store_id = ?' : ''} ORDER BY a.at DESC, a.id DESC LIMIT ?`, ...(storeId ? [storeId] : []), limit)
+        .map((a) => ({ kind: 'attempt' as const, id: `attempt-${a.id}`, number: null, store: { slug: a.slug, name: a.name }, state: null, label: 'Not placed',
+          status: 'failed' as AdminStatus, statusDetail: a.code === 'INTERNAL' ? `Technical error on the hub: ${a.message}` : a.message, errorCode: a.code,
+          channel: a.channel, fulfilment: a.fulfilment, payment: a.payment, paid: false, customerName: a.customer_name, mobile: a.mobile_masked, verified: false,
+          lines: [], address: null, distanceKm: null, note: null, itemsTotal: null, deliveryFee: null, packagingFee: null, total: a.total,
+          posBillNo: null, prepMinutes: null, rider: null, rejectReason: null, reasonText: null, placedAt: a.at, updatedAt: a.at }))
+      : [];
+    // newest first; at the same moment an attempt counts as later than an order (it came after the hub's last success)
+    const all = [...orders, ...attempts].sort((a, b) => b.placedAt - a.placedAt || (a.kind === b.kind ? 0 : a.kind === 'attempt' ? -1 : 1));
+    return { orders: all.slice(0, limit) };
+  }
+
+  /** Keeps a customer's order attempt that failed before an order existed (offline store, changed price, technical error). Never throws. */
+  private recordFailedAttempt(slug: string, body: unknown, e: unknown) {
+    try {
+      const s = one<{ id: string }>(this.db, 'SELECT id FROM store WHERE slug = ?', slug);
+      if (!s) return; // no such store: nothing to show
+      const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      const cust = (b.customer && typeof b.customer === 'object' ? b.customer : {}) as Record<string, unknown>;
+      const pick = (v: unknown, allowed: string[]) => (typeof v === 'string' && allowed.includes(v) ? v : null);
+      const mobile = typeof cust.mobile === 'string' ? normaliseMobile(cust.mobile) : '';
+      const he = e instanceof HubError ? e : null;
+      exec(this.db, 'INSERT INTO order_attempt (store_id, at, channel, fulfilment, payment, customer_name, mobile_masked, total, code, message) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        s.id, this.now(), pick(b.channel ?? 'website', ['app', 'website']), pick(b.fulfilment, ['PICKUP', 'DELIVERY']), pick(b.payment, ['COD', 'ONLINE']),
+        typeof cust.name === 'string' ? cust.name.slice(0, 60) : null, MOBILE_RE.test(mobile) ? mask(mobile) : null,
+        Number.isSafeInteger(b.expectedTotal) ? b.expectedTotal as number : null, he?.code ?? 'INTERNAL', String(he?.message ?? (e as Error)?.message ?? e).slice(0, 300));
+    } catch (err) { this.opts.log?.warn('could not record a failed order attempt', String(err)); }
+  }
+
+  private roadKm(): HubOptions['roadKm'] {
+    if (this.opts.roadKm) return this.opts.roadKm;
+    const url = this.settings().routingUrl;
+    if (!url) return undefined;
+    if (this.routing?.url !== url) this.routing = { url, fn: osrmRoadKm(url) };
+    return this.routing.fn;
+  }
 
   private store(by: { id?: string; slug?: string }): StoreRow {
     const s = by.id ? one<StoreRow>(this.db, 'SELECT * FROM store WHERE id = ?', by.id) : one<StoreRow>(this.db, 'SELECT * FROM store WHERE slug = ?', by.slug ?? '');
@@ -179,12 +353,13 @@ export class Hub {
   connected(storeId: string): boolean {
     if ((this.streams.get(storeId) ?? 0) > 0) return true;
     const closed = this.closedAt.get(storeId);
-    return closed !== undefined && this.now() - closed < (this.opts.offlineAfterMs ?? 60_000);
+    return closed !== undefined && this.now() - closed < this.settings().offlineAfterSec * 1000;
   }
 
   /** Can this store take an order now (and why not)? */
   availability(s: StoreRow, m: PublishedMenu | null, o: { channel?: 'app' | 'website'; fulfilment?: 'PICKUP' | 'DELIVERY'; payment?: 'ONLINE' | 'COD' } = {}): { open: boolean; reason: string | null } {
     if (!m) return { open: false, reason: 'This store is not taking online orders yet.' };
+    if (s.paused_reason) return { open: false, reason: s.paused_reason };
     if (!this.connected(s.id)) return { open: false, reason: 'The store is offline right now. Please try again later.' };
     if (!s.accepting) return { open: false, reason: s.accepting_reason ?? 'The store is not taking orders right now.' };
     if (!isOpen(m.serviceability.hours, this.now())) return { open: false, reason: 'The store is closed now. See the opening hours.' };
@@ -225,8 +400,9 @@ export class Hub {
     const items = priceOrder(m, body.lines);
     if (!items.ok) throw new HubError(items.reason, items.message, 409, { itemId: items.itemId });
     let measured: number | null = null;
-    if (body.fulfilment === 'DELIVERY' && body.location && m.serviceability.location && this.opts.roadKm) {
-      measured = await this.opts.roadKm(m.serviceability.location, body.location).catch(() => null);
+    const roadKm = this.roadKm();
+    if (body.fulfilment === 'DELIVERY' && body.location && m.serviceability.location && roadKm) {
+      measured = await roadKm(m.serviceability.location, body.location).catch(() => null);
     }
     const q = quote(m.serviceability, { fulfilment: body.fulfilment, to: body.location ?? undefined, itemsTotal: items.itemsTotal, measuredRoadKm: measured });
     if (!q.ok) {
@@ -281,6 +457,10 @@ export class Hub {
   // ---------------------------------------------------------------- customer: orders
 
   async placeOrder(slug: string, body: unknown, idemKey: string | undefined) {
+    try { return await this.placeOrderChecked(slug, body, idemKey); } catch (e) { this.recordFailedAttempt(slug, body, e); throw e; }
+  }
+
+  private async placeOrderChecked(slug: string, body: unknown, idemKey: string | undefined) {
     const scope = `place:${slug}`;
     const done = idemKey ? this.idemGet(scope, idemKey) : null;
     if (done) return done as { order: Order; accessToken: string };
@@ -344,7 +524,7 @@ export class Hub {
   }
 
   openOrders(dev: DeviceRef): Order[] {
-    return many<{ data_json: string }>(this.db, "SELECT data_json FROM orders WHERE store_id = ? AND state NOT IN ('REJECTED','AUTO_REJECTED','CANCELLED','DELIVERED','PICKED_UP','PLACED','PAYMENT_PENDING','PAYMENT_FAILED') ORDER BY created_at", dev.storeId)
+    return many<{ data_json: string }>(this.db, `SELECT data_json FROM orders WHERE store_id = ? AND state IN (${OPEN_STATES}) ORDER BY created_at`, dev.storeId)
       .map((r) => JSON.parse(r.data_json) as Order);
   }
 
@@ -420,6 +600,7 @@ export class Hub {
     for (const r of many<{ id: string; store_id: string }>(this.db, "SELECT id, store_id FROM orders WHERE state = 'PAYMENT_PENDING' AND created_at <= ?", now - PAYMENT_TTL)) {
       try { this.move(r.store_id, r.id, 'PAYMENT_FAILED', 'hub', {}); n++; } catch { /* paid meanwhile */ }
     }
+    exec(this.db, 'DELETE FROM order_attempt WHERE at < ?', now - ATTEMPT_DAYS * 86_400_000);
     return n;
   }
 
