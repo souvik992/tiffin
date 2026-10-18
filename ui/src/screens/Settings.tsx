@@ -59,11 +59,12 @@ export function Settings() {
   return (
     <PageShell route="settings" title="Settings" subtitle="Set up this counter.">
       {!canManage ? <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">Only a manager or owner can change settings.</p> : (
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <nav className="flex shrink-0 gap-2 lg:w-60 lg:flex-col" aria-label="Settings sections">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          {/* the section list scrolls on its own: sideways on narrow screens, and on wide screens it stays in view while the page scrolls */}
+          <nav className="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1 lg:sticky lg:top-0 lg:mx-0 lg:max-h-[calc(100vh-9rem)] lg:w-60 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:px-0 lg:pb-0 lg:pr-1" aria-label="Settings sections">
             {items.map(([key, label, Icon, hint]) => (
               <button key={key} onClick={() => setSection(key)} aria-current={shown === key ? 'page' : undefined}
-                className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${shown === key ? 'border-primary bg-accent' : 'border-border bg-card hover:border-primary'}`}>
+                className={`flex shrink-0 items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${shown === key ? 'border-primary bg-accent' : 'border-border bg-card hover:border-primary'}`}>
                 <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${shown === key ? 'text-primary' : 'text-muted-foreground'}`} />
                 <span><span className="block text-sm font-semibold">{label}</span><span className="hidden text-xs text-muted-foreground lg:block">{hint}</span></span>
               </button>
