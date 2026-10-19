@@ -28,6 +28,7 @@ export function receiptDataFrom(f: InvoiceFull): ReceiptData {
     },
     lines: f.lines.map((l) => ({ name: l.name, hsnCode: l.hsnCode, qtyMilli: l.qtyMilli, unitPrice: l.unitPrice, lineTotal: l.lineTotal, rateBp: l.rateBp, taxable: l.taxable, cgst: l.cgst, sgst: l.sgst, igst: l.igst, modifiers: l.modifiers, note: l.note })),
     payments: f.payments.map((p) => ({ mode: p.mode, amount: p.amount, tendered: p.tendered })),
+    customer: f.customer ?? null, channel: f.orderChannel,
     cashierName: f.invoice.cashierName,
   };
 }
@@ -60,6 +61,18 @@ export function queueInvoicePrints(ctx: Ctx, f: InvoiceFull, opts: { copyNo: num
     if (enqueueJob(ctx, { kind: 'RECEIPT', refId: f.invoice.id, printerId: pr.id, payload: bytes, dedupeKey: `receipt:${f.invoice.id}:${pr.id}:${opts.copyNo}` })) out.receipts++;
   }
   if (opts.kot && f.invoice.docType === 'TAX_INVOICE') {
+    const k = queueKitchenTickets(ctx, f, 'kot', false);
+    out.kitchenTickets = k.queued; kotWanted = k.wanted; kotTargets = k.targets;
+  }
+  if (receiptPrinters === 0) out.warnings.push('NO_RECEIPT_PRINTER');
+  if (kotWanted && kotTargets === 0) out.warnings.push('NO_KITCHEN_PRINTER');
+  return out;
+}
+
+/** Kitchen tickets for a bill, one per kitchen station and printer. `tag` keeps each print run apart (first print, reprint n). */
+function queueKitchenTickets(ctx: Ctx, f: InvoiceFull, tag: string, reprint: boolean): { queued: number; wanted: boolean; targets: number } {
+  let queued = 0, kotWanted = false, kotTargets = 0;
+  {
     const rows = all<{ id: string; station: string | null }>(ctx.db,
       `SELECT il.id, c.kitchen_station AS station FROM invoice_line il LEFT JOIN item i ON i.id = il.item_id LEFT JOIN category c ON c.id = i.category_id WHERE il.invoice_id = ?`, f.invoice.id);
     const stationOf = new Map(rows.map((r) => [r.id, r.station ?? '']));
@@ -73,15 +86,27 @@ export function queueInvoicePrints(ctx: Ctx, f: InvoiceFull, opts: { copyNo: num
         const list = JSON.parse(pr.stations) as string[];
         if (!(list.includes('*') || (st !== '' && list.includes(st)))) continue;
         if (st !== '') kotTargets++;
-        const bytes = buildKot({ tokenNo: f.invoice.tokenNo, channel: f.orderChannel, createdAt: f.invoice.issuedAt, station: st, orderNote: note,
+        const bytes = buildKot({ tokenNo: f.invoice.tokenNo, channel: f.orderChannel, createdAt: f.invoice.issuedAt, station: st, orderNote: note, reprint,
           lines: lines.map((l) => ({ name: l.name, qtyMilli: l.qtyMilli, modifiers: l.modifiers, note: l.note })) }, colsFor(pr.width_mm));
-        if (enqueueJob(ctx, { kind: 'KOT', refId: f.invoice.id, printerId: pr.id, payload: bytes, dedupeKey: `kot:${f.invoice.id}:${pr.id}:${st}` })) out.kitchenTickets++;
+        if (enqueueJob(ctx, { kind: 'KOT', refId: f.invoice.id, printerId: pr.id, payload: bytes, dedupeKey: `${tag}:${f.invoice.id}:${pr.id}:${st}` })) queued++;
       }
     }
   }
-  if (receiptPrinters === 0) out.warnings.push('NO_RECEIPT_PRINTER');
-  if (kotWanted && kotTargets === 0) out.warnings.push('NO_KITCHEN_PRINTER');
-  return out;
+  return { queued, wanted: kotWanted, targets: kotTargets };
+}
+
+/** KOT reprint (the kitchen lost the ticket): every station's ticket again, marked REPRINT. A manager approves, like a bill reprint. */
+export function reprintKot(ctx: Ctx, actor: Actor, requestId: string, input: { invoiceId: string }, approve: (perm: 'invoice.reprint') => string) {
+  return runCommand(ctx, requestId, 'kot.reprint', actor, () => {
+    const approver = approve('invoice.reprint');
+    const f = loadInvoiceFull(ctx, input.invoiceId);
+    if (f.invoice.docType !== 'TAX_INVOICE') throw new AppError('VALIDATION', 'Kitchen tickets belong to bills, not credit notes.');
+    const prior = get<{ n: number }>(ctx.db, "SELECT count(DISTINCT substr(dedupe_key, 1, instr(dedupe_key, ':'))) n FROM print_job WHERE kind = 'KOT' AND ref_id = ?", f.invoice.id)!.n;
+    const k = queueKitchenTickets(ctx, f, `kot-reprint-${Math.max(prior, 1)}`, true);
+    if (k.targets === 0 && k.queued === 0) throw new AppError('NO_KITCHEN_PRINTER', 'No kitchen printer is set up for these items. Set one up in Settings > Printer setup.', 409);
+    audit(ctx, actor.userId, 'kot.reprint', 'invoice', f.invoice.id, { approver, tickets: k.queued });
+    return { queued: k.queued };
+  });
 }
 
 export function reprintInvoice(ctx: Ctx, actor: Actor, requestId: string, input: { invoiceId: string; override?: { userId: string; pin: string } }, approve: (perm: 'invoice.reprint') => string) {

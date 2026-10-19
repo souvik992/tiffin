@@ -1,7 +1,12 @@
 // A virtual ESC/POS printer: decodes the byte stream the app emits back into text and commands.
 // Used by tests and by the on-screen receipt preview.
+import { composeLine } from './textPicture.ts';
+import type { PictureSpec } from './textPicture.ts';
+
 export interface Parsed {
   lines: string[];
+  /** Lines printed as pictures (rupee sign, Indian scripts); their real text is in lines. */
+  pictures: number;
   text: string;
   inits: number;
   cuts: number;
@@ -12,7 +17,7 @@ export interface Parsed {
 
 /** widen: show double-width text as it looks on paper (each character followed by a space), for on-screen previews. */
 export function parseEscPos(b: Uint8Array, o: { widen?: boolean } = {}): Parsed {
-  const out: Parsed = { lines: [], text: '', inits: 0, cuts: 0, drawerKicks: 0, qrs: [], rasters: [] };
+  const out: Parsed = { lines: [], text: '', inits: 0, cuts: 0, drawerKicks: 0, qrs: [], rasters: [], pictures: 0 };
   let cur = '';
   let i = 0;
   let wide = false;
@@ -27,6 +32,18 @@ export function parseEscPos(b: Uint8Array, o: { widen?: boolean } = {}): Parsed 
         case 0x74: case 0x61: case 0x45: need(3); i += 3; break;
         case 0x64: need(3); for (let k = 0; k < b[i + 2]!; k++) out.lines.push(''); i += 3; break;
         case 0x70: need(5); out.drawerKicks++; i += 5; break;
+        case 0x7e: {
+          need(5);
+          if (b[i + 2] !== 0x55) throw new Error(`unknown ESC ~ command at byte ${i}`);
+          const len = b[i + 3]! + b[i + 4]! * 256;
+          need(5 + len);
+          const spec = JSON.parse(Buffer.from(b.subarray(i + 5, i + 5 + len)).toString('utf8')) as PictureSpec;
+          if (cur) { out.lines.push(cur); cur = ''; }
+          out.lines.push(composeLine(spec.s, spec.c));
+          out.pictures++;
+          i += 5 + len;
+          break;
+        }
         default: throw new Error(`unknown ESC command 0x${b[i + 1]!.toString(16)} at byte ${i}`);
       }
       continue;

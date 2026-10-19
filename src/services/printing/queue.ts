@@ -3,6 +3,8 @@ import type { Actor, Ctx } from '../ctx.ts';
 import { assertPerm } from '../permissions.ts';
 import { audit } from '../audit.ts';
 import type { PrinterRow, Transport } from './transports.ts';
+import { expandPictures } from './textPicture.ts';
+import type { TextRenderer } from './textPicture.ts';
 
 interface JobRow { id: string; kind: string; printer_id: string; payload: Uint8Array; attempts: number; dedupe_key: string | null }
 
@@ -19,9 +21,11 @@ export class PrintQueue {
   private backoff: number[];
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private renderText: TextRenderer | null;
 
-  constructor(ctx: Ctx, transports: Partial<Record<PrinterRow['transport'], Transport>>, backoff: number[] = DEFAULT_BACKOFF) {
-    this.ctx = ctx; this.transports = transports; this.backoff = backoff;
+  /** renderText draws lines with the rupee sign or Indian scripts as pictures (textRender.ts); null prints them as text. */
+  constructor(ctx: Ctx, transports: Partial<Record<PrinterRow['transport'], Transport>>, backoff: number[] = DEFAULT_BACKOFF, renderText: TextRenderer | null = null) {
+    this.ctx = ctx; this.transports = transports; this.backoff = backoff; this.renderText = renderText;
   }
 
   /** Jobs interrupted mid-send by a crash go back to the queue. */
@@ -56,7 +60,8 @@ export class PrintQueue {
       try {
         const t = this.transports[printer.transport];
         if (!t) throw new Error(`no transport for "${printer.transport}"`);
-        await t.send(printer, job.payload); // transports chunk by printer profile to protect small buffers
+        // lines marked as pictures are drawn now (outside any transaction); a marker never reaches a printer
+        await t.send(printer, await expandPictures(job.payload, this.renderText)); // transports chunk by printer profile to protect small buffers
         run(this.ctx.db, "UPDATE print_job SET status = 'PRINTED', last_error = NULL, updated_at = ? WHERE id = ?", this.ctx.clock.now(), job.id);
         this.ctx.events.emit('print', { jobId: job.id, printerId: printer.id, kind: job.kind, status: 'PRINTED' });
         tally.printed++;

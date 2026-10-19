@@ -145,7 +145,7 @@ function PrinterSetup() {
       <section className="mb-6 rounded-2xl border border-border bg-card p-4" aria-label="USB printers plugged into this PC">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <Usb className="h-5 w-5 text-primary" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-48 flex-1">
             <h3 className="font-semibold">USB printers plugged into this PC</h3>
             <p className="text-xs text-muted-foreground">Plug in the printer and switch it on. It appears here within a few seconds, with or without a Windows driver.{scannedAt ? ` Last checked ${new Date(scannedAt).toLocaleTimeString('en-IN')}.` : ''}</p>
           </div>

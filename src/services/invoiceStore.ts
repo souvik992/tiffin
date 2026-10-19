@@ -1,3 +1,4 @@
+import { istDay } from '../core/numbering.ts';
 import { get, run, AppError } from '../store/db.ts';
 import type { Ctx } from './ctx.ts';
 import { financialYear, formatDocNo } from '../core/numbering.ts';
@@ -67,3 +68,19 @@ export function bumpSummary(ctx: Ctx, day: string, deviceId: string, d: Deltas):
   if (keys.length === 0) return;
   run(ctx.db, `UPDATE daily_summary SET ${keys.map((k) => `${k} = ${k} + ?`).join(', ')} WHERE day = ? AND device_id = ?`, ...keys.map((k) => d[k]!), day, deviceId);
 }
+
+export interface PaymentCorrectionRecord {
+  id: string; invoiceId: string; paymentId: string; fromMode: string; toMode: string; amount: number; reference: string | null; reason: string;
+  shiftId: string | null; createdBy: string; approvedBy: string; createdAt: number;
+}
+
+/** Writes a correction row and moves the amount between the day's payment-mode totals (also used by the journal replay). */
+export function insertCorrection(ctx: Ctx, c: PaymentCorrectionRecord, deviceId: string, issuedAt: number): void {
+  run(ctx.db, `INSERT INTO payment_correction(id, invoice_id, payment_id, from_mode, to_mode, amount, reference, reason, shift_id, created_by, approved_by, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, c.id, c.invoiceId, c.paymentId, c.fromMode, c.toMode, c.amount, c.reference, c.reason, c.shiftId, c.createdBy, c.approvedBy, c.createdAt);
+  const d: Deltas = {};
+  d[modeCol(c.fromMode)] = (d[modeCol(c.fromMode)] ?? 0) - c.amount;
+  d[modeCol(c.toMode)] = (d[modeCol(c.toMode)] ?? 0) + c.amount;
+  bumpSummary(ctx, istDay(issuedAt), deviceId, d);
+}
+

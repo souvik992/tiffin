@@ -6,8 +6,8 @@ import type { Ctx } from './ctx.ts';
 import { istDay } from '../core/numbering.ts';
 import { loadInvoiceFull } from './invoiceView.ts';
 import type { InvoiceFull } from './invoiceView.ts';
-import { insertInvoice } from './invoiceStore.ts';
-import type { InvoiceRecord, LineRecord, PaymentRecord } from './invoiceStore.ts';
+import { insertCorrection, insertInvoice } from './invoiceStore.ts';
+import type { InvoiceRecord, LineRecord, PaymentCorrectionRecord, PaymentRecord } from './invoiceStore.ts';
 import { emit } from './outbox.ts';
 import { recomputeDailySummary } from './reports.ts';
 import { applyStockEntry, insertMissingMovements, movementsForRef, recomputeStockBalances } from './stock.ts';
@@ -22,6 +22,7 @@ export type JournalEntry =
   | { v: 1; type: 'cancel'; at: number; invoiceId: string; reason: string; cancelledBy: string; stock?: MovementRecord[] }
   | { v: 1; type: 'shift_open'; at: number; shift: { id: string; deviceId: string; userId: string; openedAt: number; openingCash: number } }
   | { v: 1; type: 'shift_close'; at: number; shiftId: string; closedBy: string; expectedCash: number; countedCash: number }
+  | { v: 1; type: 'payment_correction'; at: number; correction: PaymentCorrectionRecord; deviceId: string; issuedAt: number }
   | { v: 1; type: 'stock'; at: number; items: StockItemSnapshot[]; movements: MovementRecord[]; purchase?: { purchase: PurchaseRecord; lines: PurchaseLineRecord[] }; voidPurchase?: { purchaseId: string; voidedBy: string; reason: string } };
 
 export function appendJournal(ctx: Ctx, entry: JournalEntry): void {
@@ -114,7 +115,7 @@ export function replayJournal(ctx: Ctx): ReplayResult {
       const applied = tx(ctx.db, () => applyEntry(ctx, e));
       if (applied) res.replayed++; else res.skipped++;
     } catch (err) {
-      const id = e.type === 'invoice' ? e.full.invoice.id : e.type === 'cancel' ? e.invoiceId : e.type === 'shift_open' ? e.shift.id : e.type === 'stock' ? (e.purchase?.purchase.id ?? e.voidPurchase?.purchaseId ?? e.movements[0]?.id ?? e.items[0]?.id ?? '') : e.shiftId;
+      const id = e.type === 'invoice' ? e.full.invoice.id : e.type === 'cancel' ? e.invoiceId : e.type === 'shift_open' ? e.shift.id : e.type === 'stock' ? (e.purchase?.purchase.id ?? e.voidPurchase?.purchaseId ?? e.movements[0]?.id ?? e.items[0]?.id ?? '') : e.type === 'payment_correction' ? e.correction.id : e.shiftId;
       res.errors.push({ type: e.type, id, message: (err as Error).message });
     }
   }
@@ -133,6 +134,12 @@ function applyEntry(ctx: Ctx, e: JournalEntry): boolean {
     return Number(r.changes) === 1;
   }
   if (e.type === 'stock') return applyStockEntry(ctx, e);
+  if (e.type === 'payment_correction') {
+    if (get(ctx.db, 'SELECT 1 FROM payment_correction WHERE id = ?', e.correction.id)) return false;
+    if (!get(ctx.db, 'SELECT 1 FROM payment WHERE id = ?', e.correction.paymentId)) throw new Error('the corrected payment is missing');
+    insertCorrection(ctx, { ...e.correction, shiftId: e.correction.shiftId && get(ctx.db, 'SELECT 1 FROM shift WHERE id = ?', e.correction.shiftId) ? e.correction.shiftId : null }, e.deviceId, e.issuedAt);
+    return true;
+  }
   if (e.type === 'cancel') {
     const r = run(ctx.db, "UPDATE invoice SET status = 'CANCELLED', cancel_reason = ?, cancelled_at = ?, cancelled_by = ? WHERE id = ? AND status = 'ISSUED'", e.reason, e.at, e.cancelledBy, e.invoiceId);
     const moved = insertMissingMovements(ctx, e.stock ?? []);
@@ -153,7 +160,7 @@ function applyEntry(ctx: Ctx, e: JournalEntry): boolean {
   }
   const rec: InvoiceRecord = { ...iv, seriesId: series.id, shiftId: shiftOk };
   const lrecs: LineRecord[] = lines.map((l) => ({ ...l }));
-  const precs: PaymentRecord[] = payments.map((p) => ({ ...p, shiftId: p.shiftId && shiftOk ? p.shiftId : null }));
+  const precs: PaymentRecord[] = payments.map((p) => ({ ...p, mode: p.originalMode ?? p.mode, reference: p.originalMode ? p.originalReference ?? null : p.reference, shiftId: p.shiftId && shiftOk ? p.shiftId : null }));
   insertInvoice(ctx, rec, lrecs, precs);
   run(ctx.db, 'UPDATE invoice_series SET next_no = max(next_no, ?) WHERE id = ?', iv.seqNo + 1, series.id);
   if (iv.docType === 'TAX_INVOICE') run(ctx.db, "UPDATE sale_order SET status = 'INVOICED' WHERE id = ? AND status <> 'INVOICED'", iv.orderId);

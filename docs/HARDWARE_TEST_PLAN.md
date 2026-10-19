@@ -83,6 +83,9 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Check | Result |
 |---|---|
 | Low-end shop PC (4 GB RAM, HDD): start-up time, memory, billing speed | |
+| Rupee sign and a Hindi item name on a real receipt printer (Posiflex PP8800 and a 58 mm printer): sharp enough, lines aligned, print speed on a long Hindi bill | |
+| Cash drawer opened from Billing > Open cash drawer on the real printer | |
+| Handheld POS (Sunmi V2 type) and a touch-screen PC: billing with the View bill bar, dialogs, tap targets | |
 | Settings > Backups in the installed app: Windows folder picker, copies to a real USB drive (pull it out: error shown, billing unaffected), restore from it on a second PC | |
 | Online backups against a hosted backup server over https: upload on shop internet, a large database (100 MB+), restore on a new PC | |
 | Low-end shop PC: install and update time (zip installer; ~22 s on one core of the dev PC's SSD, HDD and antivirus not measured) | |
@@ -129,6 +132,7 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 | Reports: Download CSV (Download folder) and Print / PDF (Android print screen, Save as PDF) | |
 | Install the ODS add-on from a .tiffinaddon file (Settings > This device > Add-ons), turn on online orders, pair with the hub, receive an order with the app in the background | |
 | Leave the app in the background for an hour, come back: the POS still answers | |
+| Hindi and the rupee sign on the built-in or a Bluetooth printer (the app draws them, op "render" in PrinterBridge) | |
 
 Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages). Node 24 runs; 177/184 backend tests pass (the 2 failures are timing on the slow emulator); the app starts the POS and shows the setup screen.
 

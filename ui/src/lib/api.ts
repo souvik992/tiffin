@@ -26,6 +26,8 @@ export interface TaxGroup { id: string; name: string; rateBp: number; cessBp: nu
 export interface Item {
   id: string; categoryId: string | null; name: string; shortName: string | null; sku: string | null; barcode: string | null;
   hsnCode: string | null; taxGroupId: string; price: number; unit: string; isVeg: number | null; imageFile: string | null; description: string | null; modifierGroupIds: string[];
+  /** false when marked "not available today" (back by itself tomorrow) */
+  availableToday: boolean;
 }
 export interface Modifier { id: string; name: string; price: number }
 export interface ModifierGroup { id: string; name: string; minSelect: number; maxSelect: number; modifiers: Modifier[] }
@@ -59,7 +61,9 @@ export interface InvoiceSummary {
   grandTotal: number; tokenNo: number | null; originalInvoiceId: string | null; cashierName: string;
 }
 export interface InvoiceLine { id: string; lineNo: number; name: string; qtyMilli: number; unit: string; unitPrice: number; gross: number; discount: number; rateBp: number; lineTotal: number; modifiers: Modifier[] }
-export interface Payment { id: string; mode: PayMode; amount: number; tendered: number | null; reference: string | null }
+/** mode as corrected after billing; originalMode as billed */
+export interface Payment { id: string; mode: PayMode; originalMode?: PayMode; amount: number; tendered: number | null; reference: string | null }
+export interface ModifierGroupInput { name: string; minSelect: number; maxSelect: number; modifiers: Array<{ id?: string; name: string; price: number }> }
 export interface Invoice extends InvoiceSummary {
   grossTotal: number; discountTotal: number; taxableTotal: number; cgst: number; sgst: number; igst: number; cess: number; roundOff: number;
   buyerGstin: string | null; placeOfSupply: string; cancelReason: string | null;
@@ -212,7 +216,7 @@ export function createApi(o: ApiOptions) {
   return {
     request,
     // public
-    ping: () => get<{ ok: boolean }>('/ping'),
+    ping: () => get<{ ok: boolean; boot?: string }>('/ping'),
     loginUsers: () => get<LoginUser[]>('/login-users'),
     setup: (input: SetupInput, key?: string) => change<{ ownerId: string }>('POST', '/setup', input, key),
     login: (who: LoginWith, pin: string) => request<{ token: string; user: Me }>('POST', '/auth/login', { ...who, pin }),
@@ -290,13 +294,15 @@ export function createApi(o: ApiOptions) {
     openOrders: (status?: 'DRAFT' | 'HELD') => get<OpenOrder[]>(`/orders${status ? `?status=${status}` : ''}`),
     holdOrder: (orderId: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/hold`, {}, key),
     resumeOrder: (orderId: string, key?: string) => change<Cart>('POST', `/orders/${enc(orderId)}/resume`, {}, key),
-    updateOrder: (orderId: string, input: { customerPhone?: string | null; customerName?: string | null; note?: string | null }, override?: Override, key?: string) => change<Cart>('PATCH', `/orders/${enc(orderId)}`, override ? { ...input, override } : input, key),
+    updateOrder: (orderId: string, input: { customerPhone?: string | null; customerName?: string | null; note?: string | null; buyerGstin?: string | null }, override?: Override, key?: string) => change<Cart>('PATCH', `/orders/${enc(orderId)}`, override ? { ...input, override } : input, key),
     checkPayments: (orderId: string, payments: PaymentIn[]) => request<PaymentCheck>('POST', `/orders/${enc(orderId)}/payment-check`, { payments }),
     createOrder: (key?: string) => change<Cart>('POST', '/orders', {}, key),
     getOrder: (id: string) => get<Cart>(`/orders/${enc(id)}`),
     addLine: (orderId: string, itemId: string, modifierIds: string[] = [], key?: string) =>
       change<Cart>('POST', `/orders/${enc(orderId)}/lines`, modifierIds.length ? { itemId, qtyMilli: 1000, modifierIds } : { itemId, qtyMilli: 1000 }, key),
     setLineQty: (lineId: string, qtyMilli: number, key?: string, override?: Override) => change<Cart>('PATCH', `/lines/${enc(lineId)}`, override ? { qtyMilli, override } : { qtyMilli }, key),
+    /** A line's exact quantity, discount (null removes it) and kitchen note. */
+    updateLine: (lineId: string, input: { qtyMilli?: number; discount?: Discount | null; note?: string | null }, override?: Override, key?: string) => change<Cart>('PATCH', `/lines/${enc(lineId)}`, override ? { ...input, override } : input, key),
     removeLine: (lineId: string, override?: Override, key?: string) => change<Cart>('DELETE', `/lines/${enc(lineId)}`, override ? { override } : {}, key),
     billDiscount: (orderId: string, discount: Discount | null, override?: Override, key?: string) =>
       change<Cart>('POST', `/orders/${enc(orderId)}/discount`, override ? { discount, override } : { discount }, key),
@@ -314,6 +320,16 @@ export function createApi(o: ApiOptions) {
       return get<InvoiceSummary[]>(`/invoices${p.size ? `?${p}` : ''}`);
     },
     invoice: (id: string) => get<InvoiceDetail>(`/invoices/${enc(id)}`),
+    reprintKot: (id: string, override?: Override, key?: string) => change<{ queued: number }>('POST', `/invoices/${enc(id)}/kot-reprint`, override ? { override } : {}, key),
+    correctPayment: (paymentId: string, input: { toMode: PayMode; reference: string | null; reason: string }, override?: Override, key?: string) => change<{ invoiceId: string }>('POST', `/payments/${enc(paymentId)}/correct`, override ? { ...input, override } : input, key),
+    xReport: () => get<ZReport>('/shifts/current/x-report'),
+    printXReport: (key?: string) => change<{ queued: number }>('POST', '/shifts/current/x-report/print', {}, key),
+    openDrawer: (reason: string, override?: Override, key?: string) => change<{ jobId: string | null }>('POST', '/drawer/open', override ? { reason, override } : { reason }, key),
+    setAvailability: (itemId: string, availableToday: boolean, key?: string) => change<{ itemId: string; availableToday: boolean }>('PUT', `/items/${enc(itemId)}/availability`, { availableToday }, key),
+    createModifierGroup: (input: ModifierGroupInput, key?: string) => change<{ id: string }>('POST', '/modifier-groups', input, key),
+    updateModifierGroup: (id: string, input: ModifierGroupInput, key?: string) => change<{ id: string }>('PUT', `/modifier-groups/${enc(id)}`, input, key),
+    deleteModifierGroup: (id: string, key?: string) => change<{ ok: boolean }>('DELETE', `/modifier-groups/${enc(id)}`, {}, key),
+    setItemModifierGroups: (itemId: string, groupIds: string[], key?: string) => change<{ ok: boolean }>('PUT', `/items/${enc(itemId)}/modifier-groups`, { groupIds }, key),
     reprint: (id: string, override?: Override, key?: string) => change<{ queued: number; copyNo: number }>('POST', `/invoices/${enc(id)}/reprint`, override ? { override } : {}, key),
     receiptPreview: (id: string, widthMm: 58 | 80 = 80) => get<ReceiptPreview>(`/invoices/${enc(id)}/receipt?width=${widthMm}`),
     invoicePrints: (id: string) => get<InvoicePrintJob[]>(`/invoices/${enc(id)}/prints`),

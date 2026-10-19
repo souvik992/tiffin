@@ -14,6 +14,8 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | POST `/api/auth/login` `{ mobile, pin }` (sign-in) or `{ userId, pin }` (unlock after inactivity; staff without a mobile number); `/api/auth/logout`; GET `/api/me` | | an unknown number and a wrong PIN get the same answer |
 | GET `/api/catalog`, `/api/items/search?q=`, `/api/items/by-barcode/:code` | C | |
 | POST/PATCH/DELETE `/api/items`, POST `/api/categories`, `/api/tax-groups`, `/api/modifier-groups`, PUT `/api/items/:id/modifier-groups` | M | |
+| PUT/DELETE `/api/modifier-groups/:id` | M | edit options (with id: updated; without: added; left out: switched off), min/max; delete detaches from items |
+| PUT `/api/items/:id/availability` `{availableToday}` | C | sold out for today (IST); `/api/catalog` items carry `availableToday`; adding it to a bill answers `ITEM_UNAVAILABLE` |
 | PUT `/api/items/:id/image` `{dataBase64}`; DELETE `/api/items/:id/image` | M | JPEG, PNG or WebP only (checked by content), up to 1 MB; the UI resizes to 640 px first |
 | GET `/api/images/:file` | public | photo by its stored name (`<sha256>.jpg/png/webp`) so `<img>` works without a token; any other name is 404; cached as immutable |
 | DELETE `/api/categories/:id` | M | refused (`IN_USE`) while the category has items |
@@ -33,6 +35,11 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | GET `/api/invoices`, `/api/invoices/:id` | C | |
 | POST `/api/invoices/:id/cancel`, `/credit-note`, `/reprint` | M or approval | cancel: same day, open shift |
 | GET `/api/shifts/current`, `/api/shifts/:id/report`; POST `/api/shifts/open`, `/close` | C | close: counted cash, Z-report printed |
+| GET `/api/shifts/current/x-report`; POST `/api/shifts/current/x-report/print` | C | the open shift so far (X-report); the shift stays open |
+| POST `/api/drawer/open` `{reason, override?}` | M (or approval) | opens the cash drawer of the receipt printer; audited |
+| POST `/api/invoices/:id/kot-reprint` `{override?}` | M (or approval) | kitchen tickets again, marked REPRINT |
+| POST `/api/payments/:id/correct` `{toMode, reference?, reason, override?}` | M (or approval) | payment mode fixed after billing (open shift only); bills show `mode` (corrected) and `originalMode` |
+| GET `/api/ping` | public | `{ok, boot}`: boot changes on every start of the backend (the restore screen waits for it) |
 | GET `/api/reports/daily`, `/tax`, `/items`, `/invoice-register.csv` (`?from=YYYY-MM-DD&to=`) | M | |
 | (desktop app) | | when the backend runs inside the desktop app, every request must carry `X-POS-Secret` (made at each launch, known only to the app; added by its app://pos forwarder). Without it: 403 `BAD_LAUNCH_SECRET`. `npm start` does not use a secret |
 | GET `/api/users` | O | everyone with an account, also deactivated (`id, name, role, active, locked, createdAt, you`); never PIN hashes |

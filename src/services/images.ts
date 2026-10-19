@@ -12,7 +12,7 @@ import { emit } from './outbox.ts';
  * Menu photos. Files live in <dataDir>/images, named by the SHA-256 of their bytes, so the same photo is stored
  * once and a name can never point at different content. The browser resizes photos before upload (no image
  * library here); the backend only accepts real JPEG, PNG or WebP bytes up to 1 MB. SVG is refused: it can carry script.
- * Photos are not part of the database backup (they are not financial records and can be uploaded again).
+ * Photos are not inside the database, but every backup copies the ones the menu uses (services/backup.ts).
  */
 
 export const MAX_IMAGE_BYTES = 1_000_000;

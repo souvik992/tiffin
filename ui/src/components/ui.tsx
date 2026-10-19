@@ -44,7 +44,7 @@ export function PageShell({ route, title, subtitle, children }: { route: Route; 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Rail route={route} />
-      <main className="flex-1 overflow-y-auto px-8 py-6">
+      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
         <h1 className="font-display text-3xl">{title}</h1>
         <p className="mb-6 text-sm text-muted-foreground">{subtitle}</p>
         {children}

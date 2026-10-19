@@ -79,6 +79,21 @@ export const DEFAULT_TEMPLATE: ReceiptTemplate = {
       "value": "{{invoice.buyer-gstin}}"
     },
     {
+      "type": "field",
+      "label": "Customer",
+      "value": "{{customer.name}}"
+    },
+    {
+      "type": "field",
+      "label": "Phone",
+      "value": "{{customer.phone}}"
+    },
+    {
+      "type": "field",
+      "label": "Order from",
+      "value": "{{order.channel}}"
+    },
+    {
       "type": "rule"
     },
     {

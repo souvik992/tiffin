@@ -3,7 +3,7 @@ import { CheckCircle2, CircleAlert, ImagePlus, Upload } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
 import type { Catalog } from '../lib/api.ts';
 import { useSession, messageOf } from '../lib/session.tsx';
-import { preparePhoto } from '../lib/photo.ts';
+import { preparePhoto, sizeText } from '../lib/photo.ts';
 import { matchPhotos } from '../lib/photoMatch.ts';
 import type { PhotoMatch } from '../lib/photoMatch.ts';
 
@@ -47,13 +47,13 @@ export function MenuPhotos({ catalog, canEdit, reload }: { catalog: Catalog; can
     setBusy(true);
     const todo = rows.map((r, i) => [r, i] as const).filter(([r]) => willUpload(r));
     setProgress({ done: 0, total: todo.length });
-    let ok = 0, failed = 0;
+    let ok = 0, failed = 0, before = 0, after = 0;
     for (const [r, i] of todo) { // one at a time: gentle on a small shop PC
       try {
         const p = await preparePhoto(r.f);
         URL.revokeObjectURL(p.previewUrl);
         await api.setItemImage(r.chosen!, p.dataBase64, newKey());
-        ok++;
+        ok++; before += p.originalBytes; after += p.bytes;
         setRows((rs) => rs.map((x, j) => (j === i ? { ...x, state: 'done' } : x)));
       } catch (e) {
         failed++;
@@ -63,7 +63,7 @@ export function MenuPhotos({ catalog, canEdit, reload }: { catalog: Catalog; can
     }
     setBusy(false);
     await reload();
-    notify(failed ? 'error' : 'success', failed ? `${ok} photo(s) saved, ${failed} could not be saved (see the list).` : `${ok} photo(s) saved. They show on the billing screen now.`);
+    notify(failed ? 'error' : 'success', failed ? `${ok} photo(s) saved, ${failed} could not be saved (see the list).` : `${ok} photo(s) saved, compressed from ${sizeText(before)} to ${sizeText(after)}. They show on the billing screen now.`);
   };
 
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only a manager or owner can change menu photos.</p>;
@@ -76,7 +76,7 @@ export function MenuPhotos({ catalog, canEdit, reload }: { catalog: Catalog; can
           <li>Choose them all below (Ctrl+A in the folder), or drag them in.</li>
           <li>Check the list, pick the item for any photo that did not match, then press <b>Save photos</b>.</li>
         </ol>
-        <p className="mb-3 text-xs text-muted-foreground">Pictures pasted inside Excel cannot be read; use photo files. Each photo is resized for the menu, like a single photo.</p>
+        <p className="mb-3 text-xs text-muted-foreground">Pictures pasted inside Excel cannot be read; use photo files. Each photo is compressed for the menu (at most 1024 px, high quality), like a single photo.</p>
         <button type="button" disabled={busy} onClick={() => input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); if (!busy) take(e.dataTransfer.files); }}
           className={`flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 text-sm transition-colors ${over ? 'border-primary bg-accent' : 'border-border hover:border-primary'}`}>

@@ -60,6 +60,8 @@
 @layer base {
   html, body, #root { height: 100%; }
   body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  /* touch screens: no 300 ms tap delay or double-tap zoom, no grey flash on tap */
+  button, a, input, select, textarea, label, [role="tab"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   button { cursor: pointer; }
   button:disabled { cursor: not-allowed; opacity: .55; }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -104,5 +106,7 @@
   .btn-ghost { @apply inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold hover:bg-secondary; }
   .field { @apply h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary; }
   .table { @apply w-full overflow-hidden rounded-xl border border-border bg-card text-sm; }
+  /* narrow screens: a wide table scrolls sideways instead of squeezing its columns */
+  @media (max-width: 767px) { .table { display: block; overflow-x: auto; white-space: nowrap; } }
   .veg-mark { @apply inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border-[1.5px]; }
 }

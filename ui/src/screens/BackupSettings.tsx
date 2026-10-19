@@ -234,14 +234,15 @@ function ConfirmRestore({ pick, canRestartItself, onClose }: { pick: Pick; canRe
   const go = async () => {
     setErr(null); setState('working');
     try {
+      const before = (await api.ping()).boot;
       const r = await api.restoreBackup(pick.source, pick.name, pin, pick.folder);
       if (!r.restarting) { setState('manual'); return; }
       setState('restarting');
-      // The POS restarts itself and applies the backup; sign-ins start fresh, which is how we know it is back.
+      // The POS restarts itself and applies the backup; it answers with a new start id when it is back.
       try { sessionStorage.setItem('pos.settings.section', 'backups'); } catch { /* storage unavailable */ }
       for (let i = 0; i < 600; i++) {
         await new Promise((res) => setTimeout(res, 1000));
-        try { await api.me(); } catch (e) { if (e instanceof ApiError && e.status === 401) break; }
+        try { if ((await api.ping()).boot !== before) break; } catch { /* restarting */ }
       }
       window.location.reload();
     } catch (e) { setErr(messageOf(e)); setState('ask'); setPin(''); }

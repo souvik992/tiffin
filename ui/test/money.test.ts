@@ -50,12 +50,15 @@ test('editing a price shows exactly what was saved', () => {
   assert.equal(paiseToInput(12900), '129');
 });
 
-test('photos: resized to fit 640 px without stretching or enlarging; base64 matches Node', async () => {
-  const { fitWithin, toBase64 } = await import('../src/lib/photo.ts');
-  assert.deepEqual(fitWithin(4000, 3000), { w: 640, h: 480 });
-  assert.deepEqual(fitWithin(1080, 1920), { w: 360, h: 640 });
+test('photos: resized to fit 1024 px without stretching or enlarging, saved at high quality; base64 matches Node', async () => {
+  const { fitWithin, toBase64, PHOTO_QUALITY, sizeText } = await import('../src/lib/photo.ts');
+  assert.deepEqual(fitWithin(4000, 3000), { w: 1024, h: 768 });
+  assert.deepEqual(fitWithin(1080, 1920), { w: 576, h: 1024 });
   assert.deepEqual(fitWithin(300, 200), { w: 300, h: 200 }); // small photos are not enlarged
-  assert.deepEqual(fitWithin(10000, 1), { w: 640, h: 1 });
+  assert.deepEqual(fitWithin(10000, 1), { w: 1024, h: 1 });
+  assert.ok(PHOTO_QUALITY >= 0.9, 'measured: 90% keeps photos visually the same (docs/DECISIONS.md)');
+  assert.equal(sizeText(48_000), '47 KB');
+  assert.equal(sizeText(3_400_000), '3.2 MB');
   const bytes = Uint8Array.from({ length: 70_000 }, (_, i) => (i * 31) % 256); // larger than one 32 KB chunk
   assert.equal(toBase64(bytes), Buffer.from(bytes).toString('base64'));
 });

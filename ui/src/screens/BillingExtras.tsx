@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Banknote, CheckCircle2, CreditCard, Plus, Printer, RotateCw, Smartphone, Trash2, TriangleAlert, Wallet } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
-import type { Cart, FinalizeResult, OpenOrder, PayMode, PaymentCheck, PaymentIn } from '../lib/api.ts';
-import { formatPaise, paiseToInput, parseRupees } from '../lib/money.ts';
+import type { Cart, CartLine, Discount, FinalizeResult, Item, OpenOrder, PayMode, PaymentCheck, PaymentIn, ZReport } from '../lib/api.ts';
+import { formatPaise, formatQty, formatRateBp, paiseToInput, parsePercentBp, parseQty, parseRupees } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal } from '../components/ui.tsx';
 import { PrintStatus, ReceiptDialog } from '../components/print.tsx';
@@ -179,11 +179,13 @@ export function CustomerDialog({ cart, onClose, onSaved }: { cart: Cart; onClose
   const [name, setName] = useState(cart.order.customerName ?? '');
   const [phone, setPhone] = useState(cart.order.customerPhone ?? '');
   const [note, setNote] = useState(cart.order.note ?? '');
+  const [gstin, setGstin] = useState(cart.order.buyerGstin ?? '');
   const [error, setError] = useState('');
   const save = async () => {
     if (phone.trim() && !/^\d{10}$/.test(phone.trim())) return setError('Phone number must be 10 digits.');
+    if (gstin.trim() && gstin.trim().length !== 15) return setError('A GSTIN has 15 characters.');
     try {
-      const c = await withApproval('Changing this bill', (o) => api.updateOrder(cart.order.id, { customerName: name.trim() || null, customerPhone: phone.trim() || null, note: note.trim() || null }, o, key.current));
+      const c = await withApproval('Changing this bill', (o) => api.updateOrder(cart.order.id, { customerName: name.trim() || null, customerPhone: phone.trim() || null, note: note.trim() || null, buyerGstin: gstin.trim().toUpperCase() || null }, o, key.current));
       if (c) onSaved(c);
     } catch (e) { key.current = newKey(); setError(messageOf(e)); }
   };
@@ -199,6 +201,11 @@ export function CustomerDialog({ cart, onClose, onSaved }: { cart: Cart; onClose
         <input className="field" maxLength={200} placeholder="Table 4, less spicy, parcel…" value={note} onChange={(e) => setNote(e.target.value)} />
         <span className="text-xs text-muted-foreground">Printed on the kitchen ticket.</span>
       </label>
+      <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Customer's GSTIN (business customers)</span>
+        <input className="field font-mono uppercase" maxLength={15} placeholder="15 characters (optional)" value={gstin} onChange={(e) => setGstin(e.target.value.replace(/[^0-9A-Za-z]/g, ''))} aria-label="Customer GSTIN" />
+        <span className="text-xs text-muted-foreground">Printed on the bill. A GSTIN from another state charges IGST instead of CGST + SGST.</span>
+      </label>
+      <p className="mt-2 text-xs text-muted-foreground">Name and phone are printed on the bill too.</p>
       {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
       <button className="btn-primary mt-4 w-full" onClick={() => void save()}>Save</button>
     </Modal>
@@ -218,3 +225,138 @@ export function ConfirmDialog({ title, text, confirm, onConfirm, onClose }: { ti
 }
 
 export { MODE_ICON };
+
+/** One line of the bill: exact quantity (kg items, 2.5 plates), a note for the kitchen and a discount on this line only. */
+export function LineDialog({ line, onClose, onSave }: { line: CartLine; onClose: () => void; onSave: (input: { qtyMilli?: number; discount?: Discount | null; note?: string | null }) => Promise<boolean> }) {
+  const [qty, setQty] = useState(formatQty(line.qtyMilli));
+  const [note, setNote] = useState(line.note ?? '');
+  const [discType, setDiscType] = useState<Discount['type']>(line.discount?.type ?? 'percent');
+  const [discValue, setDiscValue] = useState(line.discount ? (line.discount.type === 'percent' ? formatRateBp(line.discount.value).replace('%', '') : paiseToInput(line.discount.value)) : '');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const q = parseQty(qty);
+    if (q === null || q <= 0) return setError('Enter a quantity, like 2 or 1.5.');
+    let discount: Discount | null = null;
+    if (discValue.trim()) {
+      const v = discType === 'percent' ? parsePercentBp(discValue) : parseRupees(discValue);
+      if (v === null || v <= 0) return setError(discType === 'percent' ? 'Enter a percentage between 0 and 100.' : 'Enter an amount in rupees, like 20.');
+      discount = { type: discType, value: v };
+    }
+    setError(''); setBusy(true);
+    try { if (await onSave({ qtyMilli: q, discount, note: note.trim() || null })) onClose(); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={line.name} onClose={onClose}>
+      <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Quantity ({line.unit})</span>
+        <input className="field" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} aria-label="Quantity" />
+      </label>
+      <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Note for the kitchen</span>
+        <input className="field" maxLength={120} placeholder="Less spicy, no onion, extra sauce…" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Line note" autoFocus />
+      </label>
+      <div className="mt-3 text-sm"><span className="font-medium">Discount on this item</span>
+        <div className="mt-1 flex gap-2">
+          <div className="flex shrink-0 gap-1.5" role="group" aria-label="Discount type">
+            <button type="button" className={`pay-btn h-11 w-11 text-base ${discType === 'percent' ? 'pay-btn-active' : ''}`} aria-label="Percentage discount" onClick={() => setDiscType('percent')}>%</button>
+            <button type="button" className={`pay-btn h-11 w-11 text-base ${discType === 'amount' ? 'pay-btn-active' : ''}`} aria-label="Fixed amount discount" onClick={() => setDiscType('amount')}>₹</button>
+          </div>
+          <input className="field h-11 min-w-0 flex-1" inputMode="decimal" placeholder="None" value={discValue} onChange={(e) => setDiscValue(e.target.value)} aria-label="Line discount" />
+          {discValue && <button type="button" className="btn-ghost h-11 shrink-0 px-3" onClick={() => setDiscValue('')}>No discount</button>}
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">{discType === 'amount' ? 'Rupees off this line.' : 'Percent off this line.'} Above your discount limit a manager approves with their PIN.</p>
+      </div>
+      {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
+      <button className="btn-primary mt-4 w-full" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
+    </Modal>
+  );
+}
+
+/** Shift report (X): the open shift's figures so far, on screen and on the receipt printer. Does not close the shift. */
+export function XReportDialog({ onClose }: { onClose: () => void }) {
+  const { api, notify, fail } = useSession();
+  const [r, setR] = useState<ZReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.xReport().then(setR).catch((e) => { fail(e); onClose(); }); }, [api, fail, onClose]);
+  const print = async () => {
+    setBusy(true);
+    try { await api.printXReport(newKey()); notify('success', 'Shift report sent to the receipt printer.'); } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Shift report (X)" onClose={onClose}>
+      {!r ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+        <>
+          <p className="mb-3 text-sm text-muted-foreground">The shift so far. It stays open; the closing (Z) report is printed when the shift is closed.</p>
+          <div className="space-y-1 text-sm tabular-nums">
+            <XRow label="Bills" value={String(r.invoices)} />
+            <XRow label="Sales" value={formatPaise(r.sales)} />
+            {r.discounts > 0 && <XRow label="Discounts" value={formatPaise(r.discounts)} />}
+            {r.cancelled > 0 && <XRow label={`Cancelled (${r.cancelled})`} value={formatPaise(r.cancelledAmount)} />}
+            {r.creditNotes > 0 && <XRow label={`Refunds (${r.creditNotes})`} value={formatPaise(r.refunds)} />}
+            {Object.entries(r.byMode).map(([m, a]) => <XRow key={m} label={MODE_LABEL[m as PayMode] ?? m} value={formatPaise(a)} />)}
+            <XRow label="Opening cash" value={formatPaise(r.cash.opening)} />
+            <div className="flex justify-between pt-1 font-semibold"><span>Cash that should be in the drawer</span><span>{formatPaise(r.cash.expected)}</span></div>
+          </div>
+          <button className="btn-primary mt-5 w-full" disabled={busy} onClick={() => void print()}><Printer className="h-4 w-4" />{busy ? 'Sending…' : 'Print'}</button>
+        </>
+      )}
+    </Modal>
+  );
+}
+function XRow({ label, value }: { label: string; value: string }) {
+  return <div className="flex justify-between text-muted-foreground"><span>{label}</span><span className="text-foreground">{value}</span></div>;
+}
+
+/** Opens the cash drawer without a sale. A manager approves; the reason is recorded. */
+export function DrawerDialog({ onClose }: { onClose: () => void }) {
+  const { api, notify, withApproval } = useSession();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef(newKey());
+  const go = async (r: string) => {
+    if (r.trim().length < 2) return setError('Say why the drawer is opened.');
+    setBusy(true); setError('');
+    try {
+      const out = await withApproval('Opening the cash drawer', (o) => api.openDrawer(r.trim(), o, key.current));
+      if (out) { notify('success', 'Cash drawer opened.'); onClose(); }
+    } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Open cash drawer" onClose={onClose}>
+      <p className="text-sm text-muted-foreground">Recorded with your name and the reason. A manager approves.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {['Change for a customer', 'Cash count', 'Cash taken to the bank'].map((x) => <button key={x} className="chip" disabled={busy} onClick={() => void go(x)}>{x}</button>)}
+      </div>
+      <input className="field mt-3 w-full" maxLength={120} placeholder="Or type a reason" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason" onKeyDown={(e) => { if (e.key === 'Enter') void go(reason); }} />
+      {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
+      <button className="btn-primary mt-4 w-full" disabled={busy} onClick={() => void go(reason)}>{busy ? 'Opening…' : 'Open drawer'}</button>
+    </Modal>
+  );
+}
+
+/** Sold out today: items marked here come back by themselves tomorrow. */
+export function AvailabilityDialog({ items, onToggle, onClose }: { items: Item[]; onToggle: (item: Item, available: boolean) => Promise<void>; onClose: () => void }) {
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const shown = items.filter((i) => !q.trim() || i.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const off = items.filter((i) => i.availableToday === false).length;
+  return (
+    <Modal title="Sold out today" onClose={onClose} width="max-w-lg">
+      <p className="mb-3 text-sm text-muted-foreground">Tap an item to mark it sold out. It is greyed out on billing and hidden from online orders, and comes back by itself tomorrow.{off ? ` ${off} sold out now.` : ''}</p>
+      <input className="field mb-3 w-full" placeholder="Search items" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search items" autoFocus />
+      <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto rounded-xl border border-border">
+        {shown.map((i) => {
+          const soldOut = i.availableToday === false;
+          return (
+            <li key={i.id}>
+              <button className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-secondary disabled:opacity-60" disabled={busy !== null} onClick={async () => { setBusy(i.id); try { await onToggle(i, soldOut); } finally { setBusy(null); } }}>
+                <span className="min-w-0 flex-1 truncate">{i.name}</span>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${soldOut ? 'bg-destructive text-destructive-foreground' : 'bg-veg/15 text-veg'}`}>{busy === i.id ? '…' : soldOut ? 'Sold out' : 'Available'}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </Modal>
+  );
+}

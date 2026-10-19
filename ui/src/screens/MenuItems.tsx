@@ -6,16 +6,17 @@ import { formatPaise, formatRateBp, paiseToInput, parseRupees } from '../lib/mon
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell, VegMark } from '../components/ui.tsx';
 import { RecipeDialog } from './RecipeDialog.tsx';
-import { preparePhoto } from '../lib/photo.ts';
+import { preparePhoto, sizeText } from '../lib/photo.ts';
 import type { PreparedPhoto } from '../lib/photo.ts';
 import { MenuCategories } from './MenuCategories.tsx';
 import { MenuImport } from './MenuImport.tsx';
 import { MenuPhotos } from './MenuPhotos.tsx';
+import { MenuAddons } from './MenuAddons.tsx';
 
-type Tab = 'items' | 'categories' | 'import' | 'photos';
-const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['import', 'Bulk upload'], ['photos', 'Bulk photos']];
+type Tab = 'items' | 'categories' | 'addons' | 'import' | 'photos';
+const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['addons', 'Add-on groups'], ['import', 'Bulk upload'], ['photos', 'Bulk photos']];
 const TAB_KEY = 'pos.menu.tab';
-const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'import' || t === 'photos' ? t : 'items'; } catch { return 'items'; } };
+const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'addons' || t === 'import' || t === 'photos' ? t : 'items'; } catch { return 'items'; } };
 
 /** Menu creation: items (with veg / non-veg), categories and bulk upload. Changes appear on the billing screen at once. */
 export function MenuItems() {
@@ -29,13 +30,14 @@ export function MenuItems() {
 
   return (
     <PageShell route="menu-items" title="Menu creation" subtitle="Build your menu here. Changes appear on the billing screen straight away.">
-      <div className="mb-5 flex gap-2 border-b border-border" role="tablist" aria-label="Menu sections">
+      <div className="mb-5 flex gap-2 overflow-x-auto overflow-y-hidden border-b border-border" role="tablist" aria-label="Menu sections">
         {TABS.map(([t, label]) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
             {label}
             {t === 'items' && catalog && <span className="ml-1.5 text-xs font-medium opacity-70">{catalog.items.length}</span>}
             {t === 'categories' && catalog && <span className="ml-1.5 text-xs font-medium opacity-70">{catalog.categories.length}</span>}
+            {t === 'addons' && catalog && <span className="ml-1.5 text-xs font-medium opacity-70">{catalog.modifierGroups.length}</span>}
           </button>
         ))}
       </div>
@@ -43,6 +45,7 @@ export function MenuItems() {
       {!catalog ? <p className="text-sm text-muted-foreground">Loading…</p>
         : tab === 'items' ? <ItemsTab catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'categories' ? <MenuCategories catalog={catalog} canEdit={canEdit} reload={load} />
+        : tab === 'addons' ? <MenuAddons catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'photos' ? <MenuPhotos catalog={catalog} canEdit={canEdit} reload={load} />
         : <MenuImport canEdit={canEdit} reload={load} onDone={() => setTab('items')} />}
     </PageShell>
@@ -167,6 +170,8 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
   const [hsn, setHsn] = useState(item?.hsnCode ?? '');
   const [barcode, setBarcode] = useState(item?.barcode ?? '');
   const [more, setMore] = useState(!!(item?.shortName || item?.hsnCode || item?.barcode));
+  const [groups, setGroups] = useState<string[]>(item?.modifierGroupIds ?? []);
+  const groupsKey = useRef(newKey());
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // undefined = unchanged, null = remove, otherwise a new prepared photo
@@ -187,6 +192,8 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
     };
     try {
       const id = item ? (await api.updateItem(item.id, input, key.current), item.id) : (await api.createItem(input, key.current)).id;
+      const before = item?.modifierGroupIds ?? [];
+      if (groups.length !== before.length || groups.some((g) => !before.includes(g))) await api.setItemModifierGroups(id, groups, groupsKey.current);
       try {
         if (photo) await api.setItemImage(id, photo.dataBase64, photoKey.current);
         else if (photo === null && item?.imageFile) await api.removeItemImage(id, photoKey.current);
@@ -248,6 +255,17 @@ function ItemDialog({ catalog, item, onClose, onSaved }: { catalog: Catalog; ite
             </select>
           </label>
         </div>
+        {catalog.modifierGroups.length > 0 && (
+          <div>
+            <span className="mb-1 block text-sm font-medium">Add-on groups <span className="font-normal text-muted-foreground">(asked when the item is added to a bill)</span></span>
+            <div className="flex flex-wrap gap-2">
+              {catalog.modifierGroups.map((g) => (
+                <button key={g.id} type="button" aria-pressed={groups.includes(g.id)} className={`chip ${groups.includes(g.id) ? 'chip-active' : ''}`}
+                  onClick={() => setGroups((gs) => (gs.includes(g.id) ? gs.filter((x) => x !== g.id) : [...gs, g.id]))}>{g.name}</button>
+              ))}
+            </div>
+          </div>
+        )}
         {!more ? <button type="button" className="text-sm font-semibold text-primary" onClick={() => setMore(true)}>More details (short name, HSN, barcode)</button> : (
           <div className="grid grid-cols-3 gap-3">
             <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Short name</span><input className="field" maxLength={40} placeholder="For quick search" value={shortName} onChange={(e) => setShortName(e.target.value)} /></label>
@@ -306,7 +324,7 @@ function PhotoPicker({ name, current, value, onChange }: { name: string; current
           <button type="button" className="btn-ghost h-8 px-3 text-xs" disabled={working} onClick={() => input.current?.click()}><Camera className="h-3.5 w-3.5" />{shown ? 'Change' : 'Choose photo'}</button>
           {shown && <button type="button" className="btn-ghost h-8 px-3 text-xs" onClick={() => onChange(current ? null : undefined)}><ImageOff className="h-3.5 w-3.5" />Remove</button>}
         </div>
-        {value && <p className="mt-1 text-xs text-muted-foreground">New photo, {Math.max(1, Math.round(value.bytes / 1024))} KB. Saved when you save the item.</p>}
+        {value && <p className="mt-1 text-xs text-muted-foreground">New photo, compressed from {sizeText(value.originalBytes)} to {sizeText(value.bytes)}. Saved when you save the item.</p>}
         {value === null && <p className="mt-1 text-xs text-muted-foreground">The photo will be removed when you save.</p>}
         {error && <p className="mt-1 text-xs text-destructive" role="alert">{error}</p>}
       </div>

@@ -60,8 +60,9 @@ test('a design file is checked: wrong files, typos, unknown placeholders and mis
   assert.match(errorsOf({ ...MINIMAL, colour: 'red' }), /Unknown setting "colour"/);
   assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'picture' }] }), /Block 8: unknown block type "picture"/);
   assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'text', text: 'x', allign: 'center' }] }), /unknown setting "allign"/);
-  assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'text', text: 'Hi {{customer.name}}' }] }), /unknown placeholder \{\{customer.name\}\}/);
-  assert.match(errorsOf({ ...MINIMAL, money: { symbol: '₹' } }), /rupee sign/);
+  assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'text', text: 'Hi {{customer.email}}' }] }), /unknown placeholder \{\{customer.email\}\}/);
+  assert.match(errorsOf({ ...MINIMAL, money: { symbol: '$' } }), /"money" may only have "symbol"/);
+  assert.equal(parseTemplate(JSON.stringify({ ...MINIMAL, money: { symbol: '₹' } })).ok, true, 'the rupee sign prints as a picture now');
   assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'items', columns: [{ field: 'name', width: '*' }, { field: 'qty', width: '*' }, { field: 'amount' }] }] }), /only one column can have width "\*"/);
   assert.match(errorsOf({ ...MINIMAL, blocks: [...MINIMAL.blocks, { type: 'items', columns: [{ field: 'name' }] }] }), /must show the item "name" and its "amount"/);
   assert.match(errorsOf('x'.repeat(70_000)), /too large/);

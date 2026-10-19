@@ -136,9 +136,10 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Data in %LOCALAPPDATA%\TiffinPOS\data (local, not roaming), log in ...\logs with rotation; start-up failure dialog with "Open data folder"
 - [x] End-to-end test of the real app (dev build, packaged build and installed build): bill with live print status, reports, lockdown, crash restart, single copy, closing backup
 - [ ] Encryption at rest: SQLCipher-compatible build plus a recovery key
-- [ ] Raster printing for Hindi and other scripts, and the rupee sign
+- [x] Rupee sign, Hindi and other Indian scripts on bills and kitchen tickets: such lines print as pictures drawn with the system's fonts (Windows: GDI+ / Nirmala UI in a constant PowerShell script; Android: the app's Canvas), drawn by the print queue outside the bill transaction; plain text ("Rs", "?") when drawing is not possible. The screen preview shows the real text. Tested with real Windows fonts on the dev PC; not yet on a real printer or Android device
 - [x] Backup and restore screen for the owner (Settings > Backups): back up now, list, restore with the PIN (the POS restarts itself), copies to a USB drive or folder (Windows folder picker), online backups to the Tiffin backup server; restore from this device, a folder or online. Tested end to end in the browser and in the desktop app (dev build)
-- [ ] Sessions that survive an app restart (today a restart signs everyone out; bills are safe)
+- [x] Menu photo compression for single and bulk uploads: 1024 px, high-quality resize, WebP 90% (measured: no visible difference, ~95% smaller); the screens show the size before and after
+- [x] Sign-ins survive a restart of the POS (app_session keeps only a SHA-256 of the token; inactivity lock, sign-out and deactivation still end them; unused for 12 hours they are forgotten). Desktop e2e: still signed in after the backend crashes and restarts
 
 ### Then: distribution
 - [x] USB printers on the WinUSB driver (e.g. after the Zadig tool): listed in Printer setup and printed to through winusb.dll (bulk OUT endpoint), no admin needed. Found and opened a Posiflex PP8800 on the dev PC; a real print from this path is not tested yet
@@ -164,7 +165,7 @@ Order follows the project plan in `CLAUDE.md`.
 ### UI screens still missing
 - [x] Coupon codes: Settings > Coupons (owner only: create, edit, switch off; managers and cashiers do not see it): % or Rs off, % cap, minimum bill, valid dates, number of uses, on/off; Billing % button > Coupon code; checked when applied and again at payment; a coupon needs no manager PIN; a manual discount replaces it; cancelling a bill frees its use
 - [ ] Coupon follow-ups: coupon code printed on the bill (receipt content: needs review), coupons in the Discounts report, one use per customer mobile, coupons for online orders
-- [ ] Line-level discounts and notes (backend done)
+- [x] Line-level discounts and notes (tap a bill line: exact quantity, kitchen note, % or ₹ off this item; above the limit a manager approves)
 - [x] Reports screen (sidebar): 16 reports in 5 groups. Sales: summary, payment modes, by hour, channels, by cashier, discounts. Items: item sales, category sales. Tax: GST by rate, HSN summary, bill register. Controls: cancellations and refunds, shifts and cash. Inventory: stock on hand, stock movement, purchases
 - [x] Reports show on screen (summary cards, table, totals row), date presets (today, yesterday, last 7 days, this month, last month, custom), Download CSV for Excel, Print / PDF (A4 landscape)
 - [ ] Reports follow-ups: GSTR-1 B2B/B2CS JSON export, XLSX download, profit report (needs recipe costing), scheduled email of the daily report, reports for a single shift (X-report)
@@ -196,6 +197,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Add-on loader hardening: folder must equal the id, no going back to an older version, add-on database steps limited to their own tables (no ATTACH/PRAGMA/VACUUM); review notes in docs/ADDONS.md
 - [ ] Human security review of the add-on loader and online billing (docs/ADDONS.md "Security review")
 - [ ] Online orders, still to build: SMS for OTP, payment gateway (online payment, refunds), hosting the hub, store apps (Android/iOS/website; the demo page stands in), Swiggy/Zomato relay, customer notifications (SMS/WhatsApp)
+- [ ] Hosting the hub: setup kit for a free Oracle Cloud VM written (`hub/deploy/`: cloud-init with Node 24, Caddy HTTPS on `<ip>.sslip.io`, service, daily database copy), not yet tried on a real Oracle VM; off-VM copies of the hub database still manual
 - [ ] Online orders: not yet tried on a real Windows install with a real printer (docs/HARDWARE_TEST_PLAN.md)
 - [x] PINs are exactly 4 digits in the UI (sign-in and approval keypads, setup, users); the backend still accepts 4 to 6 so an older longer PIN keeps working until the owner resets it
 - [x] Settings > Users (owner only): add a user with name, role and PIN (typed twice); edit name and role; reset a PIN (also unlocks); change own PIN with the current one; deactivate and reactivate. Unique names among active users; no self-deactivation or own role change; the last owner is protected
@@ -204,17 +206,18 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Default bill design "Classic" (logo, store details, Bill No / Cashier / Token / Date / Time row, Item / Price / Qty / Total, Total Quantity, Gross Total, GST per rate, Net Amount)
 - [x] Bill design files (.tiffinreceipt): the owner uploads a design in Settings > Receipt, sees a 58/80 mm preview first, and every bill, reprint, screen receipt and sample uses it; back to standard in one tap. GST bill parts are required; safety marks always print
 - [x] Designer kit: format guide (docs/RECEIPT_TEMPLATES.md), three examples (templates/receipt), `npm run receipt` preview with --width/--credit/--duplicate/--upi
-- [ ] Bill design follow-ups: rupee sign and Hindi (needs text-as-image printing), table number and customer name on the bill (not in the data yet), KOT designs, a CA review of the GST bill check
+- [ ] Bill design follow-ups: table number on the bill (not in the data yet), KOT designs, a CA review of the GST bill check (rupee sign, Hindi and the customer's name and phone are done)
 - [ ] Receipt wording for an outlet without GSTIN ("TAX INVOICE" is always printed) and place of supply on IGST bills: needs CA decision
-- [ ] KOT reprint, manual cash drawer open, X-report; changing the payment mode after billing
-- [ ] Line notes and line discounts in the UI (backend done)
-- [ ] Modifier (add-on) group editing in the UI (backend can create groups and attach them)
-- [ ] Mark an item unavailable for the day without deleting it
+- [x] KOT reprint (marked REPRINT, manager approval), manual cash drawer open (reason, manager approval, audited), X-report (screen and printer, shift stays open), changing the payment mode after billing (an immutable payment_correction; payments are never edited; open shift only; journaled; reports, Z/X cash and daily totals use the corrected mode). Payment corrections need a human and CA review
+- [x] Line notes and line discounts in the UI
+- [x] Add-on (modifier) groups: Menu creation > Add-on groups (create, edit options and prices, how many to choose, remove) and choosing them per item in the item editor; removed options are switched off, never deleted, so bills keep theirs
+- [x] Sold out today: Billing > user menu > Sold out today (cashiers too); greyed out on billing, refused on new bills, hidden from online orders, back by itself the next day
 - [ ] Excel (.xlsx) upload directly (today: save as CSV UTF-8)
 - [ ] Update prices of existing items in bulk (the upload only adds new items)
 - [ ] Live updates through the events stream (the UI polls print failures every 20 s)
-- [ ] Customer name and phone, buyer GSTIN and order channel (Swiggy/Zomato) on the bill
-- [ ] Layout for screens narrower than 1280 px and touch-first testing
+- [x] Customer name and phone, buyer GSTIN (entered in Customer and note) and the order channel (App, Website, Swiggy, Zomato) on the bill (classic design; placeholders customer.name, customer.phone, order.channel). Receipt content: needs a human and CA review
+- [x] Layout below 1280 px: billing shows the bill as a full screen from a "View bill" bar on phones and handheld POS machines (below 768 px), narrower bill panel on tablets, smaller page margins, wide tables scroll sideways, no tap delay or double-tap zoom. Checked at 1024x768, 800x1280 and 390x844 in Edge with touch emulation
+- [ ] Touch and small-screen check on a real handheld POS and a touch-screen PC
 - [x] The Electron host loading the built UI (app://pos)
 
 ## Android (standalone)

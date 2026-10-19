@@ -7,6 +7,10 @@ import { AppError } from '../store/db.ts';
 import type { Actor, Ctx } from '../services/ctx.ts';
 import { assertPerm } from '../services/permissions.ts';
 import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
+import { deleteModifierGroup, updateModifierGroup } from '../services/catalog.ts';
+import { correctPaymentMode, openDrawer, printXReport, setItemAvailability, xReport } from '../services/counter.ts';
+import { reprintKot } from '../services/printing/jobs.ts';
+import { requireApproval } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
 import { addLine, applyBillDiscount, applyCoupon, removeCoupon, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
 import { cancelInvoice, checkPayments, createCreditNote, creditNoteOptions, finalizeInvoice, getInvoice, listInvoices, previewCreditNote, reprintInvoice } from '../services/invoices.ts';
@@ -67,7 +71,8 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   };
 
   // ---- public ----
-  add('GET', '/api/ping', { auth: false }, () => ({ ok: true }));
+  const boot = crypto.randomUUID();
+  add('GET', '/api/ping', { auth: false }, () => ({ ok: true, boot }));
   add('GET', '/api/login-users', { auth: false }, (c) => listLoginUsers(c.ctx));
   add('POST', '/api/setup', { auth: false }, (c) => setupFirstRun(c.ctx, rid(c), body(c, obj({
     outlet: obj({ name: str({ min: 1, max: 80 }), gstin: opt(nullable(str({ max: 15 }))), fssaiNo: opt(nullable(str({ max: 14 }))), stateCode: str({ min: 2, max: 2 }), address: opt(nullable(str({ max: 200 }))), phone: opt(nullable(str({ max: 15 }))) }),
@@ -109,6 +114,10 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('DELETE', '/api/categories/:id', {}, (c) => deleteCategory(c.ctx, c.actor, rid(c), c.params.id!));
   add('PUT', '/api/categories/order', {}, (c) => reorderCategories(c.ctx, c.actor, rid(c), body(c, obj({ ids: arr(str({ min: 1, max: 64 }), { max: 500 }) })).ids));
   add('POST', '/api/tax-groups', {}, (c) => createTaxGroup(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 40 }), rateBp: int({ min: 0, max: 10000 }), cessBp: opt(int({ min: 0, max: 10000 })), priceIncludesTax: opt(bool) }))));
+  const modGroupShape = { name: str({ min: 1, max: 60 }), minSelect: int({ min: 0, max: 50 }), maxSelect: int({ min: 1, max: 50 }), modifiers: arr(obj({ id: opt(str({ min: 1, max: 64 })), name: str({ min: 1, max: 60 }), price: int({ min: 0 }) }), { max: 50 }) };
+  add('PUT', '/api/modifier-groups/:id', {}, (c) => updateModifierGroup(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj(modGroupShape))));
+  add('DELETE', '/api/modifier-groups/:id', {}, (c) => deleteModifierGroup(c.ctx, c.actor, rid(c), c.params.id!));
+  add('PUT', '/api/items/:id/availability', {}, (c) => setItemAvailability(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ availableToday: bool })).availableToday));
   add('POST', '/api/modifier-groups', {}, (c) => createModifierGroup(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), minSelect: opt(int({ min: 0 })), maxSelect: opt(int({ min: 1 })), modifiers: arr(obj({ name: str({ min: 1, max: 60 }), price: int({ min: 0 }) }), { max: 50 }) }))));
 
   // ---- orders ----
@@ -143,12 +152,17 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/invoices/:id/credit-note', {}, (c) => createCreditNote(c.ctx, c.actor, rid(c), { invoiceId: c.params.id!, ...body(c, obj({ lines: arr(obj({ invoiceLineId: str({ min: 1, max: 64 }), qtyMilli: int({ min: 1 }) }), { max: 1000 }), reason: str({ min: 1, max: 200 }), refunds: arr(payment, { max: 6 }), override: opt(override) })) }));
   add('GET', '/api/invoices/:id/receipt', {}, (c) => { assertPerm(c.actor, 'invoice.read'); return receiptPreview(c.ctx, c.params.id!, num(c.query, 'width') ?? 80); });
   add('GET', '/api/invoices/:id/prints', {}, (c) => { assertPerm(c.actor, 'invoice.read'); return invoicePrints(c.ctx, c.params.id!); });
+  add('POST', '/api/invoices/:id/kot-reprint', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return reprintKot(c.ctx, c.actor, rid(c), { invoiceId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
+  add('POST', '/api/payments/:id/correct', {}, (c) => correctPaymentMode(c.ctx, c.actor, rid(c), { paymentId: c.params.id!, ...body(c, obj({ toMode: oneOf('CASH', 'UPI', 'CARD', 'WALLET', 'CREDIT', 'OTHER'), reference: opt(nullable(str({ max: 60 }))), reason: str({ min: 1, max: 200 }), override: opt(override) })) }));
   add('POST', '/api/invoices/:id/reprint', {}, (c) => reprintInvoice(c.ctx, c.actor, rid(c), { invoiceId: c.params.id!, ...body(c, obj({ override: opt(override) })) }));
 
   // ---- shifts ----
   add('GET', '/api/shifts/current', {}, (c) => currentShift(c.ctx));
   add('POST', '/api/shifts/open', {}, (c) => openShift(c.ctx, c.actor, rid(c), body(c, obj({ openingCash: int({ min: 0 }) }))));
   add('POST', '/api/shifts/close', {}, (c) => closeShift(c.ctx, c.actor, rid(c), body(c, obj({ countedCash: int({ min: 0 }), discardOpenOrders: opt(bool) }))));
+  add('GET', '/api/shifts/current/x-report', {}, (c) => xReport(c.ctx, c.actor));
+  add('POST', '/api/shifts/current/x-report/print', {}, (c) => printXReport(c.ctx, c.actor, rid(c)));
+  add('POST', '/api/drawer/open', {}, (c) => openDrawer(c.ctx, c.actor, rid(c), body(c, obj({ reason: str({ min: 1, max: 120 }), override: opt(override) }))));
   add('GET', '/api/shifts/:id/report', {}, (c) => { assertPerm(c.actor, 'shift.report'); return zReport(c.ctx, c.params.id!); });
 
   // ---- reports ----

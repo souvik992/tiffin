@@ -11,6 +11,11 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.hardware.usb.UsbConstants;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
@@ -101,11 +106,80 @@ final class PrinterBridge {
                     synchronized (printLock) { res = print(req.optString("address"), data, req.optBoolean("slow")); }
                     break;
                 }
+                case "render": {
+                    int n = req.optInt("length", -1);
+                    if (n < 0 || n > MAX_RENDER) { res = fail("Too many lines to draw."); break; }
+                    res = render(new String(readN(in, n), StandardCharsets.UTF_8));
+                    break;
+                }
                 default: res = fail("Unknown request.");
             }
             out.write((res + "\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
         } catch (Exception ignored) { /* the backend reports a dropped connection itself */ }
+    }
+
+    // ------------------------------------------------------------------ drawing receipt lines
+
+    private static final int MAX_RENDER = 1_000_000;
+
+    /**
+     * Receipt lines with the rupee sign or Indian scripts, drawn with Android's fonts (which join Hindi letters
+     * correctly) as 1-bit pictures for the printer. Input: [{s:[{t,col,width,align}], w, h, b, c}] (backend
+     * textPicture.ts). Output "lines": one "<widthBytes> <height> <base64>" per line, or "-" when one cannot be drawn.
+     */
+    private JSONObject render(String json) throws Exception {
+        JSONArray specs = new JSONArray(json);
+        StringBuilder lines = new StringBuilder();
+        for (int i = 0; i < specs.length(); i++) {
+            try {
+                JSONObject s = specs.getJSONObject(i);
+                int w = Math.max(1, Math.min(8, s.optInt("w", 1))), h = Math.max(1, Math.min(8, s.optInt("h", 1)));
+                int cellW = 12 * w, height = 24 * h;
+                int width = ((Math.max(1, Math.min(64, s.optInt("c", 48))) * cellW + 7) / 8) * 8;
+                Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bmp);
+                canvas.drawColor(Color.WHITE);
+                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                paint.setColor(Color.BLACK);
+                paint.setTextSize(17f * h);
+                paint.setTypeface(s.optBoolean("b") ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                Paint.FontMetrics fm = paint.getFontMetrics();
+                float baseline = (height - (fm.descent - fm.ascent)) / 2f - fm.ascent;
+                JSONArray segs = s.getJSONArray("s");
+                for (int k = 0; k < segs.length(); k++) {
+                    JSONObject g = segs.getJSONObject(k);
+                    String text = g.optString("t");
+                    float left = g.optInt("col") * cellW, room = g.optInt("width") * cellW;
+                    float tw = paint.measureText(text);
+                    String align = g.optString("align", "l");
+                    float x = align.equals("r") ? left + room - tw : align.equals("c") ? left + (room - tw) / 2f : left;
+                    canvas.save();
+                    canvas.clipRect(left, 0, left + room, height);
+                    canvas.drawText(text, x, baseline, paint);
+                    canvas.restore();
+                }
+                int wb = width / 8;
+                byte[] out = new byte[wb * height];
+                int[] px = new int[width];
+                for (int y = 0; y < height; y++) {
+                    bmp.getPixels(px, 0, width, 0, y, width, 1);
+                    for (int x = 0; x < width; x++) {
+                        int c = px[x];
+                        int lum = ((c >> 16) & 0xff) + ((c >> 8) & 0xff) + (c & 0xff);
+                        if (lum < 384) out[y * wb + (x >> 3)] |= (byte) (0x80 >> (x & 7));
+                    }
+                }
+                bmp.recycle();
+                lines.append(wb).append(' ').append(height).append(' ').append(Base64.encodeToString(out, Base64.NO_WRAP)).append('\n');
+            } catch (Exception e) {
+                lines.append("-\n");
+            }
+        }
+        JSONObject r = new JSONObject();
+        r.put("ok", true);
+        r.put("lines", lines.toString());
+        return r;
     }
 
     private boolean sameToken(String t) {

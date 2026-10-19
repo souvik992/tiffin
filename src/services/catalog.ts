@@ -1,3 +1,4 @@
+import { istDay } from '../core/numbering.ts';
 import { all, get, run, AppError } from '../store/db.ts';
 import type { Actor, Ctx } from './ctx.ts';
 import { runCommand } from './commands.ts';
@@ -26,11 +27,12 @@ export function getCatalog(ctx: Ctx) {
       (SELECT count(*) FROM item i WHERE i.category_id = c.id AND i.deleted_at IS NULL) AS item_count
     FROM category c WHERE c.deleted_at IS NULL ORDER BY c.sort_order, c.name`));
   const taxGroups = camelAll(all(ctx.db, 'SELECT id, name, rate_bp, cess_bp, price_includes_tax FROM tax_group WHERE deleted_at IS NULL ORDER BY rate_bp'));
-  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
+  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description, unavailable_on FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
   const links = all<{ item_id: string; group_id: string }>(ctx.db, 'SELECT item_id, group_id FROM item_modifier_group');
   const byItem = new Map<string, string[]>();
   for (const l of links) byItem.set(l.item_id, [...(byItem.get(l.item_id) ?? []), l.group_id]);
-  for (const it of items) it.modifierGroupIds = byItem.get(it.id as string) ?? [];
+  const today = istDay(ctx.clock.now());
+  for (const it of items) { it.modifierGroupIds = byItem.get(it.id as string) ?? []; it.availableToday = it.unavailableOn !== today; delete it.unavailableOn; }
   const groups = all<{ id: string; name: string; min_select: number; max_select: number }>(ctx.db, 'SELECT id, name, min_select, max_select FROM modifier_group WHERE deleted_at IS NULL');
   const mods = all<{ id: string; group_id: string; name: string; price: number }>(ctx.db, 'SELECT id, group_id, name, price FROM modifier WHERE active = 1');
   const modifierGroups = groups.map((g) => ({ id: g.id, name: g.name, minSelect: g.min_select, maxSelect: g.max_select, modifiers: mods.filter((m) => m.group_id === g.id).map((m) => ({ id: m.id, name: m.name, price: m.price })) }));
@@ -215,6 +217,60 @@ export function createModifierGroup(ctx: Ctx, actor: Actor, requestId: string, i
     audit(ctx, actor.userId, 'modgroup.create', 'modifier_group', id);
     emit(ctx, 'modifier_group', id, 'upsert', { id, name });
     return { id };
+  });
+}
+
+/**
+ * Changes a modifier (add-on) group: name, how many to choose, and its options. Options sent with an id are updated,
+ * new ones (no id) are added, and options left out are switched off, never deleted: bills and open carts keep their own
+ * copy of the name and price, so past bills never change.
+ */
+export function updateModifierGroup(ctx: Ctx, actor: Actor, requestId: string, groupId: string, input: { name: string; minSelect: number; maxSelect: number; modifiers: Array<{ id?: string; name: string; price: number }> }) {
+  return runCommand(ctx, requestId, 'modgroup.update', actor, () => {
+    assertPerm(actor, 'catalog.write');
+    if (!get(ctx.db, 'SELECT 1 FROM modifier_group WHERE id = ? AND deleted_at IS NULL', groupId)) throw new AppError('NOT_FOUND', 'Add-on group not found.', 404);
+    const name = clean(input.name, 'Group name', 60)!;
+    const min = input.minSelect, max = input.maxSelect;
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 1 || min > max) fail('Choose how many: at least 0, at most 1 or more, and "at least" no more than "at most".');
+    if (input.modifiers.length === 0) fail('An add-on group needs at least one option.');
+    if (min > input.modifiers.length) fail('"At least" is more than the number of options.');
+    const names = new Set<string>();
+    for (const m of input.modifiers) {
+      const n = clean(m.name, 'Option name', 60)!.toLowerCase();
+      if (names.has(n)) fail(`The option "${m.name.trim()}" is listed twice.`);
+      names.add(n);
+      if (!Number.isInteger(m.price) || m.price < 0 || m.price > MAX_PRICE) fail('Option prices must be 0 or more.');
+    }
+    run(ctx.db, 'UPDATE modifier_group SET name = ?, min_select = ?, max_select = ?, version = version + 1, updated_at = ? WHERE id = ?', name, min, max, ctx.clock.now(), groupId);
+    const keep = new Set<string>();
+    for (const m of input.modifiers) {
+      if (m.id) {
+        if (!get(ctx.db, 'SELECT 1 FROM modifier WHERE id = ? AND group_id = ?', m.id, groupId)) fail('An option does not belong to this group. Reload and try again.');
+        run(ctx.db, 'UPDATE modifier SET name = ?, price = ?, active = 1 WHERE id = ?', clean(m.name, 'Option name', 60)!, m.price, m.id);
+        keep.add(m.id);
+      } else {
+        const id = ctx.ids.next();
+        run(ctx.db, 'INSERT INTO modifier(id, group_id, name, price) VALUES (?,?,?,?)', id, groupId, clean(m.name, 'Option name', 60)!, m.price);
+        keep.add(id);
+      }
+    }
+    for (const r of all<{ id: string }>(ctx.db, 'SELECT id FROM modifier WHERE group_id = ? AND active = 1', groupId)) if (!keep.has(r.id)) run(ctx.db, 'UPDATE modifier SET active = 0 WHERE id = ?', r.id);
+    audit(ctx, actor.userId, 'modgroup.update', 'modifier_group', groupId, { name, options: input.modifiers.length });
+    emit(ctx, 'modifier_group', groupId, 'upsert', { id: groupId, name });
+    return { id: groupId };
+  });
+}
+
+/** Removes a group from the menu and from every item (kept in the database for old carts and bills). */
+export function deleteModifierGroup(ctx: Ctx, actor: Actor, requestId: string, groupId: string) {
+  return runCommand(ctx, requestId, 'modgroup.delete', actor, () => {
+    assertPerm(actor, 'catalog.write');
+    const r = run(ctx.db, 'UPDATE modifier_group SET deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL', ctx.clock.now(), ctx.clock.now(), groupId);
+    if (Number(r.changes) === 0) throw new AppError('NOT_FOUND', 'Add-on group not found.', 404);
+    run(ctx.db, 'DELETE FROM item_modifier_group WHERE group_id = ?', groupId);
+    audit(ctx, actor.userId, 'modgroup.delete', 'modifier_group', groupId);
+    emit(ctx, 'modifier_group', groupId, 'delete', { id: groupId });
+    return { ok: true };
   });
 }
 

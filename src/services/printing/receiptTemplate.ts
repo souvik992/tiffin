@@ -1,4 +1,6 @@
-import { EscPos, sanitize, wrapText } from './escpos.ts';
+import { EscPos, needsPicture, sanitize, wrapText } from './escpos.ts';
+import { visibleLength } from './textPicture.ts';
+import type { Seg } from './textPicture.ts';
 import type { ReceiptData, ReceiptOptions } from './receipt.ts';
 import { formatINR, formatQty } from '../../core/money.ts';
 
@@ -54,7 +56,9 @@ export const PLACEHOLDERS: Record<string, string> = {
   'invoice.no': 'Bill number', 'invoice.date': 'Date and time (15-10-2026 19:43)', 'invoice.date-only': 'Date (15-10-2026)', 'invoice.time': 'Time (19:43)',
   'invoice.token': 'Token number', 'invoice.against': 'Original bill number (credit notes)', 'invoice.buyer-gstin': "Customer's GSTIN",
   'invoice.total': 'Bill total', 'invoice.items': 'Number of item lines', 'cashier.name': 'Cashier name',
+  'customer.name': 'Customer name (typed on the bill)', 'customer.phone': 'Customer phone', 'order.channel': 'Where the order came from (App, Website, Swiggy, Zomato; empty at the counter)',
 };
+const CHANNEL_LABEL: Record<string, string> = { APP: 'App', WEBSITE: 'Website', SWIGGY: 'Swiggy', ZOMATO: 'Zomato' };
 const PH = /\{\{\s*([a-z][a-z0-9.-]*)\s*\}\}/g;
 
 const IST = 330 * 60_000;
@@ -71,7 +75,7 @@ const ALIGNS = ['left', 'center', 'right'];
 const FIELDS: ItemField[] = ['sno', 'name', 'qty', 'rate', 'amount', 'hsn', 'gst'];
 const TOTALS: TotalRow[] = ['subtotal', 'discount', 'taxable', 'gst', 'cess', 'roundoff', 'tax-total', 'total-qty'];
 const RULE_CHARS = ['-', '=', '*', '_', '.', '~', '#'];
-const SYMBOLS = ['', 'Rs', 'Rs.', 'INR'];
+const SYMBOLS = ['', 'Rs', 'Rs.', 'INR', '₹']; // the rupee sign prints as a picture (textPicture.ts), or as "Rs" where it cannot be drawn
 const STYLE_KEYS = ['align', 'bold', 'size', 'if'];
 const KEYS: Record<string, string[]> = {
   text: ['text', ...STYLE_KEYS], field: ['label', 'value', ...STYLE_KEYS], rule: ['char'], blank: ['lines'], 'doc-title': STYLE_KEYS,
@@ -94,7 +98,7 @@ export function parseTemplate(text: string): ParseResult {
   if (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 300)) errors.push('"description" must be text of at most 300 characters.');
   if (raw.money !== undefined) {
     if (!isObj(raw.money) || Object.keys(raw.money).some((k) => k !== 'symbol') || (raw.money.symbol !== undefined && !SYMBOLS.includes(String(raw.money.symbol)))) {
-      errors.push(`"money" may only have "symbol", one of: ${SYMBOLS.map((s) => `"${s}"`).join(', ')}. (Thermal printers cannot print the rupee sign in text mode.)`);
+      errors.push(`"money" may only have "symbol", one of: ${SYMBOLS.map((s) => `"${s}"`).join(', ')}.`);
     }
   }
   if (!Array.isArray(raw.blocks) || raw.blocks.length === 0 || raw.blocks.length > 150) {
@@ -218,6 +222,7 @@ export function renderTemplate(t: ReceiptTemplate, d: ReceiptData, o: ReceiptOpt
     'invoice.no': d.invoice.invoiceNo, 'invoice.date': `${when.date} ${when.time}`, 'invoice.date-only': when.date, 'invoice.time': when.time,
     'invoice.token': d.invoice.tokenNo !== null && !credit ? String(d.invoice.tokenNo) : '', 'invoice.against': d.invoice.originalInvoiceNo ?? '',
     'invoice.buyer-gstin': d.invoice.buyerGstin ?? '', 'invoice.total': money(d.invoice.grandTotal), 'invoice.items': String(d.lines.length), 'cashier.name': d.cashierName,
+    'customer.name': d.customer?.name ?? '', 'customer.phone': d.customer?.phone ?? '', 'order.channel': CHANNEL_LABEL[d.channel ?? ''] ?? '',
   };
   const fill = (s: string) => s.replace(PH, (_, k: string) => values[k] ?? '');
   // A line whose placeholders are all empty is left out (for example "FSSAI: {{outlet.fssai}}" when there is none).
@@ -365,11 +370,19 @@ function itemsTable(p: EscPos, b: Extract<Block, { type: 'items' }>, d: ReceiptD
   const defaults: Record<ItemField, string> = { sno: '#', name: 'Item', qty: 'Qty', rate: 'Rate', amount: 'Amount', hsn: 'HSN', gst: 'GST' };
   const columns = b.columns.map((c) => ({ ...c, label: sanitize(c.label ?? defaults[c.field]), right: c.align ? c.align === 'right' : c.field !== 'name' && c.field !== 'hsn' }));
   const flexIdx = Math.max(0, columns.findIndex((c) => c.width === '*' || (c.field === 'name' && !columns.some((x) => x.width === '*'))));
-  const widths = columns.map((c, i) => i === flexIdx ? 0 : Math.max(typeof c.width === 'number' ? c.width : 0, b.header === false ? 0 : c.label.length, ...d.lines.map((l, j) => sanitize(cell(c.field, l, j)).length)));
+  // item names in Hindi or other scripts (and amounts with a rupee sign) are kept: their row prints as a picture
+  const keep = (s: string) => (needsPicture(s) ? s : sanitize(s));
+  const widths = columns.map((c, i) => i === flexIdx ? 0 : Math.max(typeof c.width === 'number' ? c.width : 0, b.header === false ? 0 : c.label.length, ...d.lines.map((l, j) => visibleLength(keep(cell(c.field, l, j))))));
   const fixed = widths.reduce((s, w, i) => (i === flexIdx ? s : s + w + 1), 0);
   const flex = cols - fixed;
   const stacked = flex < 12; // a name column narrower than 12 characters is hard to read
   const row = (vals: string[]) => {
+    if (!stacked && vals.some(needsPicture)) {
+      const segs: Seg[] = [];
+      let at = 0;
+      vals.forEach((v, i) => { const w = i === flexIdx ? flex : widths[i]!; segs.push({ t: v, col: at, width: w, align: columns[i]!.right && i !== flexIdx ? 'r' : 'l' }); at += w + 1; });
+      return p.segments(segs);
+    }
     if (!stacked) return p.line(vals.map((v, i) => (i === flexIdx ? v.padEnd(flex) : pad(v, widths[i]!, columns[i]!.right))).join(' ').trimEnd());
     const rest = vals.filter((_, i) => i !== flexIdx).map((v, k) => pad(v, widths.filter((_, i) => i !== flexIdx)[k]!, columns.filter((_, i) => i !== flexIdx)[k]!.right)).join(' ');
     if (vals[flexIdx]) p.wrapped(vals[flexIdx]!);
@@ -377,12 +390,12 @@ function itemsTable(p: EscPos, b: Extract<Block, { type: 'items' }>, d: ReceiptD
   };
   if (b.header !== false) { row(columns.map((c) => c.label)); p.rule('-'); }
   d.lines.forEach((l, i) => {
-    const vals = columns.map((c) => sanitize(cell(c.field, l, i)));
-    if (!stacked && vals[flexIdx]!.length > flex) {
+    const vals = columns.map((c) => keep(cell(c.field, l, i)));
+    if (!stacked && visibleLength(vals[flexIdx]!) > flex) {
       const parts = wrapText(vals[flexIdx]!, flex);
       row(vals.map((v, k) => (k === flexIdx ? parts[0]! : v)));
       const indent = widths.slice(0, flexIdx).reduce((s, w) => s + w + 1, 0);
-      for (const part of parts.slice(1)) p.line(' '.repeat(indent) + part);
+      for (const part of parts.slice(1)) { if (needsPicture(part)) p.segments([{ t: part, col: indent, width: flex, align: 'l' }]); else p.line(' '.repeat(indent) + part); }
     } else row(vals);
     if (b.modifiers !== false) for (const m of l.modifiers) p.wrapped(`+ ${m.name}`, 2);
     if (b.notes !== false && l.note) p.wrapped(`Note: ${l.note}`, 2);

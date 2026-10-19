@@ -33,10 +33,10 @@ The design is stored in the shop's database, so it is included in backups and re
 
 **It can:** arrange, label, align, embolden and resize the information the POS already has. It can also hide optional parts: a line whose placeholders are all empty is left out automatically.
 
+**Rupee sign and Hindi:** `"money": { "symbol": "₹" }` and item names in Hindi or other Indian scripts print as small pictures drawn with the system's fonts (Windows and Android). Where that is not possible they print as `Rs` and `?`.
+
 **It cannot:**
 * run code or calculate anything. Every amount is the backend's own figure, formatted for print.
-* print the rupee sign. Text-mode printing is ASCII; use `"Rs"`. The store logo can be printed with the `logo` block.
-* print Hindi or other Indian scripts. These also need raster printing.
 * remove the safety marks. `doc-title` always prints `TAX INVOICE` or `CREDIT NOTE`, `SAMPLE - NOT A BILL` on samples, and `*** CANCELLED ***` and `*** DUPLICATE ***` when they apply.
 * skip the paper feed, cut and cash-drawer kick; the POS adds those itself.
 * change the kitchen ticket (KOT). Designs apply to customer bills only.
@@ -71,7 +71,7 @@ Exactly what a bill must show (HSN for the shop's turnover, FSSAI, place of supp
 | `version` | yes | Always `1`. |
 | `name` | yes | 1 to 60 characters. The owner sees this name. |
 | `description` | no | Up to 300 characters. |
-| `money.symbol` | no | The text before amounts: `""` (default), `"Rs"`, `"Rs."` or `"INR"`. |
+| `money.symbol` | no | The text before amounts: `""` (default), `"Rs"`, `"Rs."`, `"INR"` or `"₹"` (printed as a picture). |
 | `blocks` | yes | 1 to 150 blocks, printed top to bottom. |
 
 Rules for the file as a whole:
@@ -155,6 +155,8 @@ Write placeholders as `{{name}}` inside `text`, `field` labels and values, and `
 | `{{invoice.total}}` | Bill total, formatted. |
 | `{{invoice.items}}` | Number of item lines. |
 | `{{cashier.name}}` | Who made the bill. |
+| `{{customer.name}}`, `{{customer.phone}}` | Typed on the bill under Customer and note. Empty when not given. |
+| `{{order.channel}}` | Where the order came from: App, Website, Swiggy or Zomato. Empty for counter bills. |
 
 ## Tips for copying a shop's bill
 

@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { all, get, run, AppError } from '../store/db.ts';
 import type { Actor, Ctx, Role } from './ctx.ts';
 import { getDevice } from './ctx.ts';
@@ -88,7 +88,9 @@ export function login(ctx: Ctx, userId: string, pin: string): { token: string; u
   const u = checkPin(ctx, userRow(ctx, userId), pin, false);
   const token = randomBytes(32).toString('hex');
   const actor: Actor = { userId: u.id, role: u.role, name: u.name };
-  ctx.sessions.set(token, { ...actor, token, lastSeen: ctx.clock.now() });
+  const now = ctx.clock.now();
+  ctx.sessions.set(token, { ...actor, token, lastSeen: now, savedAt: now });
+  run(ctx.db, 'INSERT INTO app_session(token_hash, user_id, created_at, last_seen) VALUES (?,?,?,?)', tokenHash(token), u.id, now, now);
   audit(ctx, u.id, 'auth.login', 'user', u.id);
   return { token, user: actor };
 }
@@ -101,20 +103,47 @@ export function loginByMobile(ctx: Ctx, mobile: string, pin: string): { token: s
     throw e;
   }
 }
-export function logout(ctx: Ctx, token: string): void { ctx.sessions.delete(token); }
+export function logout(ctx: Ctx, token: string): void { endSession(ctx, token); }
+
+// Sign-ins survive a restart of the POS (an update, a crash, restoring a backup's own sessions aside): the token's
+// SHA-256 is kept in app_session, never the token. The inactivity lock still applies, and a sign-in unused for
+// SESSION_MAX_IDLE_MS is forgotten.
+const SESSION_MAX_IDLE_MS = 12 * 3_600_000;
+const SAVE_EVERY_MS = 60_000; // last-seen is written at most once a minute per sign-in
+const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
+function endSession(ctx: Ctx, token: string): void {
+  ctx.sessions.delete(token);
+  run(ctx.db, 'DELETE FROM app_session WHERE token_hash = ?', tokenHash(token));
+}
+/** A sign-in from before a restart, if it is still known. */
+function storedSession(ctx: Ctx, token: string) {
+  const r = get<{ user_id: string; last_seen: number }>(ctx.db, 'SELECT user_id, last_seen FROM app_session WHERE token_hash = ?', tokenHash(token));
+  if (!r) return undefined;
+  if (ctx.clock.now() - r.last_seen > SESSION_MAX_IDLE_MS) { run(ctx.db, 'DELETE FROM app_session WHERE token_hash = ?', tokenHash(token)); return undefined; }
+  const u = userRow(ctx, r.user_id);
+  if (!u) return undefined;
+  const s = { userId: u.id, role: u.role, name: u.name, token, lastSeen: r.last_seen, savedAt: r.last_seen };
+  ctx.sessions.set(token, s);
+  return s;
+}
+/** Forgets sign-ins unused for a long time (called at start-up). */
+export function pruneSessions(ctx: Ctx): number {
+  return Number(run(ctx.db, 'DELETE FROM app_session WHERE last_seen < ?', ctx.clock.now() - SESSION_MAX_IDLE_MS).changes);
+}
 
 export function authenticate(ctx: Ctx, token: string | undefined): Actor {
-  const s = token ? ctx.sessions.get(token) : undefined;
+  const s = token ? ctx.sessions.get(token) ?? storedSession(ctx, token) : undefined;
   if (!s) throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401);
   const idleMs = loadSettings(ctx).idleLockSeconds * 1000;
   const now = ctx.clock.now();
   if (idleMs > 0 && now - s.lastSeen > idleMs) {
-    ctx.sessions.delete(s.token);
+    endSession(ctx, s.token);
     throw new AppError('SESSION_LOCKED', 'Locked after inactivity. Enter your PIN.', 401);
   }
   s.lastSeen = now;
+  if (now - (s.savedAt ?? 0) >= SAVE_EVERY_MS) { s.savedAt = now; run(ctx.db, 'UPDATE app_session SET last_seen = ? WHERE token_hash = ?', now, tokenHash(s.token)); }
   const u = userRow(ctx, s.userId);
-  if (!u || !u.active || u.deleted_at) { ctx.sessions.delete(s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
+  if (!u || !u.active || u.deleted_at) { endSession(ctx, s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
   return { userId: s.userId, role: u.role, name: u.name };
 }
 
@@ -221,6 +250,7 @@ export function deactivateUser(ctx: Ctx, actor: Actor, requestId: string, userId
     if (userId === actor.userId) throw new AppError('SELF', 'You cannot deactivate yourself.', 409);
     run(ctx.db, 'UPDATE app_user SET active = 0, version = version + 1, updated_at = ? WHERE id = ?', ctx.clock.now(), userId);
     for (const [t, s] of ctx.sessions) if (s.userId === userId) ctx.sessions.delete(t);
+    run(ctx.db, 'DELETE FROM app_session WHERE user_id = ?', userId);
     audit(ctx, actor.userId, 'user.deactivate', 'user', userId);
     return { ok: true };
   });

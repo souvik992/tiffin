@@ -101,15 +101,16 @@ async function pos(dir: string) {
     return { status: r.status, json: await r.json().catch(() => null) as any };
   };
   const login = async (mobile: string, pin: string) => (await call('POST', '/api/auth/login', { mobile, pin })).json.token as string;
-  /** Waits until the POS has restarted itself: the old sign-in no longer works (sessions start fresh) and it answers again. */
-  const back = async (oldToken: string) => {
+  const bootId = async () => (await (await fetch(base + '/api/ping')).json()).boot as string;
+  /** Waits until the POS has restarted itself: it answers with a new start id. */
+  const back = async (before: string) => {
     for (let i = 0; i < 300; i++) {
       await new Promise((r) => setTimeout(r, 100));
-      try { if ((await fetch(base + '/api/me', { headers: { authorization: `Bearer ${oldToken}` } })).status === 401) return; } catch { /* restarting */ }
+      try { if ((await bootId()) !== before) return; } catch { /* restarting */ }
     }
     throw new Error('the POS did not restart');
   };
-  return { b, base, call, login, back };
+  return { b, base, call, login, back, bootId };
 }
 
 test('Settings > Backups: only the owner, with the PIN again; the POS restarts itself on the same port with the backup restored', async () => {
@@ -129,10 +130,11 @@ test('Settings > Backups: only the owner, with the PIN again; the POS restarts i
     assert.equal(ov.canRestartItself, true);
     assert.equal(ov.files[0].file, name);
 
+    const boot = await p.bootId();
     const r = await p.call('POST', '/api/restore', { source: 'device', name, pin: '1234' }, owner);
     assert.deepEqual(r.json, { restarting: true });
-    await p.back(owner);
-    const owner2 = await p.login('9000000001', '1234'); // sessions start fresh after the restart
+    await p.back(boot);
+    const owner2 = await p.login('9000000001', '1234');
     assert.equal((await p.call('GET', '/api/settings', undefined, owner2)).json.receipt_footer, 'Thank you! Visit again.');
     const after = (await p.call('GET', '/api/backup/overview', undefined, owner2)).json;
     assert.equal(after.lastRestore.ok, true);
@@ -175,9 +177,10 @@ test('online backup: pair with the Tiffin backup server, upload (photos too), th
     // the shop loses its photos and changes something; then restores the online backup
     await p.call('PUT', '/api/settings', { receipt_footer: 'after the upload' }, owner);
     for (const d of [join(dir, 'pos', 'images'), join(dir, 'pos', 'backups', 'images')]) for (const f of readdirSync(d)) unlinkSync(join(d, f));
+    const boot = await p.bootId();
     const r = await p.call('POST', '/api/restore', { source: 'online', name: online[0]!.name, pin: '1234' }, owner);
     assert.deepEqual(r.json, { restarting: true });
-    await p.back(owner);
+    await p.back(boot);
     const owner2 = await p.login('9000000001', '1234');
     assert.equal((await p.call('GET', '/api/settings', undefined, owner2)).json.receipt_footer, 'Thank you! Visit again.');
     assert.ok(existsSync(join(dir, 'pos', 'images', photo)), 'the photo came back from the server');
