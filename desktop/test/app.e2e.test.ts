@@ -67,10 +67,10 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     // the page has no Node, no popups, no way out of the app
     const probe = await page.evaluate(() => ({
       node: typeof (globalThis as { process?: unknown }).process + '/' + typeof (globalThis as { require?: unknown }).require,
-      popup: window.open('https://example.com') === null,
+      popup: window.open('http://example.invalid/') === null, // not https: blocked without being handed to the real browser (https links open there by design)
     }));
     assert.deepEqual(probe, { node: 'undefined/undefined', popup: true });
-    await page.evaluate(() => { location.href = 'https://example.com/'; });
+    await page.evaluate(() => { location.href = 'https://example.invalid/'; });
     await page.waitForTimeout(500);
     assert.ok(page.url().startsWith('app://pos/'), 'navigation away is blocked');
     // a page cannot reach the backend directly: it does not know the port or the secret, and file:// is not served
