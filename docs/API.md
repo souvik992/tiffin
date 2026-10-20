@@ -11,7 +11,7 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 |---|---|---|
 | GET `/api/ping`, `/api/login-users` | public | active users (id, name, role, hasMobile) for the approval dialog and for staff without a mobile number; numbers are never shown |
 | POST `/api/setup` | public, once | creates outlet, counter, owner, GST groups |
-| POST `/api/auth/login` `{ mobile, pin }` (sign-in) or `{ userId, pin }` (unlock after inactivity; staff without a mobile number); `/api/auth/logout`; GET `/api/me` | | an unknown number and a wrong PIN get the same answer |
+| POST `/api/auth/login` `{ mobile, pin }` (sign-in) or `{ userId, pin }` (staff without a mobile number); `/api/auth/logout` (also when locked); POST `/api/auth/lock` (the lock button) and `/api/auth/unlock` `{ pin }` (the same person's PIN; works while locked, everything else answers 401 SESSION_LOCKED with `{ userId, name }`); GET `/api/me` | | an unknown number and a wrong PIN get the same answer |
 | GET `/api/catalog`, `/api/items/search?q=`, `/api/items/by-barcode/:code` | C | |
 | POST/PATCH/DELETE `/api/items`, POST `/api/categories`, `/api/tax-groups`, `/api/modifier-groups`, PUT `/api/items/:id/modifier-groups` | M | |
 | PUT/DELETE `/api/modifier-groups/:id` | M | edit options (with id: updated; without: added; left out: switched off), min/max; delete detaches from items |

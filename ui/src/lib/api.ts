@@ -162,7 +162,7 @@ export interface ApiOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   getToken: () => string | null;
-  onAuthLost?: (code: string) => void;
+  onAuthLost?: (code: string, details: unknown) => void;
   /** Network retries for changes, each with the same key. */
   retries?: number;
   retryDelayMs?: number;
@@ -204,7 +204,7 @@ export function createApi(o: ApiOptions) {
       const e = err?.code
         ? new ApiError(err.code, err.message ?? 'Something went wrong.', res.status, err.details)
         : new ApiError('HTTP_' + res.status, res.status >= 500 ? 'The billing service is not responding. Check that it is running.' : 'Something went wrong. Please try again.', res.status);
-      if (AUTH_LOST.has(e.code)) o.onAuthLost?.(e.code);
+      if (AUTH_LOST.has(e.code)) o.onAuthLost?.(e.code, e.details);
       throw e;
     }
     return { res, text };
@@ -221,6 +221,8 @@ export function createApi(o: ApiOptions) {
     setup: (input: SetupInput, key?: string) => change<{ ownerId: string }>('POST', '/setup', input, key),
     login: (who: LoginWith, pin: string) => request<{ token: string; user: Me }>('POST', '/auth/login', { ...who, pin }),
     logout: () => request<{ ok: boolean }>('POST', '/auth/logout', {}),
+    lock: () => request<{ locked: boolean }>('POST', '/auth/lock', {}),
+    unlock: (pin: string) => request<{ user: Me }>('POST', '/auth/unlock', { pin }),
     me: () => get<Me>('/me'),
     // catalog
     catalog: () => get<Catalog>('/catalog'),

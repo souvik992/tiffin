@@ -44,7 +44,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 
 ### Users and security
 - [x] First-run setup (outlet, counter, owner)
-- [x] PIN login, scrypt hashing, lockout with backoff, idle lock
+- [x] PIN login, scrypt hashing, lockout with backoff; no idle lock (owner's choice): a lock button instead
 - [x] Roles (owner, manager, cashier) checked in the service layer
 - [x] Manager approval (override); failed approval PINs count toward lockout
 - [x] Local API on `127.0.0.1` only, Host allow-list, JSON-only writes, strict field validation, 2 MB body limit
@@ -78,7 +78,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Health check, disk-space warning, live events stream
 
 ### Billing UI (`ui/`, rebuilt from the Lovable "Tiffin POS" design)
-- [x] Sign-in with mobile number and PIN (on-screen keypad); after an inactivity lock the PIN alone unlocks; after sign-out both are asked; first-run shop setup asks for the owner's mobile number
+- [x] Sign-in with mobile number and PIN (on-screen keypad); after sign-out both are asked; first-run shop setup asks for the owner's mobile number
 - [ ] Existing staff without a mobile number still pick their name on the sign-in screen until the owner adds one in Settings > Users
 - [x] Billing: categories, search, barcode scan, modifiers, quantities, bill discount, Cash/UPI/Card, change from the backend
 - [x] Manager approval dialog (discount over limit, reprint)
@@ -139,7 +139,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Rupee sign, Hindi and other Indian scripts on bills and kitchen tickets: such lines print as pictures drawn with the system's fonts (Windows: GDI+ / Nirmala UI in a constant PowerShell script; Android: the app's Canvas), drawn by the print queue outside the bill transaction; plain text ("Rs", "?") when drawing is not possible. The screen preview shows the real text. Tested with real Windows fonts on the dev PC; not yet on a real printer or Android device
 - [x] Backup and restore screen for the owner (Settings > Backups): back up now, list, restore with the PIN (the POS restarts itself), copies to a USB drive or folder (Windows folder picker), online backups to the Tiffin backup server; restore from this device, a folder or online. Tested end to end in the browser and in the desktop app (dev build)
 - [x] Menu photo compression for single and bulk uploads: 1024 px, high-quality resize, WebP 90% (measured: no visible difference, ~95% smaller); the screens show the size before and after
-- [x] Sign-ins survive a restart of the POS (app_session keeps only a SHA-256 of the token; inactivity lock, sign-out and deactivation still end them; unused for 12 hours they are forgotten). Desktop e2e: still signed in after the backend crashes and restarts
+- [x] Never signed out by the POS (POS 0.3.10): the sign-in survives closing the app, a crash and a restart (the screen keeps the token in localStorage; app_session keeps only a SHA-256 of it); no inactivity lock and no expiry; only sign-out and deactivating the user end it. Lock button at the top of billing (before Held): the lock screen shows only the PIN pad for the same person (wrong PINs count toward the PIN lockout), keeps the open bill, offers sign-out; the lock is kept in app_session (migration 13), so closing or crashing while locked stays locked. Tested in the browser and the desktop end-to-end test; closing and reopening the installed Windows and Android apps not yet tried
 
 ### Then: distribution
 - [x] USB printers on the WinUSB driver (e.g. after the Zadig tool): listed in Printer setup and printed to through winusb.dll (bulk OUT endpoint), no admin needed. Found and opened a Posiflex PP8800 on the dev PC; a real print from this path is not tested yet

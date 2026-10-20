@@ -7,7 +7,7 @@ import { addLine, createOrder, updateOrder } from '../src/services/orders.ts';
 import { cancelInvoice, finalizeInvoice } from '../src/services/invoices.ts';
 import { correctPaymentMode, openDrawer, printXReport, setItemAvailability, xReport } from '../src/services/counter.ts';
 import { reprintKot, receiptPreview } from '../src/services/printing/jobs.ts';
-import { requireApproval, authenticate, login, logout, deactivateUser } from '../src/services/auth.ts';
+import { requireApproval, authenticate, login, logout, deactivateUser, lockSession, unlockSession, pruneSessions } from '../src/services/auth.ts';
 import { closeShift, zReport } from '../src/services/shifts.ts';
 import { recomputeDailySummary } from '../src/services/reports.ts';
 import { onlineMenu } from '../src/services/onlineBilling.ts';
@@ -186,7 +186,7 @@ test('the bill shows the customer typed on it, and where an online order came fr
   } finally { env.cleanup(); }
 });
 
-test('sign-ins survive a restart of the POS (only a hash is stored); sign-out, deactivation and inactivity still end them', () => {
+test('sign-ins survive a restart of the POS (only a hash is stored), also locked ones; time never ends them; sign-out and deactivation do', () => {
   const env = makeEnv(); try {
     const { token } = login(env.ctx, env.cashier.userId, PINS.cashier);
     assert.ok(!all<{ token_hash: string }>(env.ctx.db, 'SELECT token_hash FROM app_session').some((r) => r.token_hash === token), 'the token itself is not stored');
@@ -197,8 +197,15 @@ test('sign-ins survive a restart of the POS (only a hash is stored); sign-out, d
     assert.equal(code(() => authenticate({ ...env.ctx, sessions: new Map() }, token)), 'UNAUTHENTICATED');
 
     const t2 = login(env.ctx, env.cashier.userId, PINS.cashier).token;
-    env.clock.advance(10 * 60_000); // longer than the 5-minute inactivity lock
+    env.clock.advance(400 * 86_400_000); // over a year unused (and restarted): still signed in
+    assert.equal(pruneSessions(env.ctx), 0);
+    assert.equal(authenticate({ ...env.ctx, sessions: new Map() }, t2).userId, env.cashier.userId);
+    // locked by hand, then the POS closes or crashes: still locked after the restart
+    lockSession(env.ctx, t2);
     assert.equal(code(() => authenticate({ ...env.ctx, sessions: new Map() }, t2)), 'SESSION_LOCKED');
+    const again = { ...env.ctx, sessions: new Map() };
+    unlockSession(again, t2, PINS.cashier);
+    assert.equal(authenticate({ ...env.ctx, sessions: new Map() }, t2).userId, env.cashier.userId, 'the unlock is kept too');
 
     const t3 = login(env.ctx, env.cashier.userId, PINS.cashier).token;
     deactivateUser(env.ctx, env.owner, rid(), env.cashier.userId);

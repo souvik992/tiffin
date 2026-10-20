@@ -6,7 +6,7 @@ import type { LoadedAddons } from '../addons/host.ts';
 import { AppError } from '../store/db.ts';
 import type { Actor, Ctx } from '../services/ctx.ts';
 import { assertPerm } from '../services/permissions.ts';
-import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLoginUsers, listUsers, login, loginByMobile, logout, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
+import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLoginUsers, listUsers, lockSession, login, loginByMobile, logout, unlockSession, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
 import { deleteModifierGroup, updateModifierGroup } from '../services/catalog.ts';
 import { correctPaymentMode, openDrawer, printXReport, setItemAvailability, xReport } from '../services/counter.ts';
 import { reprintKot } from '../services/printing/jobs.ts';
@@ -85,7 +85,10 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
     if (b.userId) return login(c.ctx, b.userId, b.pin); // unlocking after inactivity, and staff without a mobile number yet
     throw new AppError('VALIDATION', 'Enter your mobile number.');
   });
-  add('POST', '/api/auth/logout', { idem: false }, (c) => { if (c.token) logout(c.ctx, c.token); return { ok: true }; });
+  // logout and unlock work on a locked sign-in (the lock screen offers both)
+  add('POST', '/api/auth/logout', { auth: false, idem: false }, (c) => { if (c.token) logout(c.ctx, c.token); return { ok: true }; });
+  add('POST', '/api/auth/lock', { idem: false }, (c) => { lockSession(c.ctx, c.token); return { locked: true }; });
+  add('POST', '/api/auth/unlock', { auth: false, idem: false }, (c) => ({ user: unlockSession(c.ctx, c.token, body(c, obj({ pin: str({ min: 1, max: 12 }) })).pin) }));
   add('GET', '/api/me', {}, (c) => c.actor);
 
   // ---- catalog ----

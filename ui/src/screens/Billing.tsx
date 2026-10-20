@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, Inbox, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
+import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, Inbox, Lock, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
 import { useAddons } from '../lib/addons.ts';
@@ -19,7 +19,7 @@ const PAY_MODES: Array<{ mode: PayMode; label: string; icon: typeof Banknote }> 
 const STALE_ORDER = new Set(['ORDER_NOT_OPEN', 'ORDER_ALREADY_INVOICED', 'NOT_FOUND']);
 
 export function Billing() {
-  const { api, fail, notify, withApproval } = useSession();
+  const { api, fail, notify, withApproval, lock } = useSession();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [shift, setShift] = useState<Shift | null | undefined>(undefined);
   const [cart, setCart] = useState<Cart | null>(null);
@@ -128,6 +128,10 @@ export function Billing() {
               placeholder="Search menu or scan barcode…" aria-label="Search menu or scan barcode" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKey} />
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            {/* lock the screen by hand (the POS never locks or signs out by itself); the PIN resumes */}
+            <button className="btn-ghost h-10 rounded-full" onClick={() => void lock().catch(fail)} aria-label="Lock the screen" title="Lock the screen">
+              <Lock className="h-4 w-4" /><span className="hidden sm:inline">Lock</span>
+            </button>
             {shift && (
               <button className="btn-ghost h-10 rounded-full" onClick={() => setShowHeld(true)} aria-label={`Held bills: ${heldCount}`}>
                 <PauseCircle className="h-4 w-4" /><span className="hidden sm:inline">Held</span>{heldCount > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{heldCount}</span>}

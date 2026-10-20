@@ -3,6 +3,7 @@ import { SessionProvider, useSession } from './lib/session.tsx';
 import { ApprovalDialog, Notices } from './components/ui.tsx';
 import type { Route } from './components/ui.tsx';
 import { Login, Centered } from './screens/Login.tsx';
+import { LockScreen } from './screens/LockScreen.tsx';
 import { Billing } from './screens/Billing.tsx';
 import { MenuItems } from './screens/MenuItems.tsx';
 import { Orders } from './screens/Orders.tsx';
@@ -17,11 +18,11 @@ import { loadAddonScreens, useAddons } from './lib/addons.ts';
 const parseRoute = (): Route => window.location.hash.replace(/^#\/?/, '') || 'billing';
 
 function Screens() {
-  const { user, restore, api } = useSession();
+  const { user, locked, restore, api } = useSession();
   const [route, setRoute] = useState<Route>(parseRoute);
   const [restoring, setRestoring] = useState(true);
   const { addons, ready } = useAddons();
-  useEffect(() => { if (user) void loadAddonScreens(api); }, [api, user]);
+  useEffect(() => { if (user && !locked) void loadAddonScreens(api); }, [api, user, locked]);
   useEffect(() => { void restore().finally(() => setRestoring(false)); }, [restore]);
   useEffect(() => {
     const on = () => setRoute(parseRoute());
@@ -30,6 +31,7 @@ function Screens() {
   }, []);
 
   if (restoring) return <Centered><p className="text-muted-foreground">Loading…</p></Centered>;
+  if (locked) return <LockScreen />; // nothing else is on screen (or reachable by keyboard) while locked
   if (!user) return <Login />;
   switch (route) {
     case 'menu-items': return <MenuItems />;

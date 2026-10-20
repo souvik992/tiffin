@@ -82,6 +82,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 
 | Check | Result |
 |---|---|
+| Signed in, close the POS window and open it again (and end the process in Task Manager, then open): still signed in, same bill; press Lock, close, open: still locked until the PIN | |
 | Low-end shop PC (4 GB RAM, HDD): start-up time, memory, billing speed | |
 | Rupee sign and a Hindi item name on a real receipt printer (Posiflex PP8800 and a 58 mm printer): sharp enough, lines aligned, print speed on a long Hindi bill | |
 | Cash drawer opened from Billing > Open cash drawer on the real printer | |
@@ -125,6 +126,7 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 
 | Check | Result |
 |---|---|
+| Signed in, swipe the app away and open it again, and after a device restart: still signed in; Lock survives the same | |
 | Install the APK for the machine's processor (arm64-v8a or armeabi-v7a) and complete shop setup | |
 | A day of billing: speed of adding items and paying (target: under 0.2 s per tap) | |
 | Power cut or app killed during a bill: the bill is either complete or not there, numbering has no gap | |

@@ -67,7 +67,7 @@ templates/receipt/  example bill designs (.tiffinreceipt)
 
 ## Security (local API)
 
-Binds to `127.0.0.1` only. Bearer-token sessions with idle lock. PINs hashed with scrypt, lockout with backoff
+Binds to `127.0.0.1` only. Bearer-token sessions that never end by time (only sign-out, deactivation or the lock button; the lock survives restarts). PINs hashed with scrypt, lockout with backoff
 (failed manager-approval PINs count even when the command rolls back). Role permissions plus manager approval
 for discounts above the limit, cancellations, credit notes and reprints. `Host` header allow-list (DNS rebinding),
 `Content-Type: application/json` required for writes (blocks cross-site form posts), unknown JSON fields rejected,

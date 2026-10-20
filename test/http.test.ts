@@ -147,9 +147,21 @@ test('HTTP: rejects unauthenticated, malformed, oversized, cross-site and rebind
       req.on('error', reject); req.end();
     });
     assert.equal(status, 403);
-    // expired/locked sessions are told apart from never-logged-in
-    api.env.clock.advance(301_000);
-    assert.equal((await call('GET', '/api/catalog', { token: cashier })).json.error.code, 'SESSION_LOCKED');
+    // never signed out by time; locked by hand, the screen is told who, and only that person's PIN resumes
+    api.env.clock.advance(7 * 86_400_000);
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).status, 200);
+    assert.deepEqual((await call('POST', '/api/auth/lock', { token: cashier, body: {}, key: null })).json, { locked: true });
+    const lockedErr = (await call('GET', '/api/catalog', { token: cashier })).json.error;
+    assert.equal(lockedErr.code, 'SESSION_LOCKED');
+    assert.equal(lockedErr.details.name, 'Cashier');
+    assert.equal((await call('GET', '/api/me', { token: cashier })).json.error.code, 'SESSION_LOCKED');
+    assert.equal((await call('POST', '/api/auth/unlock', { token: cashier, body: { pin: '2345' }, key: null })).json.error.code, 'BAD_PIN');
+    assert.equal((await call('POST', '/api/auth/unlock', { token: cashier, body: { pin: '1111' }, key: null })).json.user.name, 'Cashier');
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).status, 200);
+    // signing out works from the lock screen too (someone else takes over)
+    await call('POST', '/api/auth/lock', { token: cashier, body: {}, key: null });
+    assert.equal((await call('POST', '/api/auth/logout', { token: cashier, body: {}, key: null })).status, 200);
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).json.error.code, 'UNAUTHENTICATED');
   } finally { await api.close(); }
 });
 

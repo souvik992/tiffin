@@ -9,7 +9,7 @@ import { openDb, get, AppError } from '../store/db.ts';
 
 export type Role = 'owner' | 'manager' | 'cashier';
 export interface Actor { userId: string; role: Role; name: string }
-export interface Session extends Actor { token: string; lastSeen: number; /** when lastSeen was last written to app_session */ savedAt?: number }
+export interface Session extends Actor { token: string; lastSeen: number; /** when lastSeen was last written to app_session */ savedAt?: number; /** locked by hand (lock button): PIN needed */ locked?: boolean }
 export interface Logger { info(msg: string, meta?: unknown): void; warn(msg: string, meta?: unknown): void; error(msg: string, meta?: unknown): void }
 export interface Hooks { fault?: (point: string) => void }
 

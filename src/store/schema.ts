@@ -404,6 +404,12 @@ CREATE TABLE app_session (
 CREATE INDEX app_session_user ON app_session(user_id);
 `;
 
+// V13: the lock button on the billing screen locks the sign-in until the same person's PIN is entered. Kept in
+// app_session so closing or crashing the POS does not unlock it.
+const V13 = `
+ALTER TABLE app_session ADD COLUMN locked_at INTEGER;
+`;
+
 // V10: printers on Android (USB through Android's USB host API, Bluetooth including the built-in printer of Sunmi-type
 // POS machines), reached through the Android app: printers gain an 'android' transport (address usb:vid:pid[:serial]
 // or bt:MAC). Same 12-step rebuild as V3/V4; printer still has no indexes, triggers or views.
@@ -454,5 +460,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 10, name: 'printer_android', sql: V10, foreignKeysOff: true },
   { version: 11, name: 'item_description', sql: V11 },
   { version: 12, name: 'counter_extras', sql: V12 },
+  { version: 13, name: 'session_lock', sql: V13 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

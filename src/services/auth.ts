@@ -105,10 +105,10 @@ export function loginByMobile(ctx: Ctx, mobile: string, pin: string): { token: s
 }
 export function logout(ctx: Ctx, token: string): void { endSession(ctx, token); }
 
-// Sign-ins survive a restart of the POS (an update, a crash, restoring a backup's own sessions aside): the token's
-// SHA-256 is kept in app_session, never the token. The inactivity lock still applies, and a sign-in unused for
-// SESSION_MAX_IDLE_MS is forgotten.
-const SESSION_MAX_IDLE_MS = 12 * 3_600_000;
+// Sign-ins survive closing, a crash and a restart of the POS (restoring a backup's own sessions aside): the token's
+// SHA-256 is kept in app_session, never the token. Time never signs anyone out and nothing locks by itself (the owner's
+// choice: a busy counter must not lose its cashier); only sign-out, deactivating the user or the lock button do. A
+// locked sign-in (locked_at) stays locked across a restart until the same person's PIN is entered.
 const SAVE_EVERY_MS = 60_000; // last-seen is written at most once a minute per sign-in
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 function endSession(ctx: Ctx, token: string): void {
@@ -117,29 +117,44 @@ function endSession(ctx: Ctx, token: string): void {
 }
 /** A sign-in from before a restart, if it is still known. */
 function storedSession(ctx: Ctx, token: string) {
-  const r = get<{ user_id: string; last_seen: number }>(ctx.db, 'SELECT user_id, last_seen FROM app_session WHERE token_hash = ?', tokenHash(token));
+  const r = get<{ user_id: string; last_seen: number; locked_at: number | null }>(ctx.db, 'SELECT user_id, last_seen, locked_at FROM app_session WHERE token_hash = ?', tokenHash(token));
   if (!r) return undefined;
-  if (ctx.clock.now() - r.last_seen > SESSION_MAX_IDLE_MS) { run(ctx.db, 'DELETE FROM app_session WHERE token_hash = ?', tokenHash(token)); return undefined; }
   const u = userRow(ctx, r.user_id);
   if (!u) return undefined;
-  const s = { userId: u.id, role: u.role, name: u.name, token, lastSeen: r.last_seen, savedAt: r.last_seen };
+  const s = { userId: u.id, role: u.role, name: u.name, token, lastSeen: r.last_seen, savedAt: r.last_seen, locked: r.locked_at !== null };
   ctx.sessions.set(token, s);
   return s;
 }
-/** Forgets sign-ins unused for a long time (called at start-up). */
+/** Forgets sign-ins of users who were deactivated or removed (called at start-up). Time alone never ends a sign-in. */
 export function pruneSessions(ctx: Ctx): number {
-  return Number(run(ctx.db, 'DELETE FROM app_session WHERE last_seen < ?', ctx.clock.now() - SESSION_MAX_IDLE_MS).changes);
+  return Number(run(ctx.db, 'DELETE FROM app_session WHERE user_id IN (SELECT id FROM app_user WHERE active = 0 OR deleted_at IS NOT NULL)').changes);
+}
+
+/** The lock button: this sign-in needs its own PIN again before anything else (kept across a restart). */
+export function lockSession(ctx: Ctx, token: string | undefined): void {
+  const actor = authenticate(ctx, token);
+  const s = ctx.sessions.get(token!)!;
+  s.locked = true;
+  run(ctx.db, 'UPDATE app_session SET locked_at = ? WHERE token_hash = ?', ctx.clock.now(), tokenHash(token!));
+  audit(ctx, actor.userId, 'auth.lock', 'user', actor.userId);
+}
+/** Unlocks with the PIN of the person who is signed in (wrong PINs count toward the usual PIN lockout). */
+export function unlockSession(ctx: Ctx, token: string | undefined, pin: string): Actor {
+  const s = token ? ctx.sessions.get(token) ?? storedSession(ctx, token) : undefined;
+  if (!s) throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401);
+  const u = checkPin(ctx, userRow(ctx, s.userId), pin, false);
+  if (!u.active || u.deleted_at) { endSession(ctx, s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
+  s.locked = false; s.lastSeen = ctx.clock.now();
+  run(ctx.db, 'UPDATE app_session SET locked_at = NULL, last_seen = ? WHERE token_hash = ?', s.lastSeen, tokenHash(s.token));
+  audit(ctx, u.id, 'auth.unlock', 'user', u.id);
+  return { userId: u.id, role: u.role, name: u.name };
 }
 
 export function authenticate(ctx: Ctx, token: string | undefined): Actor {
   const s = token ? ctx.sessions.get(token) ?? storedSession(ctx, token) : undefined;
   if (!s) throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401);
-  const idleMs = loadSettings(ctx).idleLockSeconds * 1000;
+  if (s.locked) throw new AppError('SESSION_LOCKED', `Locked. ${s.name}, enter your PIN to continue.`, 401, { userId: s.userId, name: s.name });
   const now = ctx.clock.now();
-  if (idleMs > 0 && now - s.lastSeen > idleMs) {
-    endSession(ctx, s.token);
-    throw new AppError('SESSION_LOCKED', 'Locked after inactivity. Enter your PIN.', 401);
-  }
   s.lastSeen = now;
   if (now - (s.savedAt ?? 0) >= SAVE_EVERY_MS) { s.savedAt = now; run(ctx.db, 'UPDATE app_session SET last_seen = ? WHERE token_hash = ?', now, tokenHash(s.token)); }
   const u = userRow(ctx, s.userId);
