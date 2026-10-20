@@ -70,13 +70,14 @@ export function Modal({ title, onClose, children, width = 'max-w-md' }: { title:
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className={`w-full ${width} rounded-2xl border border-border bg-card p-5 shadow-xl`}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-xl font-semibold">{title}</h2>
-          <button className="rail-btn h-9 w-9" onClick={onClose} aria-label="Close"><X className="h-5 w-5" /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+      {/* never taller than the screen: the title and the close button stay in view, the content scrolls */}
+      <div className={`flex max-h-[calc(100dvh-1rem)] w-full ${width} flex-col rounded-2xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-2rem)]`}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <h2 className="min-w-0 truncate font-display text-xl font-semibold">{title}</h2>
+          <button className="rail-btn h-10 w-10 shrink-0" onClick={onClose} aria-label="Close" title="Close"><X className="h-5 w-5" /></button>
         </div>
-        {children}
+        <div className="min-h-0 overflow-y-auto px-5 pb-5 pt-4">{children}</div>
       </div>
     </div>
   );

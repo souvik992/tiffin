@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Cable, CheckCircle2, CircleAlert, CreditCard, Pencil, Plus, Trash2, Wifi } from 'lucide-react';
+import { Cable, CheckCircle2, CircleAlert, Pencil, Plus, Trash2, Wifi } from 'lucide-react';
 import { edc, host, onAndroid } from './host.ts';
+import { ProviderLogo } from './logos.tsx';
 import type { Connection as TerminalConnection, Machine as PaymentTerminal, MachineInput as TerminalInput, MatchRow, Provider as TerminalProvider } from './host.ts';
 
 const { useSession, Modal, newKey, messageOf } = host;
@@ -42,10 +43,10 @@ export function PaymentMachines() {
             return (
               <li key={t.id} className={`rounded-2xl border border-border bg-card p-4 ${t.active ? '' : 'opacity-60'}`}>
                 <div className="flex flex-wrap items-center gap-3">
-                  <CreditCard className="h-5 w-5 text-primary" />
+                  <span className="flex h-10 w-24 shrink-0 items-center justify-center rounded-lg border border-border bg-white px-2"><ProviderLogo provider={t.provider} className="h-6 w-full" /></span>
                   <div className="min-w-48 flex-1">
                     <p className="font-semibold">{t.name}{t.isDefault && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Default</span>}{!t.active && <span className="ml-2 text-xs text-muted-foreground">(switched off)</span>}</p>
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{t.connection === 'cloud' ? <Wifi className="h-3.5 w-3.5" /> : <Cable className="h-3.5 w-3.5" />}{t.providerName} · {CONNECTION[t.connection].label} · {t.modes.map((m) => (m === 'UPI' ? 'UPI' : 'Card')).join(' and ')}{t.config.env === 'test' ? ' · TEST server' : ''}</p>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{t.connection === 'cloud' ? <Wifi className="h-3.5 w-3.5" /> : <Cable className="h-3.5 w-3.5" />}{CONNECTION[t.connection].label} · {t.modes.map((m) => (m === 'UPI' ? 'UPI' : 'Card')).join(' and ')}{t.config.env === 'test' ? ' · TEST server' : ''}</p>
                   </div>
                   <button className="btn-ghost h-9" disabled={c === 'busy'} onClick={() => void check(t)}>{c === 'busy' ? 'Testing…' : 'Test'}</button>
                   <button className="btn-ghost h-9 px-3" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}><Pencil className="h-4 w-4" /></button>
@@ -124,7 +125,7 @@ function MachineDialog({ machine, onClose, onSaved }: { machine: PaymentTerminal
         <div>
           <span className="mb-1 block font-medium">Company</span>
           <div className="flex gap-2" role="radiogroup" aria-label="Company">
-            {PROVIDERS.map((p) => <button key={p.id} type="button" role="radio" aria-checked={provider === p.id} className={`pay-btn h-11 flex-1 ${provider === p.id ? 'pay-btn-active' : ''}`} onClick={() => setProvider(p.id)}>{p.name}</button>)}
+            {PROVIDERS.map((p) => <button key={p.id} type="button" role="radio" aria-checked={provider === p.id} aria-label={p.name} title={p.name} className={`flex h-14 flex-1 items-center justify-center rounded-xl border-2 bg-white px-3 transition-colors ${provider === p.id ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary'}`} onClick={() => setProvider(p.id)}><ProviderLogo provider={p.id} className="h-7 max-w-full" /></button>)}
           </div>
         </div>
         <div>

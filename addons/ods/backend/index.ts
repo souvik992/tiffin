@@ -10,7 +10,7 @@ import { makePlaces } from './places.ts';
 import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
-import { MIGRATIONS, apiKeysView, readFeeTaxGroup, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
+import { MIGRATIONS, apiKeysView, mapView, readFeeTaxGroup, saveMapStyle, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
 export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: ConnectorOptions } = {}): Connector {
@@ -54,7 +54,11 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     return { publishedAt: readPublishedAt(host) };
   });
 
-  // ---- API keys (owner only; the keys never leave the POS backend)
+  // ---- which map Serviceability shows (everyone who sees Serviceability; the owner chooses)
+  host.route('GET', '/map', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...mapView(host), maps: mapAttribution(host) }; });
+  host.route('PUT', '/map', {}, (c) => { saveMapStyle(host, c.actor, body(c).style); return { ...mapView(host), maps: mapAttribution(host) }; });
+
+  // ---- API keys (owner only, in Serviceability > Map; the keys never leave the POS backend)
   host.route('GET', '/api-keys', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return apiKeysView(host); });
   host.route('PUT', '/api-keys', {}, (c) => { const b = body(c); if ('google' in b) saveGoogleKey(host, c.actor, b.google); return apiKeysView(host); });
   host.route('POST', '/api-keys/test', {}, async (c) => {

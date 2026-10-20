@@ -26,7 +26,7 @@ export function CouponsSettings() {
   return (
     <>
       <div className="mb-4 flex items-center gap-3">
-        <h2 className="font-display text-2xl">Coupons</h2>
+        <h2 className="font-display text-2xl">Coupons / Offers</h2>
         <button className="btn-primary ml-auto" onClick={() => setEditing('new')}><Plus className="h-4 w-4" />Add coupon</button>
       </div>
       <p className="mb-4 text-sm text-muted-foreground">Codes customers can use. On the Billing screen, tap the % button, choose <b>Coupon code</b> and type the code. A coupon needs no manager PIN: the owner approved it here. Only the owner sees this page.</p>

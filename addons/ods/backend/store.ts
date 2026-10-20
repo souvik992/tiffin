@@ -66,8 +66,39 @@ export function saveFeeTaxGroup(host: HostApi, taxGroupId: string | null) {
   host.setSetting(FEE_TAX, taxGroupId ?? '');
 }
 
-/** Google Maps (map pictures + place search) when the owner set a key in Settings > API keys; else free OpenStreetMap. */
+/** The owner's Google key (Settings > Serviceability > Map). Used only while a Google map is chosen: see googleKeyInUse. */
 export const readGoogleKey = (host: HostApi): string | null => host.getSetting(GOOGLE_KEY) || null;
+
+// ---- which map Settings > Serviceability shows (and which place search goes with it)
+export type MapStyle = 'osm' | 'google-road' | 'google-satellite' | 'google-hybrid';
+const MAP_STYLES: Array<{ id: MapStyle; label: string; google: boolean }> = [
+  { id: 'osm', label: 'Free map (OpenStreetMap)', google: false },
+  { id: 'google-road', label: 'Google Maps', google: true },
+  { id: 'google-satellite', label: 'Google satellite', google: true },
+  { id: 'google-hybrid', label: 'Google satellite with roads', google: true },
+];
+const MAP_STYLE = 'ods_map_style';
+/** The chosen map; the free map when nothing is chosen, or a Google map was chosen and the key was removed since. */
+export function readMapStyle(host: HostApi): MapStyle {
+  const s = MAP_STYLES.find((m) => m.id === host.getSetting(MAP_STYLE));
+  return s && (!s.google || readGoogleKey(host)) ? s.id : 'osm';
+}
+/** The key, while a Google map is chosen (Google map pictures and place search); null = the free map and free search. */
+export const googleKeyInUse = (host: HostApi): string | null => (readMapStyle(host) === 'osm' ? null : readGoogleKey(host));
+export interface MapView { style: MapStyle; styles: Array<{ id: MapStyle; label: string; google: boolean; available: boolean }>; google: ApiKeysView['google'] }
+export function mapView(host: HostApi): MapView {
+  const key = Boolean(readGoogleKey(host));
+  return { style: readMapStyle(host), styles: MAP_STYLES.map((m) => ({ ...m, available: !m.google || key })), google: apiKeysView(host).google };
+}
+/** Owner only. A Google map needs the key first. */
+export function saveMapStyle(host: HostApi, actor: Actor, style: unknown) {
+  host.assertPerm(actor, 'settings.write');
+  const s = MAP_STYLES.find((m) => m.id === style);
+  if (!s) throw new host.AppError('VALIDATION', 'Choose a map from the list.');
+  if (s.google && !readGoogleKey(host)) throw new host.AppError('VALIDATION', 'Save a Google Maps key first (below the map choice).');
+  host.setSetting(MAP_STYLE, s.id);
+  host.audit(host.ctx, actor.userId, 'ods.map_style', 'settings', MAP_STYLE, { style: s.id });
+}
 /** What screens see: never the key itself. */
 export interface ApiKeysView { google: { set: boolean; hint: string | null } }
 export function apiKeysView(host: HostApi): ApiKeysView {

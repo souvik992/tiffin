@@ -112,7 +112,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Live online orders on a shop PC: pair with a real hub over https, order from a phone, sound plays, Accept prints the bill and KOT on the shop printer | |
 | Internet drop for 2-10 minutes during service: orders placed meanwhile arrive once after it returns; accepts made offline reach the customer | |
 | PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
-| Settings > API keys with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google map shows, "empire brookfield" suggests the right place, picking it moves the pin | |
+| Settings > Serviceability > Map with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google Maps, Google satellite and satellite with roads each show, switching back to the free map shows OpenStreetMap, "empire brookfield" suggests the right place, picking it moves the pin | |
 | Place search screen: suggestions appear while typing, arrow keys + Enter, pasted Google Maps coordinates and link | |
 | Online-order buzzer through the shop PC's speakers (and the Android machine's): loud enough at the counter, rings on the Billing screen, Silence works | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |

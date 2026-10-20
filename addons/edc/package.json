@@ -1,6 +1,6 @@
 {
   "name": "tiffin-pos-addon-edc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Payment machines add-on for Tiffin POS: Paytm and Pine Labs card machines (EDC), wireless or wired.",

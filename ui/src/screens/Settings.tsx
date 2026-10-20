@@ -45,18 +45,16 @@ export function Settings() {
   const { addons } = useAddons();
   const addonSections = addons.flatMap((a) => a.settings ?? []).filter((s) => !s.roles || (user && s.roles.includes(user.role)));
   const items: Array<[Section, string, ComponentType<{ className?: string }>, string]> = [
-    ['store', 'Store', Store, 'Name, address, GSTIN and bill logo'],
-    ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
+    ['store', 'Store settings', Store, 'Bill logo, store details, bill design and footer'],
+    ...(user?.role === 'owner' ? [['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(user?.role === 'owner' ? [['coupons', 'Coupons / Offers', Ticket, 'Coupon codes and offers for bills'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
-    ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
+    ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
+    ...(user?.role === 'owner' ? [['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(onAndroid() ? [['device', 'This device', Smartphone, 'Add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
-    ...(user?.role === 'owner' ? [
-      ['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string],
-      ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
-      ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
-    ] : []),
   ];
-  const shown: Section = items.some(([k]) => k === section) ? section : 'printers';
+  const wanted = section === 'receipt' ? 'store' : section; // Invoice / KOT is part of Store settings now
+  const shown: Section = items.some(([k]) => k === wanted) ? wanted : 'printers';
   const AddonSection = addonSections.find((s) => s.key === shown)?.component;
   return (
     <PageShell route="settings" title="Settings" subtitle="Set up this counter.">
@@ -72,7 +70,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <ReceiptSettings title="Store settings" before={(refresh) => <StoreSettings onChanged={refresh} />} /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : null}</div>
         </div>
       )}
     </PageShell>
@@ -513,7 +511,8 @@ function BluetoothPicker({ value, onPick }: { value: string; onPick: (addr: stri
 
 // ---------------------------------------------------------------- Receipt
 
-function ReceiptSettings() {
+/** Store settings: what the caller puts first (logo, store details), then bill design, footer and a sample; one preview. */
+function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; before?: (refresh: () => void) => ReactNode }) {
   const { api, user, fail, notify } = useSession();
   const isOwner = user?.role === 'owner';
   const key = useRef(newKey());
@@ -527,7 +526,7 @@ function ReceiptSettings() {
   /** A chosen design file that is not applied yet: its preview replaces the current one until "Use" or "Cancel". */
   const [pending, setPending] = useState<{ fileName: string; content: string; preview: ReceiptDesignPreview | null; errors: string[] } | null>(null);
   const [confirmStandard, setConfirmStandard] = useState(false);
-  const [logoV] = useState(() => Date.now()); // a fresh logo each time this section opens
+  const [logoV, setLogoV] = useState(() => Date.now()); // a fresh logo each time this section opens, and after a change
   const fileInput = useRef<HTMLInputElement>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -589,9 +588,10 @@ function ReceiptSettings() {
   const shown = pending?.preview ? pending.preview.lines : lines;
   return (
     <>
-      <h2 className="mb-4 font-display text-2xl">Receipt</h2>
+      <h2 className="mb-4 font-display text-2xl">{title}</h2>
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="space-y-4">
+          {before?.(() => { setLogoV(Date.now()); preview(); const p = pendingRef.current; if (p) void check(p.fileName, p.content, width); })}
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Bill design">
             <h3 className="font-semibold">Bill design</h3>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -668,7 +668,7 @@ function ReceiptSettings() {
             )}
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="rounded-2xl border border-border bg-card p-4 xl:sticky xl:top-0 xl:self-start">
           <div className="mb-2 flex items-center gap-2">
             <h3 className="font-semibold">{pending?.preview ? `Preview: ${pending.preview.name} (not in use yet)` : 'Preview'}</h3>
             <div className="ml-auto flex gap-2">{([80, 58] as const).map((w) => <button key={w} className={`chip ${width === w ? 'chip-active' : ''}`} onClick={() => setWidth(w)}>{w} mm</button>)}</div>

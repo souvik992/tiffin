@@ -1,15 +1,15 @@
 import type { HostApi } from '../../../src/addons/host.ts';
 import { isOnlineMode } from './onlineConfig.ts';
-import { readGoogleKey } from './store.ts';
+import { googleKeyInUse, readGoogleKey } from './store.ts';
 import { googleRefusal } from './maps.ts';
 import type { Fetcher } from './maps.ts';
 
 /**
  * Place search for Settings > Serviceability (suggestions while typing). Fetched by the POS, never by the page, and only
  * in online mode.
- *   google  with the owner's key (Settings > API keys): Places API (New) Autocomplete + Place Details, Essentials fields
+ *   google  while the owner has chosen a Google map (Settings > Serviceability): Places API (New) Autocomplete + Place Details, Essentials fields
  *           only (the cheapest tier), one session per search so Google bills it as one.
- *   free    without a key: Photon (OpenStreetMap data, made for type-as-you-go), limited to India and biased to the shop;
+ *   free    with the free map (the default): Photon (OpenStreetMap data, made for type-as-you-go), limited to India and biased to the shop;
  *           fewer words are tried when a phrase finds nothing; Nominatim once on Enter (it does not allow type-as-you-go).
  */
 
@@ -75,7 +75,7 @@ export function makePlaces(host: HostApi, fetcher: Fetcher) {
   async function suggest(qIn: string, o: { near?: { lat: number; lng: number } | null; full?: boolean; session?: string } = {}): Promise<Place[]> {
     const q = qIn.trim().replace(/\s+/g, ' ');
     if (q.length < 3 || q.length > 200) throw new host.AppError('VALIDATION', 'Type at least 3 letters.');
-    const key = readGoogleKey(host);
+    const key = googleKeyInUse(host);
     const near = o.near && Number.isFinite(o.near.lat) && Number.isFinite(o.near.lng) ? { lat: Math.round(o.near.lat * 100) / 100, lng: Math.round(o.near.lng * 100) / 100 } : BENGALURU;
     const k = `${key ? 'google' : 'osm'}|${near.lat},${near.lng}|${o.full ? 1 : 0}|${q.toLowerCase()}`;
     const hit = cache.get(k);
@@ -113,7 +113,7 @@ export function makePlaces(host: HostApi, fetcher: Fetcher) {
     return { label: str(raw?.formattedAddress), lat, lng };
   }
 
-  /** Settings > API keys > Test: one suggestion request. */
+  /** Settings > Serviceability > Map > Test key: one suggestion request. */
   async function testSearch(): Promise<{ ok: boolean; message: string }> {
     const key = readGoogleKey(host);
     if (!key) return { ok: false, message: 'No Google key saved.' };
