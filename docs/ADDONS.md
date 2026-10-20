@@ -30,9 +30,11 @@ The steps, in order:
 * **Backend:** import only `contract/` (pure code) and **types** from `src/`. Everything else comes from the `HostApi` passed to `register()`:
   * `db`, `runCommand`, `audit`, `assertPerm`, `getSetting`/`setSetting`, `route`, `migrations`, `dataDir`, `onStop`, `AppError`.
   * `billing` (POS 0.3.0): `bill` (an online order becomes a normal GST bill + KOT, with delivery/packaging fee lines), `cancel`, `shiftActor`, `menu`.
+  * POS 0.3.8, for add-ons that take payments: `billing.order` (an open bill's state and the backend's own total), `billing.finalize` (save a bill with given payments: the normal finalize), `billing.paymentGuard` (refuse Orders > Change for a bill's payment mode), `requireApproval` (manager approval), `powershell` (constant scripts only; values in env or stdin). Check they exist before use.
 * **Screens** may use `host.stream(path, onEvent, onStatus)` (POS 0.3.0) for a live feed; check it exists first.
   * Importing POS code directly would create a second copy of it inside the add-on: `instanceof AppError` would fail and state would split.
 * **Screens:** write normal React. The build maps `react` and `react/jsx-runtime` to the POS's copy (`window.__POS__`). Use `host.useSession()` for `api`, `user` and `notify`, `host.PageShell`/`host.Modal` for layout, and `host.money` to format and parse rupees. The UI never calculates money.
+* **Screen slots (POS 0.3.8):** `checkout` (`options(mode)`, `Dialog`, `pending(orderId)`): extra ways to take a Card/UPI payment, listed under the payment buttons; the add-on's dialog saves the bill and calls `onPaid`. `invoicePanels`: extra panels in Orders > a bill.
 * **Styles must never outrank the POS:** the add-on's sheet is injected after the POS's, so its build wraps every utility selector in `:where()` (`addons/ods/scripts/weaken-css.mjs`). Otherwise a plain add-on rule such as `.flex-col` beats a POS screen-size rule such as `lg:flex-row` and breaks POS screens (it once stacked Settings and narrowed Billing).
 * **Styles:** the POS's Tailwind only contains classes used by the POS itself. Each add-on builds **its own** style sheet from its own source, with the POS theme copied from `ui/src/styles.css` (see `addons/ods/scripts/build.mjs`), and injects it.
 * **Offline first:** anything that connects to the internet must check the add-on's own switch first (ODS: `isOnlineMode`).
@@ -50,6 +52,15 @@ The steps, in order:
   * If it **leaks**, anyone can make add-ons every POS trusts. Remove the leaked key from `trust.ts` and release a POS update.
 * **Public key:** in `src/addons/trust.ts`. Several keys may be listed, which allows a key change.
 * **Signing at build:** `npm run build` in the add-on signs automatically. `POS_ADDON_SIGNING_KEY` points to a different key file.
+
+## The add-ons
+
+| Add-on | Id | What | Needs POS |
+|---|---|---|---|
+| ODS | `ods` | Online orders: settings, serviceability, the ODS | 0.3.4 |
+| Payment machines | `edc` | Paytm and Pine Labs card machines, wireless or wired (docs/PAYMENT_MACHINES.md) | 0.3.8 |
+
+The payment machines add-on is built, signed and installed the same way (`addons/edc`: `npm test`, `npm run build`, `npm run installer`).
 
 ## Building and testing (ODS)
 

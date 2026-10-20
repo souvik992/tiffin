@@ -3,6 +3,8 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, Inbox, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
+import { useAddons } from '../lib/addons.ts';
+import type { CheckoutPlugin } from '../addonHost.ts';
 import { formatPaise, formatPrice, formatQty, formatRateBp, formatStockQty, parsePercentBp, parseRupees } from '../lib/money.ts';
 import { useSession } from '../lib/session.tsx';
 import { Modal, Rail, VegMark } from '../components/ui.tsx';
@@ -235,6 +237,28 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
   // One key per bill until it succeeds: a double click or a retry after a lost response returns the same invoice.
   const payKey = useRef<{ orderId: string; key: string } | null>(null);
 
+  // add-on payment options (for example card machines): "addon:option", or "" = enter the payment by hand
+  const { addons } = useAddons();
+  const plugins = addons.filter((a) => a.checkout).map((a) => ({ id: a.id, p: a.checkout as CheckoutPlugin }));
+  const optionsFor = (m: PayMode) => plugins.flatMap(({ id, p }) => { try { return p.options(m).map((o) => ({ ...o, key: `${id}:${o.id}`, plugin: p })); } catch { return []; } });
+  const [optionFor, setOptionFor] = useState<Partial<Record<PayMode, string>>>({});
+  const chosenOption = (m: PayMode) => {
+    const list = optionsFor(m);
+    const pick = optionFor[m];
+    if (pick === '') return null;
+    return list.find((x) => x.key === pick) ?? list.find((x) => x.isDefault) ?? list[0] ?? null;
+  };
+  const [external, setExternal] = useState<{ key: string; mode: PayMode; resume?: unknown } | null>(null);
+  // after a reload: a payment an add-on was still taking for this bill
+  const resumed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cart || resumed.current === cart.order.id || plugins.length === 0) return;
+    resumed.current = cart.order.id;
+    for (const { id, p } of plugins) {
+      p.pending?.(cart.order.id).then((r) => { if (r) setExternal({ key: `${id}:${r.optionId}`, mode: r.mode, resume: r.resume }); }).catch(() => { /* by hand */ });
+    }
+  }, [cart, plugins.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const externalPlugin = external ? plugins.find(({ id }) => external.key.startsWith(`${id}:`))?.p ?? null : null;
   const t = cart?.totals;
   const lines = cart?.lines ?? [];
   const empty = lines.length === 0;
@@ -260,6 +284,8 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
 
   const pay = async () => {
     if (!cart || !t || empty || busy || paying) return;
+    const option = t.grandTotal > 0 ? chosenOption(mode) : null;
+    if (option) { setExternal({ key: option.key, mode }); return; }
     let tenderedPaise: number | null = null;
     if (mode === 'CASH' && tendered.trim()) {
       tenderedPaise = parseRupees(tendered);
@@ -400,21 +426,30 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
           </button>
         ))}
       </div>
-      <div className="px-4 pt-2">
+      {optionsFor(mode).length > 0 && (
+        <div className="px-4 pt-2">
+          <select className="field h-10 w-full" aria-label="Payment machine" value={chosenOption(mode)?.key ?? ''} onChange={(e) => setOptionFor((f) => ({ ...f, [mode]: e.target.value }))}>
+            {optionsFor(mode).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            <option value="">Enter by hand (paid on another machine)</option>
+          </select>
+        </div>
+      )}
+      {!chosenOption(mode) && <div className="px-4 pt-2">
         {mode === 'CASH'
           ? <input className="field h-10 w-full" inputMode="decimal" placeholder="Cash received (optional)" aria-label="Cash received" value={tendered} onChange={(e) => setTendered(e.target.value)} />
           : <input className="field h-10 w-full" placeholder={mode === 'UPI' ? 'UPI reference (optional)' : 'Card slip / last 4 digits (optional)'} aria-label="Payment reference" maxLength={60} value={reference} onChange={(e) => setReference(e.target.value)} />}
-      </div>
+      </div>}
       <div className="px-4 pb-3 pt-2">
         <div className="flex gap-2">
           <button className="btn-ghost h-12 shrink-0 px-3" aria-label="Split payment" title="Split payment (part UPI, part cash…)" disabled={empty || busy || paying || !t || t.grandTotal === 0} onClick={() => setSplitting(true)}>
             <Split className="h-4 w-4" />Split
           </button>
           <button className="btn-primary h-12 min-w-0 flex-1 text-base" disabled={empty || busy || paying} onClick={() => void pay()}>
-            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}` : 'Charge'}
+            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}${chosenOption(mode) && t.grandTotal > 0 ? ' on machine' : ''}` : 'Charge'}
           </button>
         </div>
       </div>
+      {external && externalPlugin && cart && <externalPlugin.Dialog cart={cart} mode={external.mode} optionId={external.key.slice(external.key.indexOf(':') + 1)} resume={external.resume} onClose={() => setExternal(null)} onPaid={(r) => { setExternal(null); setMode('CASH'); onPaid(r); }} />}
       {splitting && cart && <SplitPaymentDialog cart={cart} payKey={payKey} onClose={() => setSplitting(false)} onPaid={(r) => { setSplitting(false); onPaid(r); }} />}
     </aside>
   );

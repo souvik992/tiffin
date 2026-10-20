@@ -86,6 +86,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Rupee sign and a Hindi item name on a real receipt printer (Posiflex PP8800 and a 58 mm printer): sharp enough, lines aligned, print speed on a long Hindi bill | |
 | Cash drawer opened from Billing > Open cash drawer on the real printer | |
 | Handheld POS (Sunmi V2 type) and a touch-screen PC: billing with the View bill bar, dialogs, tap targets | |
+| Payment machines (docs/PAYMENT_MACHINES.md): Paytm wireless and USB, Pine Labs wireless and PAD Controller, each on the company's test account and a real machine: card, UPI, decline, cancel, no internet, unplugged cable, reverse; then one small live payment | |
 | Settings > Backups in the installed app: Windows folder picker, copies to a real USB drive (pull it out: error shown, billing unaffected), restore from it on a second PC | |
 | Online backups against a hosted backup server over https: upload on shop internet, a large database (100 MB+), restore on a new PC | |
 | Low-end shop PC: install and update time (zip installer; ~22 s on one core of the dev PC's SSD, HDD and antivirus not measured) | |

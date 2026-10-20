@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeftRight, Ban, ChefHat, Monitor, Printer, Undo2 } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
 import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode } from '../lib/api.ts';
+import { useAddons } from '../lib/addons.ts';
 import { formatPaise, formatQty } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell } from '../components/ui.tsx';
@@ -26,6 +27,8 @@ export function Orders() {
   const [refunding, setRefunding] = useState<InvoiceDetail | null>(null);
   const [statusKey, setStatusKey] = useState(0);
   const [correcting, setCorrecting] = useState<Payment | null>(null);
+  const { addons } = useAddons();
+  const panels = addons.flatMap((a) => (a.invoicePanels ?? []).map((P, i) => ({ key: `${a.id}:${i}`, P })));
 
   const load = useCallback(() => {
     setRows(null);
@@ -104,6 +107,7 @@ export function Orders() {
               </div>
             ))}
           </div>
+          {panels.map(({ key, P }) => <P key={key} invoiceId={open.invoice.id} />)}
           {open.invoice.status === 'CANCELLED' && <p className="mt-3 text-sm text-destructive">Cancelled{open.invoice.cancelReason ? `: ${open.invoice.cancelReason}` : ''}</p>}
           <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>
           <div className="mt-4 grid grid-cols-2 gap-2">

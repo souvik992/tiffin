@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Banknote, CheckCircle2, CreditCard, Plus, Printer, RotateCw, Smartphone, Trash2, TriangleAlert, Wallet } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Cart, CartLine, Discount, FinalizeResult, Item, OpenOrder, PayMode, PaymentCheck, PaymentIn, ZReport } from '../lib/api.ts';
@@ -360,3 +360,4 @@ export function AvailabilityDialog({ items, onToggle, onClose }: { items: Item[]
     </Modal>
   );
 }
+
