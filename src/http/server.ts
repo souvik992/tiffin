@@ -10,6 +10,7 @@ import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLo
 import { deleteModifierGroup, updateModifierGroup } from '../services/catalog.ts';
 import { correctPaymentMode, openDrawer, printXReport, setItemAvailability, xReport } from '../services/counter.ts';
 import { reprintKot } from '../services/printing/jobs.ts';
+import { cancelCharge, chargesForInvoice, checkTerminal, completeCharge, deleteTerminal, getTxn, listTerminals, openChargeFor, recheckCharge, saveTerminal, startCharge, voidCharge } from '../services/terminals/service.ts';
 import { requireApproval } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
 import { addLine, applyBillDiscount, applyCoupon, removeCoupon, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
@@ -162,6 +163,24 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/shifts/close', {}, (c) => closeShift(c.ctx, c.actor, rid(c), body(c, obj({ countedCash: int({ min: 0 }), discardOpenOrders: opt(bool) }))));
   add('GET', '/api/shifts/current/x-report', {}, (c) => xReport(c.ctx, c.actor));
   add('POST', '/api/shifts/current/x-report/print', {}, (c) => printXReport(c.ctx, c.actor, rid(c)));
+  // ---- payment machines (Settings > Payment machines; Billing: card or UPI on a machine) ----
+  const terminalShape = { name: str({ min: 1, max: 40 }), provider: oneOf('paytm', 'pinelabs'), connection: oneOf('cloud', 'wired'), modes: arr(oneOf('CARD', 'UPI'), { max: 2 }),
+    config: obj({ mid: opt(str({ max: 300 })), tid: opt(str({ max: 300 })), channelId: opt(str({ max: 300 })), env: opt(str({ max: 10 })), liveUrl: opt(str({ max: 300 })), comPort: opt(str({ max: 20 })),
+      libFolder: opt(str({ max: 300 })), merchantId: opt(str({ max: 20 })), storeId: opt(str({ max: 20 })), clientId: opt(str({ max: 20 })), host: opt(str({ max: 100 })), baud: opt(int({ min: 1 })), port: opt(int({ min: 1 })) }),
+    secret: opt(nullable(str({ max: 200 }))), isDefault: opt(bool), active: opt(bool) };
+  add('GET', '/api/terminals', {}, (c) => listTerminals(c.ctx, c.actor));
+  add('POST', '/api/terminals', {}, (c) => saveTerminal(c.ctx, c.actor, rid(c), null, body(c, obj(terminalShape)) as Parameters<typeof saveTerminal>[4]));
+  add('PUT', '/api/terminals/:id', {}, (c) => saveTerminal(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj(terminalShape)) as Parameters<typeof saveTerminal>[4]));
+  add('DELETE', '/api/terminals/:id', {}, (c) => deleteTerminal(c.ctx, c.actor, rid(c), c.params.id!));
+  add('POST', '/api/terminals/:id/check', { idem: false }, (c) => checkTerminal(c.ctx, c.actor, c.params.id!));
+  add('POST', '/api/terminal-charges', {}, (c) => startCharge(c.ctx, c.actor, rid(c), body(c, obj({ orderId: str({ min: 1, max: 64 }), mode: oneOf('CARD', 'UPI'), terminalId: opt(nullable(str({ max: 64 }))) }))));
+  add('GET', '/api/terminal-charges/:id', {}, (c) => getTxn(c.ctx, c.actor, c.params.id!));
+  add('GET', '/api/orders/:id/terminal-charge', {}, (c) => openChargeFor(c.ctx, c.actor, c.params.id!));
+  add('POST', '/api/terminal-charges/:id/cancel', { idem: false }, (c) => cancelCharge(c.ctx, c.actor, c.params.id!));
+  add('POST', '/api/terminal-charges/:id/recheck', { idem: false }, (c) => recheckCharge(c.ctx, c.actor, c.params.id!));
+  add('POST', '/api/terminal-charges/:id/complete', {}, (c) => completeCharge(c.ctx, c.actor, rid(c), c.params.id!));
+  add('POST', '/api/terminal-charges/:id/void', {}, (c) => voidCharge(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ override: opt(override) })).override));
+  add('GET', '/api/invoices/:id/terminal-charges', {}, (c) => chargesForInvoice(c.ctx, c.actor, c.params.id!));
   add('POST', '/api/drawer/open', {}, (c) => openDrawer(c.ctx, c.actor, rid(c), body(c, obj({ reason: str({ min: 1, max: 120 }), override: opt(override) }))));
   add('GET', '/api/shifts/:id/report', {}, (c) => { assertPerm(c.actor, 'shift.report'); return zReport(c.ctx, c.params.id!); });
 

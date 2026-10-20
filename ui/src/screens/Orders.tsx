@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeftRight, Ban, ChefHat, Monitor, Printer, Undo2 } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
-import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode } from '../lib/api.ts';
+import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode, TerminalTxn } from '../lib/api.ts';
 import { formatPaise, formatQty } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell } from '../components/ui.tsx';
@@ -26,6 +26,15 @@ export function Orders() {
   const [refunding, setRefunding] = useState<InvoiceDetail | null>(null);
   const [statusKey, setStatusKey] = useState(0);
   const [correcting, setCorrecting] = useState<Payment | null>(null);
+  const [machinePays, setMachinePays] = useState<TerminalTxn[]>([]);
+  useEffect(() => { setMachinePays([]); if (open) api.invoiceTerminalCharges(open.invoice.id).then(setMachinePays).catch(() => { /* none */ }); }, [api, open]);
+  const reverseOnMachine = async (x: TerminalTxn) => {
+    const key = newKey();
+    try {
+      const v = await withApproval('Reversing a machine payment', (o) => api.voidTerminalCharge(x.id, o, key));
+      if (v) { notify('info', 'Reversal sent to the machine. Check the machine for the reversal slip.'); setTimeout(() => { if (open) api.invoiceTerminalCharges(open.invoice.id).then(setMachinePays).catch(() => {}); }, 3000); }
+    } catch (e) { fail(e); }
+  };
 
   const load = useCallback(() => {
     setRows(null);
@@ -98,12 +107,28 @@ export function Orders() {
               <div key={p.id} className="flex items-center justify-between gap-2 text-muted-foreground">
                 <span>Paid by {MODE_LABEL[p.mode]}{p.reference ? ` (${p.reference})` : ''}{p.originalMode && p.originalMode !== p.mode ? <span className="ml-1 text-xs text-primary">(changed from {MODE_LABEL[p.originalMode]})</span> : null}</span>
                 <span className="flex items-center gap-1">
-                  {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost h-8 px-2 text-xs" onClick={() => setCorrecting(p)} aria-label="Change payment mode"><ArrowLeftRight className="h-3.5 w-3.5" />Change</button>}
+                  {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && !machinePays.some((x) => x.kind === 'SALE' && x.status === 'APPROVED') && <button className="btn-ghost h-8 px-2 text-xs" onClick={() => setCorrecting(p)} aria-label="Change payment mode"><ArrowLeftRight className="h-3.5 w-3.5" />Change</button>}
                   <span className="text-foreground">{formatPaise(p.amount)}</span>
                 </span>
               </div>
             ))}
           </div>
+          {machinePays.length > 0 && (
+            <div className="mt-3 rounded-lg border border-border p-3 text-sm">
+              <p className="mb-1 text-xs font-semibold">Payment machine</p>
+              {machinePays.map((x) => {
+                const reversed = machinePays.some((v) => v.kind === 'VOID' && v.status === 'APPROVED');
+                return (
+                  <div key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-0.5">
+                    <span className="text-muted-foreground">{x.kind === 'VOID' ? `Reversal on ${x.terminalName}: ${x.status === 'APPROVED' ? 'done' : x.status === 'PENDING' ? 'waiting for the machine' : x.message ?? x.status.toLowerCase()}`
+                      : `${x.terminalName}: ${formatPaise(x.amount)}${x.result?.approvalCode ? ` · Auth ${x.result.approvalCode}` : ''}${x.result?.cardLast4 ? ` · *${x.result.cardLast4}` : ''}`}</span>
+                    {x.kind === 'SALE' && x.status === 'APPROVED' && !reversed && <button className="btn-ghost h-8 px-2 text-xs text-destructive" onClick={() => void reverseOnMachine(x)}>Reverse on machine</button>}
+                  </div>
+                );
+              })}
+              <p className="mt-1 text-xs text-muted-foreground">Reversing gives the money back on the card or UPI (same day only). Cancel or refund the bill as well.</p>
+            </div>
+          )}
           {open.invoice.status === 'CANCELLED' && <p className="mt-3 text-sm text-destructive">Cancelled{open.invoice.cancelReason ? `: ${open.invoice.cancelReason}` : ''}</p>}
           <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>
           <div className="mt-4 grid grid-cols-2 gap-2">

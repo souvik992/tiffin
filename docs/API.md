@@ -39,6 +39,9 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | POST `/api/drawer/open` `{reason, override?}` | M (or approval) | opens the cash drawer of the receipt printer; audited |
 | POST `/api/invoices/:id/kot-reprint` `{override?}` | M (or approval) | kitchen tickets again, marked REPRINT |
 | POST `/api/payments/:id/correct` `{toMode, reference?, reason, override?}` | M (or approval) | payment mode fixed after billing (open shift only); bills show `mode` (corrected) and `originalMode` |
+| GET/POST `/api/terminals`, PUT/DELETE `/api/terminals/:id`, POST `/api/terminals/:id/check` | O (list: C) | payment machines; secrets are never returned (`hasSecret`) |
+| POST `/api/terminal-charges` `{orderId, mode: CARD\|UPI, terminalId?}`; GET `/api/terminal-charges/:id`; POST `/:id/cancel`, `/:id/recheck`, `/:id/complete` | C | sends the backend's bill total to the machine; complete saves the bill (finalize) once APPROVED; GET `/api/orders/:id/terminal-charge` finds an attempt to resume |
+| POST `/api/terminal-charges/:id/void` `{override?}`; GET `/api/invoices/:id/terminal-charges` | M (or approval) | reverse a machine payment (same day) |
 | GET `/api/ping` | public | `{ok, boot}`: boot changes on every start of the backend (the restore screen waits for it) |
 | GET `/api/reports/daily`, `/tax`, `/items`, `/invoice-register.csv` (`?from=YYYY-MM-DD&to=`) | M | |
 | (desktop app) | | when the backend runs inside the desktop app, every request must carry `X-POS-Secret` (made at each launch, known only to the app; added by its app://pos forwarder). Without it: 403 `BAD_LAUNCH_SECRET`. `npm start` does not use a secret |

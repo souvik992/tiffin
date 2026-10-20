@@ -371,6 +371,32 @@ const V11 = `
 ALTER TABLE item ADD COLUMN description TEXT;
 `;
 
+// V13: payment machines (card machines / EDC): Paytm and Pine Labs, over the internet or a cable.
+//  - payment_terminal: one row per machine; settings that are not secret in config_json. Keys and security tokens
+//    are settings named terminal_<id>_key (never listed, like every "_key" setting).
+//  - terminal_txn: every amount sent to a machine and what came back. Not a financial record by itself: an approved
+//    payment becomes a normal bill payment (mode CARD/UPI, reference with the approval code) when the bill is saved.
+const V13 = `
+CREATE TABLE payment_terminal (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  provider TEXT NOT NULL CHECK (provider IN ('paytm','pinelabs')),
+  connection TEXT NOT NULL CHECK (connection IN ('cloud','wired')),
+  modes TEXT NOT NULL DEFAULT 'CARD,UPI', config_json TEXT NOT NULL DEFAULT '{}',
+  is_default INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE terminal_txn (
+  id TEXT PRIMARY KEY, terminal_id TEXT NOT NULL REFERENCES payment_terminal(id), order_id TEXT NOT NULL REFERENCES sale_order(id),
+  kind TEXT NOT NULL CHECK (kind IN ('SALE','VOID')), mode TEXT NOT NULL CHECK (mode IN ('CARD','UPI','ANY')),
+  amount INTEGER NOT NULL CHECK (amount > 0), merchant_txn_id TEXT NOT NULL UNIQUE, provider_ref TEXT,
+  status TEXT NOT NULL CHECK (status IN ('PENDING','APPROVED','FAILED','CANCELLED','UNKNOWN')),
+  result_json TEXT, message TEXT, invoice_id TEXT REFERENCES invoice(id), original_txn_id TEXT REFERENCES terminal_txn(id),
+  created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX terminal_txn_order ON terminal_txn(order_id);
+CREATE INDEX terminal_txn_status ON terminal_txn(status);
+`;
+
 // V12: counter extras.
 //  - item.unavailable_on: "not available today" (an IST day, YYYY-MM-DD); the item is back the next day by itself.
 //  - payment_correction: a wrong payment mode fixed after billing (cash entered, customer paid UPI). Payments stay
@@ -454,5 +480,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 10, name: 'printer_android', sql: V10, foreignKeysOff: true },
   { version: 11, name: 'item_description', sql: V11 },
   { version: 12, name: 'counter_extras', sql: V12 },
+  { version: 13, name: 'payment_terminals', sql: V13 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -105,6 +105,19 @@ export interface Printer {
 export interface PrinterInput { name: string; transport: Transport; address: string | null; widthMm: 58 | 80; isReceipt: boolean; drawer: boolean; stations: string[]; active?: boolean; profile?: string }
 export interface WindowsPrinter { name: string; port: string; driver: string; offline: boolean; connection: 'usb' | 'serial' | 'bluetooth' | 'network' | 'virtual' | 'other' }
 export interface SerialPortInfo { port: string; name: string; bluetooth: boolean }
+export type TerminalProvider = 'paytm' | 'pinelabs';
+export type TerminalConnection = 'cloud' | 'wired';
+export interface PaymentTerminal {
+  id: string; name: string; provider: TerminalProvider; providerName: string; connection: TerminalConnection; modes: Array<'CARD' | 'UPI'>;
+  config: Record<string, string | number>; hasSecret: boolean; needsSecret: boolean; isDefault: boolean; active: boolean;
+}
+export interface TerminalInput { name: string; provider: TerminalProvider; connection: TerminalConnection; modes: Array<'CARD' | 'UPI'>; config: Record<string, string | number>; secret?: string | null; isDefault?: boolean; active?: boolean }
+export type TerminalTxnStatus = 'PENDING' | 'APPROVED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN';
+export interface TerminalTxn {
+  id: string; kind: 'SALE' | 'VOID'; terminalId: string; terminalName: string; provider: TerminalProvider; connection: TerminalConnection; orderId: string;
+  mode: 'CARD' | 'UPI' | 'ANY'; amount: number; status: TerminalTxnStatus; message: string | null; invoiceId: string | null; canCancel: boolean; createdAt: number;
+  result: { approvalCode?: string | null; rrn?: string | null; cardLast4?: string | null; cardType?: string | null; paidBy?: string } | null;
+}
 export interface InvoicePrintJob { id: string; kind: string; status: 'QUEUED' | 'SENDING' | 'PRINTED' | 'FAILED'; attempts: number; lastError: string | null; printerName: string; createdAt: number; updatedAt: number }
 export interface ReceiptPreview { invoiceId: string; widthMm: number; cols: number; lines: string[] }
 export interface PaymentCheck { total: number; paid: number; remaining: number; changeDue: number; ok: boolean; message: string | null }
@@ -285,6 +298,19 @@ export function createApi(o: ApiOptions) {
     dismissDetected: (key: string) => change<{ key: string }>('POST', '/printers/detected/dismiss', { key }),
     quickAddPrinter: (key: string, override?: Override, idem?: string) => change<{ printerId: string; name: string; isReceipt: boolean; testJobId: string | null }>('POST', '/printers/quick-add', override ? { key, override } : { key }, idem),
     serialPorts: () => get<SerialPortInfo[]>('/printers/serial-ports'),
+    // payment machines
+    terminals: () => get<PaymentTerminal[]>('/terminals'),
+    saveTerminal: (id: string | null, input: TerminalInput, key?: string) => change<PaymentTerminal>(id ? 'PUT' : 'POST', id ? `/terminals/${enc(id)}` : '/terminals', input, key),
+    deleteTerminal: (id: string, key?: string) => change<{ ok: boolean }>('DELETE', `/terminals/${enc(id)}`, {}, key),
+    checkTerminal: (id: string) => request<{ ok: boolean; message: string }>('POST', `/terminals/${enc(id)}/check`, {}),
+    startTerminalCharge: (orderId: string, mode: 'CARD' | 'UPI', terminalId: string | null, key?: string) => change<TerminalTxn>('POST', '/terminal-charges', { orderId, mode, terminalId }, key),
+    terminalCharge: (id: string) => get<TerminalTxn>(`/terminal-charges/${enc(id)}`),
+    openTerminalCharge: (orderId: string) => get<TerminalTxn | null>(`/orders/${enc(orderId)}/terminal-charge`),
+    cancelTerminalCharge: (id: string) => request<TerminalTxn>('POST', `/terminal-charges/${enc(id)}/cancel`, {}),
+    recheckTerminalCharge: (id: string) => request<TerminalTxn>('POST', `/terminal-charges/${enc(id)}/recheck`, {}),
+    completeTerminalCharge: (id: string, key?: string) => change<FinalizeResult>('POST', `/terminal-charges/${enc(id)}/complete`, {}, key),
+    voidTerminalCharge: (id: string, override?: Override, key?: string) => change<TerminalTxn>('POST', `/terminal-charges/${enc(id)}/void`, override ? { override } : {}, key),
+    invoiceTerminalCharges: (invoiceId: string) => get<TerminalTxn[]>(`/invoices/${enc(invoiceId)}/terminal-charges`),
     discoverPrinters: (port?: number) => request<{ scanned: number; port: number; found: Array<{ host: string; address: string }> }>('POST', '/printers/discover', port ? { port } : {}),
     // shifts
     currentShift: () => get<Shift | null>('/shifts/current'),

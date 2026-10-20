@@ -157,7 +157,9 @@ Order follows the project plan in `CLAUDE.md`.
 ### Smaller gaps found in the backend
 - [x] `npm run seed` works on Windows (it silently did nothing before)
 - [ ] Cart change returns only what changed (today the whole cart, about 300 KB at 1,000 lines)
-- [ ] UPI payment confirmation (today the cashier confirms by hand); card machine integration
+- [x] Payment machines (docs/PAYMENT_MACHINES.md): Paytm and Pine Labs, wireless (internet) and wired (Paytm USB library on Windows, Pine Labs PAD Controller); Settings > Payment machines (owner) with Test; counter sends Card/UPI to the machine and saves the bill only on approval; cancel, check again, reverse (void); Reports > Card machine payments (daily match). Tested with simulated servers and controller only
+- [ ] Payment machines on real hardware and the companies' test accounts; PhonePe and Razorpay POS connectors; Pine Labs UPI by cable
+- [ ] UPI payment confirmation without a machine (bank or UPI app merchant notifications)
 - [ ] Inventory follow-ups: unit conversion (buy in kg, use in g), recipes for modifiers (extra cheese), supplier list, purchase GST input credit, stock reports (consumption, wastage, variance), FIFO or average cost valuation, purchase CSV import
 - [ ] Owner to confirm: credit notes do not restock (returned food is discarded)
 - [ ] Yearly archive files (not needed until a shop's database grows large)

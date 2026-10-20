@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Banknote, CheckCircle2, CreditCard, Plus, Printer, RotateCw, Smartphone, Trash2, TriangleAlert, Wallet } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
-import type { Cart, CartLine, Discount, FinalizeResult, Item, OpenOrder, PayMode, PaymentCheck, PaymentIn, ZReport } from '../lib/api.ts';
+import type { Cart, CartLine, Discount, FinalizeResult, Item, OpenOrder, PayMode, PaymentCheck, PaymentIn, TerminalTxn, ZReport } from '../lib/api.ts';
 import { formatPaise, formatQty, formatRateBp, paiseToInput, parsePercentBp, parseQty, parseRupees } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal } from '../components/ui.tsx';
@@ -357,6 +357,75 @@ export function AvailabilityDialog({ items, onToggle, onClose }: { items: Item[]
           );
         })}
       </ul>
+    </Modal>
+  );
+}
+
+/**
+ * Card or UPI on a payment machine: sends the bill total, waits for the customer, saves the bill when approved.
+ * Nothing unclear is ever called "failed": the cashier is told to look at the machine.
+ */
+export function MachinePayDialog({ cart, mode, terminalId, resume, onClose, onPaid }: { cart: Cart; mode: 'CARD' | 'UPI'; terminalId: string | null; resume?: TerminalTxn | null; onClose: () => void; onPaid: (r: FinalizeResult) => void }) {
+  const { api, notify, withApproval } = useSession();
+  const [txn, setTxn] = useState<TerminalTxn | null>(resume ?? null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const startKey = useRef(newKey());
+  const doneKey = useRef(newKey());
+  const completing = useRef(false);
+  const start = useCallback(async () => {
+    setError(''); setTxn(null);
+    try { setTxn(await api.startTerminalCharge(cart.order.id, mode, terminalId, startKey.current)); } catch (e) { startKey.current = newKey(); setError(messageOf(e)); }
+  }, [api, cart.order.id, mode, terminalId]);
+  useEffect(() => { if (!resume) void start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // waiting: ask the POS every second
+  useEffect(() => {
+    if (!txn || txn.status !== 'PENDING') return;
+    const t = setInterval(() => { api.terminalCharge(txn.id).then(setTxn).catch(() => { /* next tick */ }); }, 1000);
+    return () => clearInterval(t);
+  }, [api, txn]);
+  // approved: save the bill
+  useEffect(() => {
+    if (!txn || txn.status !== 'APPROVED' || txn.invoiceId || completing.current) return;
+    completing.current = true;
+    api.completeTerminalCharge(txn.id, doneKey.current).then(onPaid).catch((e) => { setError(messageOf(e)); completing.current = false; });
+  }, [api, txn, onPaid]);
+  const cancel = async () => {
+    if (!txn) return onClose();
+    setBusy(true);
+    try { setTxn(await api.cancelTerminalCharge(txn.id)); } catch (e) { setError(messageOf(e)); } finally { setBusy(false); }
+  };
+  const recheck = async () => {
+    if (!txn) return;
+    setBusy(true);
+    try { setTxn(await api.recheckTerminalCharge(txn.id)); } catch (e) { setError(messageOf(e)); } finally { setBusy(false); }
+  };
+  const reverse = async () => {
+    if (!txn) return;
+    const key = newKey();
+    try { const v = await withApproval('Reversing a machine payment', (o) => api.voidTerminalCharge(txn.id, o, key)); if (v) { notify('info', 'Reversal sent to the machine. Charge the bill again.'); onClose(); } } catch (e) { setError(messageOf(e)); }
+  };
+  const again = () => { startKey.current = newKey(); doneKey.current = newKey(); completing.current = false; void start(); };
+  const what = mode === 'UPI' ? 'UPI' : 'Card';
+  const st = txn?.status;
+  return (
+    <Modal title={`${what} on ${txn?.terminalName ?? 'the machine'}`} onClose={st === 'PENDING' ? () => {} : onClose}>
+      <p className="text-center text-3xl font-bold tabular-nums text-primary">{formatPaise(txn?.amount ?? cart.totals.grandTotal)}</p>
+      <div className="mt-4 min-h-24 rounded-xl border border-border p-4 text-sm" role="status">
+        {!txn && !error && <p className="text-center text-muted-foreground">Sending to the machine…</p>}
+        {st === 'PENDING' && <div className="text-center"><CreditCard className="mx-auto h-8 w-8 animate-pulse text-primary" /><p className="mt-2 font-semibold">Waiting for the customer on the machine</p><p className="text-muted-foreground">{mode === 'UPI' ? 'The customer scans the QR on the machine.' : 'Tap, insert or swipe the card on the machine.'}</p></div>}
+        {st === 'APPROVED' && <div className="text-center"><CheckCircle2 className="mx-auto h-8 w-8 text-veg" /><p className="mt-2 font-semibold">Approved{txn?.result?.approvalCode ? ` · ${txn.result.approvalCode}` : ''}</p><p className="text-muted-foreground">{error ? '' : 'Saving the bill…'}</p></div>}
+        {(st === 'FAILED' || st === 'CANCELLED') && <div className="text-center"><TriangleAlert className="mx-auto h-8 w-8 text-destructive" /><p className="mt-2 font-semibold">{st === 'CANCELLED' ? 'Cancelled' : 'Not approved'}</p><p className="text-muted-foreground">{txn?.message}</p></div>}
+        {st === 'UNKNOWN' && <div className="text-center"><TriangleAlert className="mx-auto h-8 w-8 text-primary" /><p className="mt-2 font-semibold">Check the machine</p><p className="text-muted-foreground">{txn?.message} If the machine shows approved, close this and pay by hand with the slip's approval code.</p></div>}
+        {error && <p className="mt-2 text-center text-destructive" role="alert">{error}</p>}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+        {st === 'PENDING' && (txn?.canCancel ? <button className="btn-ghost" disabled={busy} onClick={() => void cancel()}>{busy ? 'Cancelling…' : 'Cancel payment'}</button> : <p className="text-xs text-muted-foreground">To stop, press Cancel on the machine.</p>)}
+        {st === 'UNKNOWN' && txn?.connection === 'cloud' && <button className="btn-ghost" disabled={busy} onClick={() => void recheck()}>Check again</button>}
+        {st === 'APPROVED' && error && <button className="btn-ghost text-destructive" onClick={() => void reverse()}>Reverse on the machine</button>}
+        {(st === 'FAILED' || st === 'CANCELLED' || (!txn && error)) && <button className="btn-primary" onClick={again}>Try again</button>}
+        {st !== 'PENDING' && <button className="btn-ghost" onClick={onClose}>Close</button>}
+      </div>
     </Modal>
   );
 }
