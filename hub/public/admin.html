@@ -167,7 +167,7 @@
   const keyStore = { get: () => { try { return sessionStorage.getItem('hubAdminKey') || ''; } catch { return ''; } },
     set: (v) => { try { v ? sessionStorage.setItem('hubAdminKey', v) : sessionStorage.removeItem('hubAdminKey'); } catch { /* private window */ } } };
   let key = keyStore.get(), overview = null, timer = null, settingsDirty = false;
-  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false };
+  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false, up: new Map() };
 
   if (location.protocol === 'http:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) $('insecure').classList.remove('hidden');
 
@@ -361,6 +361,7 @@
     try { s = await api('GET', `/v1/admin/stores/${encodeURIComponent(slug)}`); }
     catch (e) { box.replaceChildren(h('p', {}, h('a', { href: '#stores' }, '← All stores')), h('div', { class: 'card err' }, e.message)); return; }
     const p = s.published, link = ui.links.get(slug);
+    const upState = await loadUp(slug).catch((e) => ({ error: e.message }));
     const err = h('div', { class: 'err' });
     const pauseInput = h('input', { maxlength: '200', placeholder: 'This store is not taking online orders right now.' });
     box.replaceChildren(
@@ -388,6 +389,9 @@
         h('tbody', {}, s.devices.map((d) => h('tr', {}, h('td', {}, d.name), h('td', {}, when(d.createdAt)),
           h('td', { class: 'num' }, d.revokedAt ? h('span', { class: 'muted' }, `Revoked ${when(d.revokedAt)}`) : h('button', { class: 'danger', onclick: () => revoke(s, d) }, 'Revoke'))))))
         : h('p', { class: 'muted', style: 'margin:0' }, 'No POS connected yet. Make a connection link and send it to the shop.')),
+
+      h('h2', {}, 'Swiggy & Zomato (UrbanPiper)'),
+      upState.error ? h('div', { class: 'card err' }, upState.error) : upCard(slug, upState, Boolean(p)),
 
       h('h2', {}, 'Store settings'),
       p ? storeSettings(p) : h('div', { class: 'card muted' }, 'Nothing published yet. The settings appear here once the shop’s POS connects and turns on online orders.'),
@@ -420,6 +424,93 @@
       h('div', { class: 'card' }, h('h3', {}, 'Menu'),
         kv('Items', `${p.menu.items}${p.menu.unavailable ? ` (${p.menu.unavailable} not available now)` : ''}`),
         p.menu.categories.map((c) => kv(c.name, `${c.items} items`))));
+  }
+
+  // ------------------------------------------------------------ Swiggy & Zomato through UrbanPiper (one store)
+  // The form keeps what was typed (st.draft) across the page's 15-second refresh; the API key is never shown back.
+  const UP_PATH = (slug) => `/v1/admin/stores/${encodeURIComponent(slug)}/urbanpiper`;
+  const draftOf = (v) => ({ env: v.env, baseUrl: v.env === 'production' ? v.baseUrl : '', username: v.username, apiKey: '', bizId: v.bizId, locationRef: v.locationRef, city: v.city, address: v.address, phone: v.phone, platforms: [...v.platforms], enabled: v.enabled, packMode: v.packMode, packValue: v.packValue });
+  async function loadUp(slug) {
+    const view = await api('GET', UP_PATH(slug));
+    let st = ui.up.get(slug);
+    if (!st) { st = { view, draft: draftOf(view), dirty: false, errors: {}, msg: null, warnings: [], busy: false }; ui.up.set(slug, st); }
+    else { st.view = view; if (!st.dirty) st.draft = draftOf(view); }
+    return st;
+  }
+  async function upDo(slug, st, what) {
+    st.busy = true; st.msg = null; st.errors = {}; renderStore(slug);
+    try {
+      if (what === 'save') {
+        st.view = await api('PUT', UP_PATH(slug), st.draft);
+        st.draft = draftOf(st.view); st.dirty = false;
+        st.msg = { ok: true, text: 'Saved. Next: Test connection, then Set up order links, Send store details and Send menu.' };
+      } else if (what === 'remove') {
+        if (!confirm('Remove the UrbanPiper details of this store? Swiggy and Zomato orders for it are then refused.')) { st.busy = false; renderStore(slug); return; }
+        await api('DELETE', UP_PATH(slug)); ui.up.delete(slug);
+      } else {
+        const r = await api('POST', `${UP_PATH(slug)}/${what}`);
+        st.msg = { ok: r.ok, text: r.message }; st.warnings = r.warnings || (what === 'menu' ? [] : st.warnings);
+      }
+    } catch (e) { st.errors = e.fields || {}; st.msg = { ok: false, text: e.message }; }
+    st.busy = false;
+    await renderStore(slug);
+  }
+  function upCard(slug, st, published) {
+    const v = st.view, d = st.draft;
+    const set = (k, val) => { d[k] = val; st.dirty = true; };
+    const err = (k) => h('div', { class: 'err' }, st.errors[k] || '');
+    const field = (k, label, attrs = {}, hint) => h('div', {}, h('label', { for: `up-${k}` }, label),
+      h('input', { id: `up-${k}`, value: d[k] ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, oninput: (e) => set(k, e.target.value) }),
+      hint ? h('div', { class: 'hint' }, hint) : null, err(k));
+    const platformBox = (pl, name) => h('label', { style: 'display:inline-flex;gap:6px;align-items:center;font-weight:400;margin-right:16px' },
+      h('input', { type: 'checkbox', style: 'width:auto', checked: d.platforms.includes(pl), onchange: (e) => set('platforms', e.target.checked ? [...new Set([...d.platforms, pl])] : d.platforms.filter((x) => x !== pl)), 'aria-label': name }), channelBadge(pl));
+    const busy = st.busy;
+    const btn = (what, text, cls) => h('button', { class: cls, disabled: busy || (what !== 'save' && st.dirty) || ((what === 'store' || what === 'menu') && !published), onclick: () => upDo(slug, st, what) }, busy ? '…' : text);
+    const DIR = { out: '→ UrbanPiper', in: '← UrbanPiper' };
+    return h('div', { class: 'card' },
+      h('div', { class: 'row between' },
+        h('div', { class: 'muted', style: 'max-width:640px' }, 'Swiggy and Zomato orders come through UrbanPiper. Enter this store\'s details from UrbanPiper (the welcome email or Atlas). Orders then appear on the shop\'s ODS like website orders, and accept, ready and cancel go back to Swiggy and Zomato.'),
+        h('div', { class: 'row' }, v.set ? chip(v.enabled ? 'ok' : 'warn', v.enabled ? 'Taking orders' : 'Orders off') : chip('plain', 'Not set up'), v.set ? chip(v.env === 'staging' ? 'warn' : 'ok', v.env === 'staging' ? 'Test account' : 'Live account') : null)),
+      h('div', { class: 'grid' },
+        h('div', {}, h('label', { for: 'up-env' }, 'UrbanPiper account'),
+          h('select', { id: 'up-env', onchange: (e) => { set('env', e.target.value); renderStore(slug); } },
+            h('option', { value: 'staging', selected: d.env === 'staging' }, 'Test account (pos-int.urbanpiper.com)'),
+            h('option', { value: 'production', selected: d.env === 'production' }, 'Live account')),
+          h('div', { class: 'hint' }, 'Use the test account until UrbanPiper certifies the setup.')),
+        d.env === 'production' ? field('baseUrl', 'Live address', { placeholder: 'https://…urbanpiper.com' }, 'From UrbanPiper\'s certification email.') : null,
+        field('username', 'API username', { placeholder: 'from "apikey username:key"' }),
+        field('apiKey', 'API key', { type: 'password', placeholder: v.set ? `Saved (ends ${v.apiKeyHint})` : 'the part after the colon' }, v.set ? 'Leave empty to keep the saved key. Kept on the hub only; never shown again.' : 'Kept on the hub only; never shown again.'),
+        field('bizId', 'Biz ID', { inputmode: 'numeric', placeholder: 'e.g. 324255' }, 'The X-UPR-Biz-Id number.'),
+        field('locationRef', 'Store ID at UrbanPiper', { placeholder: slug }, 'Your own ID for this store at UrbanPiper. Keep it once orders flow.'),
+        field('city', 'City', { placeholder: 'Bengaluru' }),
+        field('address', 'Address', { placeholder: 'Shop address as customers see it' }),
+        field('phone', 'Store phone', { inputmode: 'tel', placeholder: '080 4144 0067' }),
+        h('div', {}, h('label', { for: 'up-packMode' }, 'Packaging charge on Swiggy and Zomato'),
+          h('select', { id: 'up-packMode', onchange: (e) => { set('packMode', e.target.value); renderStore(slug); } },
+            h('option', { value: 'none', selected: d.packMode === 'none' }, 'None'),
+            h('option', { value: 'per_item', selected: d.packMode === 'per_item' }, '₹ per item'),
+            h('option', { value: 'percent', selected: d.packMode === 'percent' }, '% of the item price')),
+          h('div', { class: 'hint' }, 'Both platforms take packaging per item only. GST on it is set in Atlas (Zomato) or by your Swiggy contact.')),
+        d.packMode !== 'none' ? field('packValue', d.packMode === 'percent' ? 'Packaging (% of item price)' : 'Packaging (₹ per item)', { inputmode: 'decimal', placeholder: d.packMode === 'percent' ? '5' : '10' }, 'Sent with the next menu.') : null),
+      h('label', {}, 'Platforms'), h('div', {}, platformBox('swiggy', 'Swiggy'), platformBox('zomato', 'Zomato')), err('platforms'),
+      h('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:400;margin-top:12px' },
+        h('input', { type: 'checkbox', style: 'width:auto', checked: d.enabled, onchange: (e) => set('enabled', e.target.checked) }),
+        'Take Swiggy and Zomato orders for this store (off: orders are refused and the store is not switched on)'),
+      h('div', { class: 'actions' },
+        btn('save', st.dirty || !v.set ? 'Save details' : 'Saved', 'primary'),
+        v.set ? [btn('test', 'Test connection'), btn('webhooks', 'Set up order links'), btn('store', 'Send store details'), btn('menu', 'Send menu'), h('button', { class: 'danger', disabled: busy, onclick: () => upDo(slug, st, 'remove') }, 'Remove')] : null),
+      st.dirty && v.set ? h('div', { class: 'hint' }, 'Save the changes before testing or sending.') : null,
+      v.set && !published ? h('div', { class: 'hint' }, 'Store details and menu can be sent once the shop\'s POS has connected and published them.') : null,
+      st.msg ? h('div', { class: st.msg.ok ? 'box' : 'banner' }, st.msg.text) : null,
+      st.warnings.length ? h('div', { class: 'banner info' }, h('b', {}, 'Swiggy and Zomato may refuse or hide some items:'), h('ul', { style: 'margin:6px 0 0;padding-left:18px' }, st.warnings.map((w) => h('li', {}, w)))) : null,
+      v.set ? h('div', { class: 'box' },
+        h('div', {}, 'UrbanPiper sends orders to:'),
+        h('div', { class: 'linkbox' }, h('input', { readonly: true, value: v.webhookUrl, 'aria-label': 'Webhook address', onfocus: (e) => e.target.select() })),
+        v.webhookUrlProblem ? h('div', { class: 'err' }, v.webhookUrlProblem) : h('div', { class: 'hint' }, '"Set up order links" registers this address with UrbanPiper, with a secret only this hub knows. Orders sent without the secret are refused.')) : null,
+      v.set ? [h('h3', { style: 'margin-top:14px' }, 'Activity', v.pending ? h('span', { class: 'muted', style: 'font-weight:400' }, ` (${v.pending} waiting to be sent)`) : null),
+        v.log.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'When'), h('th', {}, ''), h('th', {}, 'What'), h('th', {}, ''), h('th', {}, 'Result'))),
+          h('tbody', {}, v.log.map((l) => h('tr', {}, h('td', {}, `${day(l.at)} ${clock(l.at)}`), h('td', { class: 'muted' }, DIR[l.dir]), h('td', {}, l.kind), h('td', {}, chip(l.ok ? 'ok' : 'bad', l.ok ? 'OK' : 'Failed')), h('td', { style: 'white-space:normal' }, l.text))))))
+          : h('p', { class: 'muted' }, 'Nothing yet.')] : null);
   }
 
   async function pause(slug, paused, reason, err) {

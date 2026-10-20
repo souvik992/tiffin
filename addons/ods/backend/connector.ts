@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Actor } from '../../../src/services/ctx.ts';
 import type { HostApi } from '../../../src/addons/host.ts';
-import type { Order, PosEvent, RejectReason, Rider } from '../../../contract/src/types.ts';
+import type { Order, PlatformAction, PosEvent, RejectReason, Rider } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
 import { priceOrder , channelPrice } from '../../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../../contract/src/menu.ts';
@@ -212,7 +212,16 @@ export class Connector {
         }
       } else if (ev.type === 'order.cancelled') {
         const o = getOrder(this.host, ev.orderId);
-        if (o) setState(this.host, ev.orderId, 'CANCELLED', { alert: o.billInvoiceId ? `The customer cancelled. Cancel bill ${o.billNo} (manager approval).` : 'Cancelled by the customer.', patch: { reasonText: ev.reasonText } });
+        const who = ev.by === 'aggregator' ? `${o?.order.channel === 'zomato' ? 'Zomato' : 'Swiggy'} cancelled it${ev.reasonText ? ` (${ev.reasonText})` : ''}` : 'The customer cancelled';
+        if (o) setState(this.host, ev.orderId, 'CANCELLED', { alert: o.billInvoiceId ? `${who}. Cancel bill ${o.billNo} (manager approval).` : `${who}.`, patch: { reasonText: ev.reasonText } });
+      } else if (ev.type === 'order.rider') {
+        // Swiggy / Zomato rider: who, and how far (assigned, at the store, out for delivery)
+        const o = getOrder(this.host, ev.orderId);
+        if (o) setState(this.host, ev.orderId, o.state, { patch: { rider: ev.rider, ...(o.order.external ? { external: { ...o.order.external, riderStatus: ev.riderStatus } } : {}) } });
+      } else if (ev.type === 'order.notice') {
+        // Swiggy / Zomato: the customer's number, a PIN to call, a request the platform did not take
+        const o = getOrder(this.host, ev.orderId);
+        if (o) setState(this.host, ev.orderId, o.state, { alert: ev.text });
       } else if (ev.type === 'order.auto_rejected') {
         if (getOrder(this.host, ev.orderId)) setState(this.host, ev.orderId, 'AUTO_REJECTED', { alert: 'Not accepted in time: the hub rejected it.' });
       } else if (ev.type === 'order.updated') {
@@ -306,6 +315,7 @@ export class Connector {
             setState(this.host, row.order_id, j?.error?.details?.state ?? 'CANCELLED', { alert: `The hub refused the accept (${j?.error?.message ?? 'order closed'}). Cancel bill ${o.billNo} (manager approval).` });
             this.bus.emit('change');
           }
+          if (o && row.action === 'platform-action') { setState(this.host, row.order_id, o.state, { alert: `Not sent to ${o.order.channel === 'zomato' ? 'Zomato' : 'Swiggy'}: ${j?.error?.message ?? r.status}` }); this.bus.emit('change'); }
           continue;
         }
         outboxFailed(this.host, row.id, `hub answered ${r.status}`);
@@ -338,7 +348,8 @@ export class Connector {
     const items = priceOrder(menu, cart);
     if (!items.ok) return { total: o.total, deliveryFee: o.deliveryFee, packagingFee: o.packagingFee, differs: true, problem: items.message };
     let deliveryFee = 0, packagingFee = 0;
-    if (o.fulfilment === 'DELIVERY' && o.location) {
+    if (o.external) { deliveryFee = o.deliveryFee; packagingFee = o.packagingFee; } // Swiggy / Zomato set their own charges
+    else if (o.fulfilment === 'DELIVERY' && o.location) {
       const q = quote(svc, { fulfilment: 'DELIVERY', to: o.location, itemsTotal: items.itemsTotal, measuredRoadKm: o.distanceKm });
       deliveryFee = q.ok ? q.deliveryFee : o.deliveryFee; packagingFee = q.ok ? q.packagingFee : o.packagingFee;
     } else if (o.fulfilment === 'PICKUP') packagingFee = svc.packagingFee;
@@ -366,7 +377,8 @@ export class Connector {
       note: `${o.number} ${o.fulfilment === 'DELIVERY' ? 'DELIVERY' : 'PICKUP'} ${who}${o.customer.mobile}${addr}${o.note ? ` | ${o.note}` : ''}`.slice(0, 300),
       lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note, ...this.billPrice(o.channel, l.itemId) })),
       fees: { delivery: price.deliveryFee, packaging: price.packagingFee, taxGroupId: readFeeTaxGroup(this.host) },
-      paymentMode: o.payment === 'COD' ? 'CASH' : 'UPI',
+      // Swiggy / Zomato pay the store later (OTHER), unless the store's own rider collects cash
+      paymentMode: o.external ? (o.payment === 'COD' && o.external.deliveredBy === 'store' ? 'CASH' : 'OTHER') : o.payment === 'COD' ? 'CASH' : 'UPI',
     });
     this.host.db.tx(() => {
       setState(this.host, orderId, 'ACCEPTED', { billInvoiceId: bill.invoiceId, billNo: bill.invoiceNo, billTotal: bill.grandTotal, alert: price.differs ? `Billed at the POS price Rs ${(bill.grandTotal / 100).toFixed(2)} (customer was shown Rs ${(o.total / 100).toFixed(2)}).` : null, patch: { prepMinutes: prep, posBillNo: bill.invoiceNo } });
@@ -413,6 +425,36 @@ export class Connector {
       });
     }
     this.bus.emit('change');
+    void this.flush();
+    return getOrder(this.host, orderId)!;
+  }
+
+  /** Swiggy / Zomato requests about one order (items out of stock, customer's number, extra rider, rider check). Checked
+   * here for what the POS knows; the hub checks the rest and the platform's answer comes back as a notice on the order. */
+  platformAction(actor: Actor, orderId: string, input: PlatformAction, requestId: string) {
+    this.host.assertPerm(actor, 'order.write');
+    const lo = getOrder(this.host, orderId);
+    if (!lo) throw new this.host.AppError('NOT_FOUND', 'Order not found.', 404);
+    const x = lo.order.external;
+    if (!x) throw new this.host.AppError('NOT_PLATFORM_ORDER', 'This is not a Swiggy or Zomato order.', 409);
+    if (['REJECTED', 'AUTO_REJECTED', 'CANCELLED', 'DELIVERED', 'PICKED_UP'].includes(lo.state)) throw new this.host.AppError('ORDER_CLOSED', 'This order is already finished.', 409);
+    let body: PlatformAction;
+    if (input.action === 'items_out_of_stock') {
+      if (x.platform !== 'swiggy') throw new this.host.AppError('NOT_SUPPORTED', 'Only Swiggy takes out-of-stock items on an order. For Zomato, reject or cancel the order.', 409);
+      const ids = [...new Set((Array.isArray(input.itemIds) ? input.itemIds : []).map(String))].filter((id) => lo.order.lines.some((l) => l.itemId === id));
+      if (!ids.length) throw new this.host.AppError('VALIDATION', 'Choose the items that ran out.');
+      body = { action: 'items_out_of_stock', itemIds: ids, allowEdit: input.allowEdit === true };
+    } else if (input.action === 'extra_rider' || input.action === 'customer_phone') {
+      if (x.platform !== 'zomato') throw new this.host.AppError('NOT_SUPPORTED', 'This is a Zomato request.', 409);
+      body = { action: input.action };
+    } else if (input.action === 'rider_check') {
+      if (x.platform !== 'zomato') throw new this.host.AppError('NOT_SUPPORTED', 'This is a Zomato request.', 409);
+      const temp = Number(input.temperatureF);
+      if (!(temp >= 90 && temp <= 110)) throw new this.host.AppError('VALIDATION', "Enter the rider's temperature in °F (90 to 110).");
+      body = { action: 'rider_check', temperatureF: temp, wearingMask: input.wearingMask === true, riderPhone: input.riderPhone ? String(input.riderPhone).replace(/\D/g, '').slice(-10) : null };
+    } else throw new this.host.AppError('VALIDATION', 'Unknown request.');
+    enqueue(this.host, orderId, 'platform-action', body, `pa-${requestId}`.slice(0, 120));
+    this.host.audit(this.host.ctx, actor.userId, 'ods.platform_action', 'ods_order', orderId, { action: body.action });
     void this.flush();
     return getOrder(this.host, orderId)!;
   }

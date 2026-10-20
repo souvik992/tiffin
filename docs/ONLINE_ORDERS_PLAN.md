@@ -90,7 +90,7 @@ Each transition is listed in the contract with:
 | **3. Online payment** | Gateway per store (money goes straight to the store), webhooks, refunds | F9, F10, F16 pass in gateway test mode; CA sign-off |
 | **4. Go live** | Staging and production hub in an Indian region, domain, TLS, backups, monitoring and alerts, rate limits | One pilot store for 2 weeks with no lost or duplicate order |
 | **5. Store apps** | Android (and iOS) wrappers per store, push notifications | Play Store / TestFlight builds approved |
-| **6. Swiggy / Zomato** | Via their integration-partner programme or an aggregator | Partner approval; their test orders flow into ODS |
+| **6. Swiggy / Zomato** | Through UrbanPiper (built: hub `src/urbanpiper.ts`, hub/README.md) | UrbanPiper test orders (Atlas Developer Tools) flow into ODS; UrbanPiper certification |
 
 ## 6. Start now, in parallel (these take weeks and would otherwise become gaps)
 

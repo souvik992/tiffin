@@ -43,6 +43,25 @@ CREATE TABLE IF NOT EXISTS order_attempt (
 );
 CREATE INDEX IF NOT EXISTS order_attempt_at ON order_attempt(store_id, at);
 CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+-- Swiggy / Zomato through UrbanPiper (src/urbanpiper.ts). up_link: one store's UrbanPiper details; api_key and
+-- webhook_token are secrets (never sent to the admin page). items_json: availability last sent; menu_sig: menu last sent.
+-- pack_mode/pack_value: packaging charge on the platforms: none, per_item (paise per item), percent (basis points of the item price).
+CREATE TABLE IF NOT EXISTS up_link (
+  store_id TEXT PRIMARY KEY REFERENCES store(id), base_url TEXT NOT NULL, username TEXT NOT NULL, api_key TEXT NOT NULL, biz_id TEXT NOT NULL,
+  location_ref TEXT NOT NULL, city TEXT NOT NULL, address TEXT NOT NULL, phone TEXT NOT NULL, platforms_json TEXT NOT NULL,
+  webhook_token TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, items_json TEXT, menu_sig TEXT, store_on INTEGER,
+  pack_mode TEXT NOT NULL DEFAULT 'none', pack_value INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (biz_id, location_ref)
+);
+-- up_order: the platform's order (UrbanPiper id) for each hub order; can_reject: Swiggy lets the store reject it directly
+CREATE TABLE IF NOT EXISTS up_order (up_id TEXT PRIMARY KEY, store_id TEXT NOT NULL, order_id TEXT NOT NULL UNIQUE, platform TEXT NOT NULL, can_reject INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS up_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT NOT NULL, kind TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body_json TEXT NOT NULL,
+  label TEXT NOT NULL, order_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, done_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS up_outbox_due ON up_outbox(done_at, next_at);
+CREATE TABLE IF NOT EXISTS up_log (id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT, at INTEGER NOT NULL, dir TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL, text TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS up_log_store ON up_log(store_id, id);
 `;
 
 export type Db = DatabaseSync;

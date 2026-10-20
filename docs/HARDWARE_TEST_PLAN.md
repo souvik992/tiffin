@@ -145,6 +145,21 @@ Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages).
 | A shop's own design compared with their old bill | |
 | Bill logo on real printers (58 and 80 mm, Posiflex PP8800, a cheap 58 mm): centred, dark enough, print speed, no garbage after the logo | |
 
+## Swiggy and Zomato (UrbanPiper test account)
+
+| Check | Result |
+|---|---|
+| Hub on an https address; store card saved with the pos-int details; Test connection says connected | |
+| Set up order links: 9 webhooks in Atlas (Settings > Webhooks) pointing at the hub, with the secret header | |
+| Send store details and Send menu: store and menu appear in Atlas; the activity list shows UrbanPiper's results | |
+| Atlas Developer Tools: Swiggy and Zomato test orders (delivery, pickup, cash, options) appear on the ODS, priced right | |
+| Accept (prep time), Ready, reject, cancel: Atlas shows Acknowledged, Food Ready, Cancelled with the reason | |
+| Platform cancel and rider updates from Developer Tools reach the ODS | |
+| Item sold out in the POS and the store pausing show in Atlas | |
+| Swiggy test order: Item out of stock, both choices (change order: number and PIN on the ODS; cancel) | |
+| Zomato test order: Customer's number, Rider check; a bulk test order: Ask for another rider | |
+| Packaging per item and as a percentage show on the test orders and the POS bill; a menu with 5% and 12% items is taken (tax codes) | |
+
 ## Accounting sign-off (CA)
 GST rates and inclusive/exclusive treatment, odd-paisa rule, discount before tax, round-off, invoice numbering
-and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month.
+and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month. Swiggy/Zomato bills: GST on food paid by the platform (section 9(5)), packaging charges, store-funded platform discounts, payment mode OTHER until the platform pays out.
