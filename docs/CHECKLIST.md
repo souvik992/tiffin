@@ -143,7 +143,7 @@ Order follows the project plan in `CLAUDE.md`.
 
 ### Then: distribution
 - [x] USB printers on the WinUSB driver (e.g. after the Zadig tool): listed in Printer setup and printed to through winusb.dll (bulk OUT endpoint), no admin needed. Found and opened a Posiflex PP8800 on the dev PC; a real print from this path is not tested yet
-- [x] Windows installer (NSIS) that runs as a standard user: installed, run and uninstalled on the dev PC without admin; shortcuts; uninstall keeps the data folder
+- [x] Windows installer (NSIS) that runs as a standard user: installed, run and uninstalled on the dev PC without admin; shortcuts; uninstall keeps the data folder; the installer waits up to 30 s for a POS that is still closing (closing backup) before saying it is open (desktop/build/installer.nsh; tested on the dev PC with a separately named copy)
 - [x] Faster installs on low-end PCs: zip package, English-only Chromium strings, no WebGPU shader compilers (silent install on one CPU core ~22 s instead of ~47 s; tested with a separately named copy, and the trimmed app passes the desktop e2e test with and without a graphics card)
 - [x] Auto-update (electron-updater): background download, installs when the POS is closed, checks the publisher signature; on when built with POS_UPDATE_URL
 - [ ] Code-signing certificate (the installer is unsigned: SmartScreen warns) and an update server (any static HTTPS host)
