@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, Inbox, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
-import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PaymentTerminal, PrintJob, Shift, StockItem, TerminalTxn, ZReport } from '../lib/api.ts';
+import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
+import { useAddons } from '../lib/addons.ts';
+import type { CheckoutPlugin } from '../addonHost.ts';
 import { formatPaise, formatPrice, formatQty, formatRateBp, formatStockQty, parsePercentBp, parseRupees } from '../lib/money.ts';
 import { useSession } from '../lib/session.tsx';
 import { Modal, Rail, VegMark } from '../components/ui.tsx';
-import { AfterPayment, AvailabilityDialog, MachinePayDialog, ConfirmDialog, CustomerDialog, DrawerDialog, HeldBillsDialog, LineDialog, SplitPaymentDialog, XReportDialog } from './BillingExtras.tsx';
+import { AfterPayment, AvailabilityDialog, ConfirmDialog, CustomerDialog, DrawerDialog, HeldBillsDialog, LineDialog, SplitPaymentDialog, XReportDialog } from './BillingExtras.tsx';
 import { PlugAndPlay } from '../components/plugAndPlay.tsx';
 
 const PAY_MODES: Array<{ mode: PayMode; label: string; icon: typeof Banknote }> = [
@@ -232,29 +234,31 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
   const coupon = cart?.order.coupon ?? null;
   const [paying, setPaying] = useState(false);
   const [splitting, setSplitting] = useState(false);
-  // payment machines: Card / UPI go to the chosen machine ("" = enter the payment by hand)
-  const [machines, setMachines] = useState<PaymentTerminal[]>([]);
-  const [machineFor, setMachineFor] = useState<Partial<Record<'CARD' | 'UPI', string>>>({});
-  const [onMachine, setOnMachine] = useState<{ mode: 'CARD' | 'UPI'; terminalId: string | null; resume?: TerminalTxn | null } | null>(null);
-  useEffect(() => { api.terminals().then((l) => setMachines(l.filter((m) => m.active))).catch(() => { /* none: by hand */ }); }, [api]);
-  const machinesFor = (m: PayMode) => (m === 'CARD' || m === 'UPI' ? machines.filter((x) => x.modes.includes(m)) : []);
-  const chosenMachine = (m: PayMode): string | null => {
-    if (m !== 'CARD' && m !== 'UPI') return null;
-    const list = machinesFor(m);
-    const pick = machineFor[m];
-    if (pick === '') return null;
-    return list.find((x) => x.id === pick)?.id ?? list.find((x) => x.isDefault)?.id ?? list[0]?.id ?? null;
-  };
-  // after a reload: a payment that was waiting on a machine, or approved without a bill
-  const resumed = useRef<string | null>(null);
-  useEffect(() => {
-    if (!cart || resumed.current === cart.order.id) return;
-    resumed.current = cart.order.id;
-    api.openTerminalCharge(cart.order.id).then((x) => { if (x) setOnMachine({ mode: x.mode === 'UPI' ? 'UPI' : 'CARD', terminalId: x.terminalId, resume: x }); }).catch(() => { /* by hand */ });
-  }, [api, cart]);
   // One key per bill until it succeeds: a double click or a retry after a lost response returns the same invoice.
   const payKey = useRef<{ orderId: string; key: string } | null>(null);
 
+  // add-on payment options (for example card machines): "addon:option", or "" = enter the payment by hand
+  const { addons } = useAddons();
+  const plugins = addons.filter((a) => a.checkout).map((a) => ({ id: a.id, p: a.checkout as CheckoutPlugin }));
+  const optionsFor = (m: PayMode) => plugins.flatMap(({ id, p }) => { try { return p.options(m).map((o) => ({ ...o, key: `${id}:${o.id}`, plugin: p })); } catch { return []; } });
+  const [optionFor, setOptionFor] = useState<Partial<Record<PayMode, string>>>({});
+  const chosenOption = (m: PayMode) => {
+    const list = optionsFor(m);
+    const pick = optionFor[m];
+    if (pick === '') return null;
+    return list.find((x) => x.key === pick) ?? list.find((x) => x.isDefault) ?? list[0] ?? null;
+  };
+  const [external, setExternal] = useState<{ key: string; mode: PayMode; resume?: unknown } | null>(null);
+  // after a reload: a payment an add-on was still taking for this bill
+  const resumed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cart || resumed.current === cart.order.id || plugins.length === 0) return;
+    resumed.current = cart.order.id;
+    for (const { id, p } of plugins) {
+      p.pending?.(cart.order.id).then((r) => { if (r) setExternal({ key: `${id}:${r.optionId}`, mode: r.mode, resume: r.resume }); }).catch(() => { /* by hand */ });
+    }
+  }, [cart, plugins.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const externalPlugin = external ? plugins.find(({ id }) => external.key.startsWith(`${id}:`))?.p ?? null : null;
   const t = cart?.totals;
   const lines = cart?.lines ?? [];
   const empty = lines.length === 0;
@@ -280,8 +284,8 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
 
   const pay = async () => {
     if (!cart || !t || empty || busy || paying) return;
-    const machine = t.grandTotal > 0 ? chosenMachine(mode) : null;
-    if (machine && (mode === 'CARD' || mode === 'UPI')) { setOnMachine({ mode, terminalId: machine }); return; }
+    const option = t.grandTotal > 0 ? chosenOption(mode) : null;
+    if (option) { setExternal({ key: option.key, mode }); return; }
     let tenderedPaise: number | null = null;
     if (mode === 'CASH' && tendered.trim()) {
       tenderedPaise = parseRupees(tendered);
@@ -422,15 +426,15 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
           </button>
         ))}
       </div>
-      {machinesFor(mode).length > 0 && (
+      {optionsFor(mode).length > 0 && (
         <div className="px-4 pt-2">
-          <select className="field h-10 w-full" aria-label="Payment machine" value={chosenMachine(mode) ?? ''} onChange={(e) => setMachineFor((f) => ({ ...f, [mode]: e.target.value }))}>
-            {machinesFor(mode).map((m) => <option key={m.id} value={m.id}>On machine: {m.name}</option>)}
+          <select className="field h-10 w-full" aria-label="Payment machine" value={chosenOption(mode)?.key ?? ''} onChange={(e) => setOptionFor((f) => ({ ...f, [mode]: e.target.value }))}>
+            {optionsFor(mode).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             <option value="">Enter by hand (paid on another machine)</option>
           </select>
         </div>
       )}
-      {!(chosenMachine(mode) && (mode === 'CARD' || mode === 'UPI')) && <div className="px-4 pt-2">
+      {!chosenOption(mode) && <div className="px-4 pt-2">
         {mode === 'CASH'
           ? <input className="field h-10 w-full" inputMode="decimal" placeholder="Cash received (optional)" aria-label="Cash received" value={tendered} onChange={(e) => setTendered(e.target.value)} />
           : <input className="field h-10 w-full" placeholder={mode === 'UPI' ? 'UPI reference (optional)' : 'Card slip / last 4 digits (optional)'} aria-label="Payment reference" maxLength={60} value={reference} onChange={(e) => setReference(e.target.value)} />}
@@ -441,11 +445,11 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
             <Split className="h-4 w-4" />Split
           </button>
           <button className="btn-primary h-12 min-w-0 flex-1 text-base" disabled={empty || busy || paying} onClick={() => void pay()}>
-            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}${chosenMachine(mode) && t.grandTotal > 0 ? ' on machine' : ''}` : 'Charge'}
+            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}${chosenOption(mode) && t.grandTotal > 0 ? ' on machine' : ''}` : 'Charge'}
           </button>
         </div>
       </div>
-      {onMachine && cart && <MachinePayDialog cart={cart} mode={onMachine.mode} terminalId={onMachine.terminalId} resume={onMachine.resume} onClose={() => setOnMachine(null)} onPaid={(r) => { setOnMachine(null); setMode('CASH'); onPaid(r); }} />}
+      {external && externalPlugin && cart && <externalPlugin.Dialog cart={cart} mode={external.mode} optionId={external.key.slice(external.key.indexOf(':') + 1)} resume={external.resume} onClose={() => setExternal(null)} onPaid={(r) => { setExternal(null); setMode('CASH'); onPaid(r); }} />}
       {splitting && cart && <SplitPaymentDialog cart={cart} payKey={payKey} onClose={() => setSplitting(false)} onPaid={(r) => { setSplitting(false); onPaid(r); }} />}
     </aside>
   );

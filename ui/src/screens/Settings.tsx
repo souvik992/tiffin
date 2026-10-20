@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  Banknote, Bluetooth, CreditCard, DatabaseBackup, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
+  Banknote, Bluetooth, DatabaseBackup, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
 } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Printer, PrinterInput, ReceiptDesign, ReceiptDesignPreview, SerialPortInfo, Transport, UsbDevice, WindowsPrinter } from '../lib/api.ts';
@@ -13,7 +13,6 @@ import { UsersSettings } from './UsersSettings.tsx';
 import { CouponsSettings } from './CouponsSettings.tsx';
 import { DeviceSettings } from './DeviceSettings.tsx';
 import { BackupSettings } from './BackupSettings.tsx';
-import { PaymentMachines } from './PaymentMachines.tsx';
 import { onAndroid } from '../lib/android.ts';
 import { useAddons } from '../lib/addons.ts';
 
@@ -53,7 +52,6 @@ export function Settings() {
     ...(onAndroid() ? [['device', 'This device', Smartphone, 'Add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(user?.role === 'owner' ? [
       ['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string],
-      ['payment-machines', 'Payment machines', CreditCard, 'Paytm and Pine Labs card machines, wireless or wired'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
       ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
     ] : []),
@@ -74,7 +72,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : shown === 'payment-machines' ? <PaymentMachines /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : <ReceiptSettings />}</div>
         </div>
       )}
     </PageShell>

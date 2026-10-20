@@ -1,5 +1,9 @@
 # Payment machines (card machines / EDC)
 
+A separately installed add-on (`addons/edc`, id `edc`, needs POS 0.3.8): `TiffinPOS-PaymentMachines-Setup-<version>.exe` on
+Windows, `TiffinPOS-PaymentMachines-<version>.tiffinaddon` on Android. Without it the POS takes Card and UPI by hand,
+as before. Build: `cd addons/edc && npm run build` (signed) and `npm run installer`.
+
 Settings > Payment machines (owner). At the counter, Card and UPI payments go to the machine; the bill is saved only
 when the machine approves, with the approval code, RRN and the card's last 4 digits as the payment reference.
 
@@ -37,7 +41,7 @@ Paytm both ways and Pine Labs by cable from the POS; Pine Labs over the internet
   approved, the bill is paid by hand with the slip's approval code. A customer is never charged twice by the POS.
 * Keys and security tokens are stored like other secrets ("_key" settings): never shown again or sent to the screen.
 * A payment approved by a machine cannot have its mode changed by hand (Orders > Change), only reversed.
-* Reports > Card machine payments lists every attempt and matches it with bills: "approved, no bill" and "unclear"
+* Settings > Payment machines > Daily match lists every attempt and matches it with bills: "approved, no bill" and "unclear"
   are counted at the top, for the daily check.
 
 ## Not verified yet (needs the companies' test access)

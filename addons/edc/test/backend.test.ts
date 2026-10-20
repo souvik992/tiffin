@@ -5,22 +5,32 @@ import net from 'node:net';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { all, get, AppError } from '../src/store/db.ts';
-import { allSettings } from '../src/services/settings.ts';
-import { paytmChecksum, verifyPaytmChecksum } from '../src/services/terminals/paytmChecksum.ts';
-import { PaytmCloud, PaytmWired } from '../src/services/terminals/paytm.ts';
-import { PineCloud, PineWired, csvFields, frame } from '../src/services/terminals/pinelabs.ts';
-import type { Connector } from '../src/services/terminals/types.ts';
-import { completeCharge, getTxn, listTerminals, recheckCharge, resumeCharges, saveTerminal, setConnectorFactory, startCharge, cancelCharge, voidCharge, openChargeFor } from '../src/services/terminals/service.ts';
-import type { TerminalInput } from '../src/services/terminals/service.ts';
-import { runReport } from '../src/services/reportCatalog.ts';
-import { addLine } from '../src/services/orders.ts';
-import { correctPaymentMode } from '../src/services/counter.ts';
-import { cartOf, makeEnv, rid, startShift } from './helpers.ts';
-import type { Env } from './helpers.ts';
+import { all, get, AppError } from '../../../src/store/db.ts';
+import { applyAddonMigrations, makeHost } from '../../../src/addons/host.ts';
+import type { AddonRoute } from '../../../src/addons/host.ts';
+import { allSettings } from '../../../src/services/settings.ts';
+import { paytmChecksum, verifyPaytmChecksum } from '../backend/paytmChecksum.ts';
+import { PaytmCloud, PaytmWired } from '../backend/paytm.ts';
+import { PineCloud, PineWired, csvFields, frame } from '../backend/pinelabs.ts';
+import type { Connector } from '../backend/types.ts';
+import { completeCharge, getTxn, listTerminals, recheckCharge, resumeCharges, saveTerminal, setConnectorFactory, startCharge, cancelCharge, voidCharge, openChargeFor } from '../backend/service.ts';
+import type { TerminalInput } from '../backend/service.ts';
+import { dailyMatch, register } from '../backend/index.ts';
+import { addLine } from '../../../src/services/orders.ts';
+import { correctPaymentMode } from '../../../src/services/counter.ts';
+import { cartOf, makeEnv, rid, startShift } from '../../../test/helpers.ts';
+import type { Env } from '../../../test/helpers.ts';
 
 const KEY = 'kbzk1DSbJiV_O3p5'; // a made-up 16-character test key
 const code = async (fn: () => unknown): Promise<string> => { try { await fn(); } catch (e) { if (e instanceof AppError) return e.code; throw e; } return 'NO_ERROR'; };
+/** Loads the add-on into a test POS the way the POS does: its toolbox, register(), then its database steps. */
+const hostFor = (env: Env) => {
+  const sink = { routes: [] as AddonRoute[], migrations: [] as Parameters<typeof applyAddonMigrations>[2], stops: [] as Array<() => void | Promise<void>> };
+  const host = makeHost(env.ctx, 'edc', '0.3.8', sink);
+  register(host);
+  applyAddonMigrations(env.ctx, 'edc', sink.migrations);
+  return host;
+};
 const waitFor = async (env: Env, id: string, done: (s: string) => boolean, ms = 8000) => {
   const end = Date.now() + ms;
   for (;;) { const t = getTxn(env.ctx, env.cashier, id); if (done(t.status)) return t; if (Date.now() > end) throw new Error(`still ${t.status}: ${t.message}`); await new Promise((r) => setTimeout(r, 20)); }
@@ -60,6 +70,7 @@ const paytmCloudInput: TerminalInput = { name: 'Counter Paytm', provider: 'paytm
 
 test('Paytm over the internet: signed requests, the customer pays by UPI, the bill is saved with the approval details, matched in the report, then reversed', async () => {
   const env = makeEnv();
+  const host = hostFor(env);
   let polls = 0;
   const srv = await fakeServer((path, b) => {
     if (path === '/ecr/payment/request') return { head: {}, body: { resultInfo: { resultStatus: 'A', resultCodeId: '0009', resultMsg: 'ACCEPTED_SUCCESS' } } };
@@ -92,7 +103,7 @@ test('Paytm over the internet: signed requests, the customer pays by UPI, the bi
     assert.match(bill.payments[0]!.reference!, /^Paytm Auth 7261A9 RRN 624615343002/);
     assert.equal(openChargeFor(env.ctx, env.cashier, cart.order.id), null);
     const day = new Date(env.clock.now() + 330 * 60_000).toISOString().slice(0, 10);
-    const rep = runReport(env.ctx, env.manager, 'card-machines', { from: day, to: day });
+    const rep = dailyMatch(host, env.ctx, day, day);
     assert.equal(rep.rows[0]!.match, 'Matched to bill');
     assert.equal(rep.rows[0]!.invoiceNo, bill.invoice.invoiceNo);
 
@@ -100,12 +111,13 @@ test('Paytm over the internet: signed requests, the customer pays by UPI, the bi
     const v = voidCharge(env.ctx, env.manager, rid(), t.id);
     const vd = await waitFor(env, v.id, (s) => s !== 'PENDING', 20000);
     assert.equal(vd.status, 'APPROVED');
-    assert.equal(runReport(env.ctx, env.manager, 'card-machines', { from: day, to: day }).rows[0]!.match, 'Reversed (void)');
+    assert.equal(dailyMatch(host, env.ctx, day, day).rows[0]!.match, 'Reversed (void)');
   } finally { await srv.close(); env.cleanup(); }
 });
 
 test('Pine Labs over the internet: upload, "uploaded" means still waiting, approved with card details; a waiting payment is cancelled from the POS', async () => {
   const env = makeEnv();
+  const host = hostFor(env);
   let polls = 0;
   const srv = await fakeServer((path, b) => {
     if (path.endsWith('/UploadBilledTransaction')) return { ResponseCode: 0, ResponseMessage: 'APPROVED', PlutusTransactionReferenceID: 701409 + (b.Amount % 7) };
@@ -167,6 +179,7 @@ test('Pine Labs by cable (PAD Controller, port 8082 frame): approved sale and vo
   assert.deepEqual([...frame('4001,TX1,100,,,,,,,')].slice(0, 6), [0x10, 0x00, 0x09, 0x97, 0x00, 19]);
   assert.deepEqual(csvFields('105,"7261A9","APPROVED"," ************2802"'), ['105', '7261A9', 'APPROVED', '************2802']);
   const env = makeEnv();
+  const host = hostFor(env);
   let decline = false;
   const ctl = await fakeController((csv) => csv.startsWith('4006,') ? 'APPROVED'
     : decline ? '105,"","DECLINED","","","","",0,0,"30000001",1,"CARD DECLINED"'
@@ -202,6 +215,7 @@ test('Paytm by USB cable (Windows): Paytm\'s library is called from a constant s
   const lib = mkdtempSync(join(tmpdir(), 'paytm-lib-'));
   writeFileSync(join(lib, 'PaytmPayments_v1.0.0.9.dll'), 'stand-in');
   const env = makeEnv();
+  const host = hostFor(env);
   const calls: Array<{ script: string; env: Record<string, string> }> = [];
   const runner = async (r: { script: string; env?: Record<string, string> }) => {
     calls.push({ script: r.script, env: r.env ?? {} });
@@ -225,7 +239,7 @@ test('Paytm by USB cable (Windows): Paytm\'s library is called from a constant s
     assert.ok(!sale.script.includes('TEST123') && !sale.script.includes('COM4'), 'no shop value is written into the script');
     const paid = completeCharge(env.ctx, env.cashier, rid(), t.id);
     assert.equal(paid.payments[0]!.mode, 'CARD');
-    assert.equal(await code(() => correctPaymentMode(env.ctx, env.manager, rid(), { paymentId: paid.payments[0]!.id, toMode: 'CASH', reason: 'try to change' })), 'MACHINE_PAYMENT', 'a machine payment\'s mode is not changed by hand');
+    assert.equal(await code(() => correctPaymentMode(env.ctx, env.manager, rid(), { paymentId: paid.payments[0]!.id, toMode: 'CASH', reason: 'try to change' })), 'PAYMENT_LOCKED', 'a machine payment\'s mode is not changed by hand');
     assert.match((await new PaytmWired(m.config as never, runner, 'linux').check()).message, /Windows POS/);
     assert.match((await new PaytmWired({ ...(m.config as object), libFolder: join(lib, 'missing') } as never, runner, 'win32').check()).message, /not in/);
   } finally { env.cleanup(); rmSync(lib, { recursive: true, force: true }); }
@@ -233,6 +247,7 @@ test('Paytm by USB cable (Windows): Paytm\'s library is called from a constant s
 
 test('safety: a cable machine that stops answering is UNCLEAR (never "failed"), a restart does the same, the bill cannot change after approval, owner-only setup, keys never shown', async () => {
   const env = makeEnv();
+  const host = hostFor(env);
   try {
     startShift(env);
     assert.equal(await code(() => saveTerminal(env.ctx, env.manager, rid(), null, paytmCloudInput)), 'FORBIDDEN');
@@ -270,9 +285,9 @@ test('safety: a cable machine that stops answering is UNCLEAR (never "failed"), 
     assert.equal(await code(() => completeCharge(env.ctx, env.cashier, rid(), t3.id)), 'AMOUNT_CHANGED');
     assert.equal(get<{ n: number }>(env.ctx.db, "SELECT count(*) n FROM invoice WHERE order_id = ?", cart3.order.id)!.n, 0);
     const day = new Date(env.clock.now() + 330 * 60_000).toISOString().slice(0, 10);
-    const rep = runReport(env.ctx, env.manager, 'card-machines', { from: day, to: day });
-    assert.equal(rep.summary.find((s) => s.label === 'Approved without a bill')!.value, 1);
-    assert.equal(rep.summary.find((s) => s.label === 'Unclear (check the machine)')!.value, 2);
-    assert.equal(all(env.ctx.db, 'SELECT 1 FROM terminal_txn').length, 3);
+    const rep = dailyMatch(host, env.ctx, day, day);
+    assert.equal(rep.noBill, 1);
+    assert.equal(rep.unclear, 2);
+    assert.equal(all(env.ctx.db, 'SELECT 1 FROM edc_txn').length, 3);
   } finally { env.cleanup(); }
 });

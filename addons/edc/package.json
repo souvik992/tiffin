@@ -1,0 +1,24 @@
+{
+  "name": "tiffin-pos-addon-edc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Payment machines add-on for Tiffin POS: Paytm and Pine Labs card machines (EDC), wireless or wired.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"test/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "build": "node scripts/build.mjs",
+    "installer": "node scripts/build.mjs && node scripts/installer.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^1.57.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.3"
+  }
+}

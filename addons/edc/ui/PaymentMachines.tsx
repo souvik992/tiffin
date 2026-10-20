@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Cable, CheckCircle2, CircleAlert, CreditCard, Pencil, Plus, Trash2, Wifi } from 'lucide-react';
-import { newKey } from '../lib/api.ts';
-import type { PaymentTerminal, SerialPortInfo, TerminalConnection, TerminalInput, TerminalProvider } from '../lib/api.ts';
-import { messageOf, useSession } from '../lib/session.tsx';
-import { Modal } from '../components/ui.tsx';
-import { onAndroid } from '../lib/android.ts';
+import { edc, host, onAndroid } from './host.ts';
+import type { Connection as TerminalConnection, Machine as PaymentTerminal, MachineInput as TerminalInput, MatchRow, Provider as TerminalProvider } from './host.ts';
+
+const { useSession, Modal, newKey, messageOf } = host;
+type SerialPortInfo = { port: string; name: string; bluetooth: boolean };
 
 const CONNECTION: Record<TerminalConnection, { label: string; hint: string }> = {
   cloud: { label: 'Wireless (internet)', hint: 'The POS sends the amount over the internet; the machine shows it. Needs internet at the counter.' },
@@ -18,15 +18,15 @@ export function PaymentMachines() {
   const [list, setList] = useState<PaymentTerminal[] | null>(null);
   const [editing, setEditing] = useState<PaymentTerminal | 'new' | null>(null);
   const [checks, setChecks] = useState<Record<string, { ok: boolean; message: string } | 'busy'>>({});
-  const load = useCallback(() => api.terminals().then(setList).catch(fail), [api, fail]);
+  const load = useCallback(() => edc(api).machines().then(setList).catch(fail), [api, fail]);
   useEffect(() => { void load(); }, [load]);
   const check = async (t: PaymentTerminal) => {
     setChecks((c) => ({ ...c, [t.id]: 'busy' }));
-    try { const r = await api.checkTerminal(t.id); setChecks((c) => ({ ...c, [t.id]: r })); } catch (e) { setChecks((c) => ({ ...c, [t.id]: { ok: false, message: messageOf(e) } })); }
+    try { const r = await edc(api).check(t.id); setChecks((c) => ({ ...c, [t.id]: r })); } catch (e) { setChecks((c) => ({ ...c, [t.id]: { ok: false, message: messageOf(e) } })); }
   };
   const remove = async (t: PaymentTerminal) => {
     if (!window.confirm(`Remove ${t.name}? Its past payments stay in the reports.`)) return;
-    try { await api.deleteTerminal(t.id, newKey()); notify('success', `${t.name} removed.`); await load(); } catch (e) { fail(e); }
+    try { await edc(api).remove(t.id, newKey()); notify('success', `${t.name} removed.`); await load(); } catch (e) { fail(e); }
   };
   return (
     <>
@@ -57,7 +57,7 @@ export function PaymentMachines() {
           })}
         </ul>
       )}
-      <p className="mt-4 max-w-3xl text-xs text-muted-foreground">Check the day's machine payments against bills in Reports &gt; Card machine payments. Payments are never taken twice: anything unclear is shown as "check the machine".</p>
+      <DailyMatch />
       {editing && <MachineDialog machine={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await load(); }} />}
     </>
   );
@@ -115,7 +115,7 @@ function MachineDialog({ machine, onClose, onSaved }: { machine: PaymentTerminal
     for (const k of fields) { const v = (cfg[k] ?? '').trim(); if (v) config[k] = k === 'port' || k === 'baud' ? Number(v) : v; }
     const input: TerminalInput = { name: name.trim(), provider, connection, modes: pineCable ? ['CARD'] : modes, config, secret: secret.trim() || null, isDefault, active };
     setBusy(true);
-    try { await api.saveTerminal(machine?.id ?? null, input, key.current); notify('success', `${input.name} saved. Use Test to check the connection.`); await onSaved(); } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(false); }
+    try { await edc(api).save(machine?.id ?? null, input, key.current); notify('success', `${input.name} saved. Use Test to check the connection.`); await onSaved(); } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(false); }
   };
 
   return (
@@ -202,5 +202,41 @@ function MachineDialog({ machine, onClose, onSaved }: { machine: PaymentTerminal
         <button className="btn-primary w-full" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </Modal>
+  );
+}
+
+const today = () => new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+const timeOf = (ms: number) => new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+
+/** The daily check: every amount sent to a machine, matched with bills. "Approved, no bill" and "unclear" need a look. */
+function DailyMatch() {
+  const { api, fail } = useSession();
+  const [day, setDay] = useState(today);
+  const [r, setR] = useState<{ rows: MatchRow[]; approvedTotal: number; noBill: number; unclear: number } | null>(null);
+  useEffect(() => { edc(api).report(day, day).then(setR).catch(fail); }, [api, fail, day]);
+  return (
+    <section className="mt-6 max-w-3xl rounded-2xl border border-border bg-card p-4" aria-label="Daily match">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <h3 className="font-semibold">Daily match</h3>
+        <input type="date" className="field h-9" value={day} max={today()} onChange={(e) => setDay(e.target.value || today())} aria-label="Day" />
+        {r && <span className="text-sm text-muted-foreground">Approved on machines: <b className="text-foreground">{host.money.formatPaise(r.approvedTotal)}</b></span>}
+      </div>
+      {r && (r.noBill > 0 || r.unclear > 0) && <p role="alert" className="mb-2 text-sm text-destructive">{r.noBill > 0 ? `${r.noBill} approved without a bill. ` : ''}{r.unclear > 0 ? `${r.unclear} unclear: check the machine's slips.` : ''}</p>}
+      {!r ? <p className="text-sm text-muted-foreground">Loading…</p> : r.rows.length === 0 ? <p className="text-sm text-muted-foreground">No machine payments on this day.</p> : (
+        <table className="table">
+          <thead className="bg-muted text-left"><tr><th className="p-2">Time</th><th className="p-2">Machine</th><th className="p-2">Payment</th><th className="p-2">Result</th><th className="p-2 text-right">Amount</th><th className="p-2">Bill</th><th className="p-2">Match</th></tr></thead>
+          <tbody>
+            {r.rows.map((x, i) => (
+              <tr key={i} className="border-t border-border">
+                <td className="p-2 tabular-nums">{timeOf(x.at)}</td><td className="p-2">{x.machine}</td><td className="p-2">{x.what}</td>
+                <td className="p-2" title={x.message}>{x.status}</td><td className="p-2 text-right tabular-nums">{x.amount ? host.money.formatPaise(x.amount) : ''}</td>
+                <td className="p-2">{x.invoiceNo}</td><td className={`p-2 ${x.match.startsWith('APPROVED, NO BILL') ? 'font-semibold text-destructive' : ''}`}>{x.match}{x.approval ? <span className="block text-xs text-muted-foreground">{x.approval}</span> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">Payments are never taken twice: anything unclear is shown as "check the machine".</p>
+    </section>
   );
 }

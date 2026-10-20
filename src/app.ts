@@ -8,7 +8,6 @@ import { runBackup } from './services/backup.ts';
 import { scheduleCloudBackups } from './services/cloudBackup.ts';
 import { applyPendingRestore } from './services/restore.ts';
 import { EMPTY_ADDONS, loadAddons } from './addons/host.ts';
-import { resumeCharges } from './services/terminals/service.ts';
 
 export interface BackendOptions {
   dataDir: string;
@@ -66,7 +65,6 @@ async function boot(o: BackendOptions, wantPort: number, restart: () => void): P
   try { addons = await loadAddons(ctx, { dir: o.addonsDir, posVersion: o.posVersion ?? '0.0.0-dev', trustedKeys: o.trustedAddonKeys }); }
   catch (e) { ctx.logger.error('add-ons could not be loaded; the POS runs without them', String(e)); }
   queue.start(1000);
-  resumeCharges(ctx); // payment machines that were waiting when the POS stopped
   const stopBackups = o.scheduleBackups === false ? () => {} : scheduleBackups(ctx);
   const stopCloud = o.scheduleBackups === false ? () => {} : scheduleCloudBackups(ctx);
   const server = createServer(ctx, { queue, secret: o.secret, addons, restart });

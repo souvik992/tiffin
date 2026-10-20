@@ -22,7 +22,8 @@ test('the signed package (npm run build) loads in a real POS with its built-in t
     const owner = (await call('GET', '/api/login-users')).json[0];
     const token = (await call('POST', '/api/auth/login', { body: { userId: owner.id, pin: '1234' } })).json.token as string;
     const list = (await call('GET', '/api/addons', { token })).json;
-    assert.deepEqual(list.map((a: { id: string; status: string; reason: string | null }) => [a.id, a.status, a.reason]), [['ods', 'active', null]]);
+    const ods = list.find((a: { id: string }) => a.id === 'ods'); // other add-ons may be built next to it
+    assert.deepEqual([ods.id, ods.status, ods.reason], ['ods', 'active', null]);
     assert.match((await call('GET', '/api/addons/ods/ui.js')).text, /__POS__/);
     assert.equal((await call('GET', '/api/addons/ods/config', { token })).json.mode, 'offline');
     assert.equal((await call('GET', '/api/addons/ods/serviceability', { token })).json.zones.length, 2);

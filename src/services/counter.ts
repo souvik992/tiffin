@@ -9,6 +9,7 @@ import type { Override } from './auth.ts';
 import { appendJournal } from './journal.ts';
 import { openShiftRow } from './orders.ts';
 import { zReport } from './shifts.ts';
+import { paymentGuardProblem } from './paymentGuards.ts';
 import { insertCorrection } from './invoiceStore.ts';
 import type { PaymentCorrectionRecord } from './invoiceStore.ts';
 import { buildTextReport } from './printing/receipt.ts';
@@ -109,9 +110,8 @@ export function correctPaymentMode(ctx: Ctx, actor: Actor, requestId: string, in
     if (p.status !== 'ISSUED') throw new AppError('VALIDATION', 'This bill is cancelled.', 409);
     const shift = openShiftRow(ctx);
     if (!shift || p.shift_id !== shift.id) throw new AppError('SHIFT_CLOSED', 'Only bills of the shift that is still open can be changed: a closed shift\'s cash count is final.', 409);
-    if (get(ctx.db, "SELECT 1 FROM terminal_txn WHERE invoice_id = ? AND kind = 'SALE' AND status = 'APPROVED'", p.invoice_id)) {
-      throw new AppError('MACHINE_PAYMENT', 'This bill was paid on a payment machine; the machine decides how it was paid. Reverse it on the machine instead.', 409);
-    }
+    const guarded = paymentGuardProblem(ctx, p.invoice_id); // e.g. paid on a payment machine (add-on)
+    if (guarded) throw new AppError('PAYMENT_LOCKED', guarded, 409);
     if (!MODES.includes(input.toMode)) throw new AppError('VALIDATION', 'Choose a payment mode.');
     if (input.toMode === p.mode) throw new AppError('VALIDATION', `This payment is already ${p.mode}.`);
     const reason = (input.reason ?? '').trim();

@@ -328,37 +328,7 @@ const purchases: Def = {
   },
 };
 
-const TXN_STATUS: Record<string, string> = { APPROVED: 'Approved', FAILED: 'Not approved', CANCELLED: 'Cancelled', PENDING: 'Waiting', UNKNOWN: 'Unclear: check the machine' };
-const machines: Def = {
-  key: 'card-machines', title: 'Card machine payments', group: 'Controls',
-  description: 'Every amount sent to a payment machine and its result, matched with bills: approved payments without a bill need a look.',
-  build(ctx, b) {
-    const rows = all<Row & { status: string; kind: string; result_json: string | null; invoiceNo: string | null; voided: number }>(ctx.db, `SELECT x.created_at AS at, t.name AS machine, x.kind, x.status, x.mode, x.amount,
-        i.invoice_no AS invoiceNo, x.result_json, x.message,
-        (SELECT count(*) FROM terminal_txn v WHERE v.original_txn_id = x.id AND v.status = 'APPROVED') AS voided
-      FROM terminal_txn x JOIN payment_terminal t ON t.id = x.terminal_id LEFT JOIN invoice i ON i.id = x.invoice_id
-      WHERE x.created_at >= ? AND x.created_at < ? ORDER BY x.created_at`, b.fromMs, b.toMs);
-    const out = rows.map((r) => {
-      const res = r.result_json ? JSON.parse(r.result_json) as Record<string, string> : {};
-      const approved = r.status === 'APPROVED';
-      const match = r.kind === 'VOID' ? (approved ? 'Reversed on the machine' : '') : !approved ? '' : r.voided ? 'Reversed (void)' : r.invoiceNo ? 'Matched to bill' : 'APPROVED, NO BILL: check';
-      return { at: r.at, machine: r.machine, what: r.kind === 'VOID' ? 'Reverse (void)' : r.mode === 'UPI' ? 'UPI' : r.mode === 'CARD' ? 'Card' : 'Card / UPI',
-        status: TXN_STATUS[r.status] ?? r.status, amount: approved ? (r.kind === 'VOID' ? -n(r.amount) : n(r.amount)) : 0, invoiceNo: r.invoiceNo ?? '',
-        approval: [res.approvalCode, res.rrn ? `RRN ${res.rrn}` : '', res.cardLast4 ? `*${res.cardLast4}` : ''].filter(Boolean).join(' '), match };
-    });
-    const columns: Column[] = [{ key: 'at', label: 'Time', type: 'datetime' }, { key: 'machine', label: 'Machine', type: 'text' }, { key: 'what', label: 'Payment', type: 'text' },
-      { key: 'status', label: 'Result', type: 'text' }, { key: 'amount', label: 'Approved amount', type: 'money' }, { key: 'invoiceNo', label: 'Bill', type: 'text' },
-      { key: 'approval', label: 'Approval / RRN / card', type: 'text' }, { key: 'match', label: 'Match', type: 'text' }];
-    const noBill = out.filter((r) => r.match.startsWith('APPROVED, NO BILL'));
-    const unclear = out.filter((r) => r.status.startsWith('Unclear'));
-    return { columns, rows: out, totals: totalsOf(columns, out), summary: [
-      { label: 'Approved on machines', value: out.reduce((s, r) => s + r.amount, 0), type: 'money' },
-      { label: 'Approved without a bill', value: noBill.length, type: 'int' },
-      { label: 'Unclear (check the machine)', value: unclear.length, type: 'int' },
-    ] };
-  },
-};
-const DEFS: Def[] = [salesSummary, payments, hourly, channels, staff, discounts, items, categories, gstRates, hsn, bills, cancellations, shifts, machines, stock, stockMovements, purchases];
+const DEFS: Def[] = [salesSummary, payments, hourly, channels, staff, discounts, items, categories, gstRates, hsn, bills, cancellations, shifts, stock, stockMovements, purchases];
 export const REPORTS = DEFS.map(({ key, title, group, description }) => ({ key, title, group, description, usesDates: key !== 'stock' }));
 
 function bounds(r: Range): Bounds {

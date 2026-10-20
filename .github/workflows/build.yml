@@ -42,6 +42,18 @@ jobs:
           npm test
       - name: Order hub
         run: node --test --test-concurrency=1 "hub/test/*.test.ts"
+      - name: ODS add-on
+        working-directory: addons/ods
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Payment machines add-on
+        working-directory: addons/edc
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
 
   windows:
     name: Windows installer

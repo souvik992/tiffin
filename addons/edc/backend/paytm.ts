@@ -6,8 +6,7 @@
 //    PowerShell script (like printing): every value travels in environment variables, never on the command line.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { runPowerShell } from '../printing/powershell.ts';
-import type { PsRunner } from '../printing/powershell.ts';
+import type { PsRunner } from '../../../src/services/printing/powershell.ts';
 import { paytmChecksum } from './paytmChecksum.ts';
 import { istStamp, last4, paidByOf, TerminalError } from './types.ts';
 import type { Connector, SaleRequest, TerminalResult } from './types.ts';
@@ -139,7 +138,7 @@ function fromWired(j: Record<string, unknown>): TerminalResult {
 
 export class PaytmWired implements Connector {
   private cfg: PaytmWiredConfig; private run: PsRunner; private platform: string;
-  constructor(cfg: PaytmWiredConfig, run: PsRunner = runPowerShell, platform: string = process.platform) { this.cfg = cfg; this.run = run; this.platform = platform; }
+  constructor(cfg: PaytmWiredConfig, run: PsRunner, platform: string = process.platform) { this.cfg = cfg; this.run = run; this.platform = platform; }
 
   private async call(op: 'SALE' | 'STATUS' | 'VOID' | 'CHECK', req?: SaleRequest, timeoutMs = 30_000): Promise<Record<string, unknown>> {
     if (this.platform !== 'win32') throw new TerminalError('A Paytm machine on a USB cable works with the Windows POS. On Android use the internet connection.');
