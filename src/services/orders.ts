@@ -15,6 +15,7 @@ import { istDay } from '../core/numbering.ts';
 import { mulDivRound } from '../core/money.ts';
 import { couponById, couponProblem, findCouponByCode } from './coupons.ts';
 import { camel } from './camel.ts';
+import { kotStatus, queuePendingKot } from './printing/kot.ts';
 
 export interface OrderRow {
   id: string; device_id: string; shift_id: string | null; channel: string; external_id: string | null; token_no: number | null;
@@ -119,6 +120,8 @@ export function getCart(ctx: Ctx, orderId: string) {
       grossTotal: calc.grossTotal, discountTotal: calc.discountTotal, taxableTotal: calc.taxableTotal, cgst: calc.cgst, sgst: calc.sgst,
       igst: calc.igst, cess: calc.cess, roundOff: calc.roundOff, grandTotal: calc.grandTotal, itemCount: lines.length,
     },
+    /** Kitchen tickets: how they print, tickets sent so far, lines not sent yet. */
+    kot: kotStatus(ctx, orderId),
   };
 }
 
@@ -395,6 +398,7 @@ export function cancelOrder(ctx: Ctx, actor: Actor, requestId: string, orderId: 
     const o = getOrderRow(ctx, orderId);
     assertOpen(o);
     run(ctx.db, "UPDATE sale_order SET status = 'CANCELLED', updated_at = ? WHERE id = ?", ctx.clock.now(), orderId);
+    queuePendingKot(ctx, orderId, actor.name); // items already with the kitchen print as CANCEL
     audit(ctx, actor.userId, 'order.cancel', 'order', orderId);
     return { id: orderId, status: 'CANCELLED' as const };
   });

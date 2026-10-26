@@ -15,7 +15,7 @@ React UI (or an Electron host can call the service layer directly).
 npm install            # dev dependencies only (typecheck)
 npm run seed           # demo data: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111 (mobile/PIN)  (DEVELOPMENT ONLY)
 npm start              # http://127.0.0.1:4800   (POS_DATA_DIR, POS_PORT to override)
-npm test               # 206 tests (1 opt-in), about 60 seconds on Windows
+npm test               # 217 tests (1 opt-in), about 60 seconds on Windows
 npm run receipt -- <file.tiffinreceipt> [--width 58]   # check a shop's bill design and show it on sample paper
 npm run restore        # list backups; `npm run restore -- <file>` restores one (POS stopped)
 npm run typecheck      # strict TypeScript
@@ -38,7 +38,7 @@ src/services/   commands: auth, catalog, orders, invoices, shifts, reports, jour
 src/http/       local API: routing, strict validation, security checks
 src/app.ts      startBackend(): used by `npm start` (src/main.ts) and the desktop app
 src/startup.ts  integrity check, queue recovery, journal repair/compaction, backup schedule
-test/           206 tests, including child-process kill tests and multi-process concurrency
+test/           217 tests, including child-process kill tests and multi-process concurrency
 scripts/bench.ts
 addons/         separately installed signed modules (docs/ADDONS.md): ods (online orders, serviceability, live ODS)
 hub/            the online order hub (hub/README.md)

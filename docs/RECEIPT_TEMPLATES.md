@@ -39,7 +39,7 @@ The design is stored in the shop's database, so it is included in backups and re
 * run code or calculate anything. Every amount is the backend's own figure, formatted for print.
 * remove the safety marks. `doc-title` always prints `TAX INVOICE` or `CREDIT NOTE`, `SAMPLE - NOT A BILL` on samples, and `*** CANCELLED ***` and `*** DUPLICATE ***` when they apply.
 * skip the paper feed, cut and cash-drawer kick; the POS adds those itself.
-* change the kitchen ticket (KOT). Designs apply to customer bills only.
+* change the kitchen ticket (KOT). Kitchen tickets have their own designs (.tiffinkot): see docs/KOT_TEMPLATES.md.
 
 **A design must include everything a GST bill needs, or the upload is refused:**
 * a `doc-title` block

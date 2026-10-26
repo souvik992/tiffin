@@ -1,26 +1,36 @@
 // The online-order buzzer: rings on every screen (not only the ODS) while an order waits to be accepted, like an order
-// tablet. One live feed for the whole app, started by the side-menu status dot (index.tsx). Sound on/off is shared
+// tablet. In the automatic accept mode an order never waits, so a new one rings twice and shows a banner for a while. One live feed for the whole app, started by the side-menu status dot (index.tsx). Sound on/off is shared
 // with the ODS screen's switch (localStorage "ods.sound").
 import { useSyncExternalStore } from 'react';
 import { BASE, host } from './host.ts';
+import { arrivals, isWaiting } from './arrivals.ts';
+import type { FeedOrder } from './arrivals.ts';
 
 export interface WaitingOrder { id: string; number: string }
-interface Snapshot { waiting: WaitingOrder[]; silenced: boolean; soundOn: boolean; /** Connected to the order hub (null until the feed answers). */ connected: boolean | null }
+interface Snapshot {
+  waiting: WaitingOrder[]; silenced: boolean; soundOn: boolean; /** Connected to the order hub (null until the feed answers). */ connected: boolean | null;
+  /** New orders accepted automatically just now (shown for RECENT_MS). */
+  recent: string[];
+}
 
 const RING_EVERY_MS = 3000;
+const RECENT_MS = 20_000;
 let started = false;
 let waiting: WaitingOrder[] = [];
 let known = new Set<string>();
 const silencedIds = new Set<string>();
 let connected: boolean | null = null;
-let snapshot: Snapshot = { waiting: [], silenced: false, soundOn: true, connected: null };
+let seen: Set<string> | null = null; // every order on the feed at the last update (null: none yet)
+let recent: string[] = [];
+let recentTimer: ReturnType<typeof setTimeout> | null = null;
+let snapshot: Snapshot = { waiting: [], silenced: false, soundOn: true, connected: null, recent: [] };
 const subs = new Set<() => void>();
 let ctx: AudioContext | null = null;
 
 export const soundOn = (): boolean => { try { return localStorage.getItem('ods.sound') !== 'off'; } catch { return true; } };
 const loud = () => waiting.some((w) => !silencedIds.has(w.id));
 function emit() {
-  snapshot = { waiting, silenced: waiting.length > 0 && !loud(), soundOn: soundOn(), connected };
+  snapshot = { waiting, silenced: waiting.length > 0 && !loud(), soundOn: soundOn(), connected, recent };
   subs.forEach((f) => f());
 }
 
@@ -66,8 +76,17 @@ export function startBuzzer(): void {
   host.stream(`${BASE}/events`, (type, data) => {
     if (type !== 'ods') return;
     connected = (data as { link?: { state?: string } }).link?.state === 'connected';
-    const orders = (data as { orders?: Array<{ id: string; number: string; state: string; billInvoiceId: string | null }> }).orders ?? [];
-    waiting = orders.filter((o) => (o.state === 'SENT_TO_STORE' || o.state === 'RECEIVED') && !o.billInvoiceId).map((o) => ({ id: o.id, number: o.number }));
+    const orders = (data as { orders?: FeedOrder[] }).orders ?? [];
+    waiting = orders.filter(isWaiting).map((o) => ({ id: o.id, number: o.number }));
+    const news = arrivals(seen, orders);
+    seen = news.ids;
+    if (news.autoAccepted.length) {
+      // accepted automatically: ring twice and show it for a while (nothing for staff to do but make it)
+      recent = [...recent, ...news.autoAccepted.map((o) => o.number)].slice(-5);
+      if (recentTimer) clearTimeout(recentTimer);
+      recentTimer = setTimeout(() => { recent = []; emit(); }, RECENT_MS);
+      if (soundOn()) { ringOnce(); setTimeout(ringOnce, 1300); }
+    }
     const ids = new Set(waiting.map((w) => w.id));
     for (const id of [...silencedIds]) if (!ids.has(id)) silencedIds.delete(id);
     const arrived = waiting.some((w) => !known.has(w.id));
@@ -80,6 +99,9 @@ export function startBuzzer(): void {
 
 /** Stops the ringing for the orders waiting now; a new order rings again. */
 export function silence(): void { waiting.forEach((w) => silencedIds.add(w.id)); emit(); }
+
+/** Hides the "accepted automatically" banner. */
+export function dismissRecent(): void { recent = []; if (recentTimer) clearTimeout(recentTimer); emit(); }
 
 export function setSoundOn(on: boolean): void {
   try { localStorage.setItem('ods.sound', on ? 'on' : 'off'); } catch { /* ignore */ }

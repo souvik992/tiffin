@@ -3,6 +3,8 @@ import { getCart, getOrderRow } from '../services/orders.ts';
 import { finalizeInvoice } from '../services/invoices.ts';
 import { requireApproval } from '../services/auth.ts';
 import { runPowerShell } from '../services/printing/powershell.ts';
+import { printOrReprintInvoice } from '../services/printing/jobs.ts';
+import { printOrReprintKot } from '../services/printing/kot.ts';
 import { addPaymentGuard } from '../services/paymentGuards.ts';
 import type { PaymentGuard } from '../services/paymentGuards.ts';
 import { builtinModules, createRequire } from 'node:module';
@@ -59,6 +61,11 @@ export interface HostApi {
     finalize?: typeof finalizeInvoice;
     /** POS 0.3.8: a reason against changing a bill's payment mode by hand (Orders > Change), or null. */
     paymentGuard?: (g: PaymentGuard) => void;
+  };
+  /** POS 0.3.11: a bill's print buttons. First print without approval; afterwards a reprint, which a manager approves (override). */
+  printing?: {
+    bill: (actor: Actor, requestId: string, invoiceId: string, override?: { userId: string; pin: string }) => { queued: number; copyNo: number };
+    kot: (actor: Actor, requestId: string, invoiceId: string, override?: { userId: string; pin: string }) => { queued: number; kotNo: number | null; warnings: string[] };
   };
   /** POS 0.3.8: a manager's approval (or the actor's own permission), as for discounts and cancellations. */
   requireApproval?: typeof requireApproval;
@@ -172,6 +179,10 @@ export function makeHost(ctx: Ctx, id: string, posVersion: string, sink: { route
     },
     requireApproval: (c, actor, perm, override, insideTx) => requireApproval(c, actor, perm, override, insideTx),
     powershell: runPowerShell,
+    printing: {
+      bill: (actor, requestId, invoiceId, override) => printOrReprintInvoice(ctx, actor, requestId, { invoiceId }, (perm) => requireApproval(ctx, actor, perm, override)),
+      kot: (actor, requestId, invoiceId, override) => printOrReprintKot(ctx, actor, requestId, { invoiceId }, (perm) => requireApproval(ctx, actor, perm, override)),
+    },
   };
 }
 

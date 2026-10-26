@@ -1,7 +1,7 @@
 // ODS add-on: registers its screens with the POS (window.__POS__.register).
 import { BellRing, BellOff, Globe, MapPinned, MonitorPlay } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { silence, startBuzzer, useBuzzer } from './buzzer.ts';
+import { dismissRecent, silence, startBuzzer, useBuzzer } from './buzzer.ts';
 import { host } from './host.ts';
 import { onlineEnabled, useOnlineConfig } from './online.ts';
 import { OnlineSettings } from './OnlineSettings.tsx';
@@ -38,12 +38,27 @@ function StatusDot() {
   );
 }
 
-/** On any screen but the ODS: a banner while online orders wait to be accepted (the buzzer rings meanwhile). */
+/** On any screen but the ODS: a banner while online orders wait to be accepted (the buzzer rings meanwhile), or for a
+ * while after new ones were accepted automatically. */
 function OrderAlert() {
-  const { waiting, silenced, soundOn } = useBuzzer();
+  const { waiting, silenced, soundOn, recent } = useBuzzer();
   const [route, setRoute] = useState(() => window.location.hash);
   useEffect(() => { const f = () => setRoute(window.location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
-  if (!waiting.length || /^#\/?ods/.test(route)) return null;
+  if (/^#\/?ods/.test(route)) return null;
+  if (!waiting.length && recent.length) {
+    return (
+      <div role="status" className="fixed left-1/2 top-3 z-[2000] flex w-[min(92vw,560px)] -translate-x-1/2 items-center gap-3 rounded-2xl border-2 border-primary bg-card p-3 shadow-2xl">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white"><BellRing className="h-6 w-6" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">New online order{recent.length > 1 ? 's' : ''} {recent.join(', ')}</p>
+          <p className="text-xs text-muted-foreground">Accepted automatically: the bill and kitchen ticket are printing.{!soundOn ? ' Sound is off on the ODS.' : ''}</p>
+        </div>
+        <button className="btn-ghost h-10 shrink-0 px-3" onClick={dismissRecent}>OK</button>
+        <a className="btn-primary h-10 shrink-0 px-4" href="#/ods" onClick={dismissRecent}>Open ODS</a>
+      </div>
+    );
+  }
+  if (!waiting.length) return null;
   const first = waiting[0]!;
   return (
     <div role="alert" className="fixed left-1/2 top-3 z-[2000] flex w-[min(92vw,560px)] -translate-x-1/2 items-center gap-3 rounded-2xl border-2 border-primary bg-card p-3 shadow-2xl">

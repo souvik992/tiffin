@@ -60,7 +60,7 @@ test('Android printers: addresses are checked when saved; found printers appear 
   const env = makeEnv(); try {
     const code = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as AppError).code; } return 'NO_ERROR'; };
     assert.equal(code(() => createPrinter(env.ctx, env.owner, rid(), { name: 'X', transport: 'android', address: 'bt:zz' })), 'VALIDATION');
-    const p = createPrinter(env.ctx, env.owner, rid(), { name: 'Kitchen BT', transport: 'android', address: 'bt:AA:BB:CC:DD:EE:FF', stations: ['kitchen'] });
+    const p = createPrinter(env.ctx, env.owner, rid(), { name: 'Kitchen BT', transport: 'android', address: 'bt:AA:BB:CC:DD:EE:FF', stations: [get<{ id: string }>(env.ctx.db, "SELECT id FROM prep_station WHERE name = 'Kitchen'")!.id] });
     assert.ok(p);
     const scan = async () => ({ usb: [], windows: [], android: [
       { address: 'bt:00:11:22:33:44:55', name: 'Built-in printer', detail: 'Bluetooth InnerPrinter', builtin: true },

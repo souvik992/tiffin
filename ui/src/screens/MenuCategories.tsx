@@ -1,21 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
-import type { Catalog, Category } from '../lib/api.ts';
+import type { Catalog, Category, PrepStation } from '../lib/api.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal } from '../components/ui.tsx';
 
-/** Categories: the tabs on the billing screen, in this order. The kitchen station decides which printer gets the KOT. */
+/** Categories: the tabs on the billing screen, in this order. The prep station decides which kitchen ticket its items go on. */
 export function MenuCategories({ catalog, canEdit, reload }: { catalog: Catalog; canEdit: boolean; reload: () => Promise<void> }) {
   const { api, notify, fail } = useSession();
   const [editing, setEditing] = useState<Category | 'new' | null>(null);
   const [deleting, setDeleting] = useState<Category | null>(null);
   const [moving, setMoving] = useState(false);
-  const [stations, setStations] = useState<string[]>([]);
-  useEffect(() => {
-    api.printers().then((ps) => setStations([...new Set([...ps.flatMap((p) => p.stations), ...catalog.categories.map((c) => c.kitchenStation).filter((s): s is string => !!s)])].sort()))
-      .catch(() => setStations([...new Set(catalog.categories.map((c) => c.kitchenStation).filter((s): s is string => !!s))]));
-  }, [api, catalog.categories]);
+  const [stations, setStations] = useState<PrepStation[]>([]);
+  useEffect(() => { api.prepStations().then(setStations).catch(() => setStations([])); }, [api, catalog.categories]);
+  const stationName = (id: string | null) => stations.find((s) => s.id === id)?.name ?? null;
 
   const cats = catalog.categories;
   const move = async (index: number, dir: -1 | 1) => {
@@ -38,7 +36,7 @@ export function MenuCategories({ catalog, canEdit, reload }: { catalog: Catalog;
       </div>
       <table className="table">
         <thead className="bg-muted text-left">
-          <tr>{canEdit && <th className="w-24 p-3">Order</th>}<th className={canEdit ? '' : 'p-3'}>Category</th><th>Kitchen station</th><th className="text-right">Items</th><th className="w-24" /></tr>
+          <tr>{canEdit && <th className="w-24 p-3">Order</th>}<th className={canEdit ? '' : 'p-3'}>Category</th><th>Prep station</th><th className="text-right">Items</th><th className="w-24" /></tr>
         </thead>
         <tbody>
           {cats.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">No categories yet.</td></tr>}
@@ -53,7 +51,7 @@ export function MenuCategories({ catalog, canEdit, reload }: { catalog: Catalog;
                 </td>
               )}
               <td className={`font-medium ${canEdit ? '' : 'p-3'}`}>{c.name}</td>
-              <td className={c.kitchenStation ? '' : 'text-muted-foreground'}>{c.kitchenStation ?? 'None'}</td>
+              <td className={stationName(c.prepStationId) ? '' : 'text-muted-foreground'}>{stationName(c.prepStationId) ?? 'None'}</td>
               <td className="text-right tabular-nums">{c.itemCount}</td>
               <td className="pr-2">
                 {canEdit && (
@@ -82,17 +80,17 @@ export function MenuCategories({ catalog, canEdit, reload }: { catalog: Catalog;
   );
 }
 
-function CategoryDialog({ category, stations, onClose, onSaved }: { category: Category | null; stations: string[]; onClose: () => void; onSaved: () => Promise<void> }) {
+function CategoryDialog({ category, stations, onClose, onSaved }: { category: Category | null; stations: PrepStation[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const { api, notify } = useSession();
   const key = useRef(newKey());
   const [name, setName] = useState(category?.name ?? '');
-  const [station, setStation] = useState(category?.kitchenStation ?? stations[0] ?? 'kitchen');
+  const [station, setStation] = useState(category ? category.prepStationId ?? '' : stations[0]?.id ?? '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const save = async () => {
     if (!name.trim()) return setError('Enter the category name.');
     setBusy(true); setError('');
-    const input = { name: name.trim(), kitchenStation: station.trim() || null };
+    const input = { name: name.trim(), prepStationId: station || null };
     try {
       if (category) await api.updateCategory(category.id, input, key.current); else await api.createCategory(input, key.current);
       notify('success', category ? `${input.name} updated.` : `${input.name} added.`);
@@ -104,10 +102,12 @@ function CategoryDialog({ category, stations, onClose, onSaved }: { category: Ca
       <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Name</span>
         <input className="field" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} autoFocus />
       </label>
-      <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Kitchen station</span>
-        <input className="field" list="kitchen-stations" maxLength={30} placeholder="For example kitchen or bar" value={station} onChange={(e) => setStation(e.target.value)} />
-        <datalist id="kitchen-stations">{stations.map((s) => <option key={s} value={s} />)}</datalist>
-        <span className="text-xs text-muted-foreground">Items in this category print a kitchen ticket (KOT) on printers set to this station. If left empty, only printers set to all stations print them.</span>
+      <label className="mt-3 flex flex-col gap-1 text-sm"><span className="font-medium">Prep station</span>
+        <select className="field" value={station} onChange={(e) => setStation(e.target.value)} aria-label="Prep station">
+          <option value="">None</option>
+          {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <span className="text-xs text-muted-foreground">Its items go on this station's kitchen ticket (KOT). An item can have its own station (Prep stations tab). None: only printers set to all stations print them.</span>
       </label>
       {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
       <div className="mt-5 flex gap-2">

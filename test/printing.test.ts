@@ -126,7 +126,7 @@ test('KOT: routed by category station, with token, modifiers and no prices', () 
     const r = mixedBill(env);
     const kitchen = all<{ payload: Uint8Array }>(env.ctx.db, "SELECT payload FROM print_job WHERE kind='KOT' ORDER BY created_at").map((j) => parseEscPos(j.payload).text);
     assert.equal(kitchen.length, 2);
-    const k = kitchen.find((t) => t.includes('KOT - kitchen'))!, b = kitchen.find((t) => t.includes('KOT - bar'))!;
+    const k = kitchen.find((t) => t.includes('Kitchen'))!, b = kitchen.find((t) => t.includes('Bar'))!; // the prep station, big, on its ticket
     assert.ok(k.includes('TOKEN 1') && k.includes('1 x Cheese Burger') && k.includes('+ Extra cheese'));
     assert.ok(b.includes('2 x Cola 300ml') && !b.includes('Cheese Burger'));
     assert.ok(!/\d+\.\d\d/.test(k), 'kitchen tickets carry no prices');

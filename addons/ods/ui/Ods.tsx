@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-react';
+import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff, Printer as PrinterIcon } from 'lucide-react';
 import { BASE, host } from './host.ts';
 import { setSoundOn } from './buzzer.ts';
 import { ChannelBadge } from './channels.tsx';
@@ -103,6 +103,11 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
   const isNew = (o.state === 'SENT_TO_STORE' || o.state === 'RECEIVED') && !o.billInvoiceId;
   const left = d.acceptBy ? Math.max(0, Math.round((d.acceptBy - Date.now()) / 1000)) : null;
   const act = async (fn: () => Promise<unknown>, ok?: string) => { setBusy(true); try { await fn(); if (ok) notify('success', ok); } catch (e) { fail(e); } finally { setBusy(false); } };
+  // Bill and KOT: the first print needs no approval; a reprint asks a manager (withApproval)
+  const print = (what: 'bill' | 'kot') => {
+    const key = newKey();
+    return act(() => withApproval(what === 'bill' ? `Printing the bill of ${o.number} again` : `Printing the kitchen tickets of ${o.number} again`, (override) => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/print-${what}`, override ? { override } : {}, key)), what === 'bill' ? `Bill of ${o.number} sent to the printer.` : `Kitchen tickets of ${o.number} sent to the printer.`);
+  };
   const step = (to: OrderState, extra: Record<string, unknown> = {}) => act(() => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/step`, { to, ...extra }, newKey()));
   const accept = (acceptPriceChange = false) => act(() => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/accept`, { prepMinutes: prep, acceptPriceChange }, newKey()), `${o.number} accepted: bill and kitchen ticket sent to the printer.`);
 
@@ -150,6 +155,12 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
         {o.state === 'OUT_FOR_DELIVERY' && <button className="btn-primary h-9" disabled={busy} onClick={() => void step('DELIVERED')}>Delivered</button>}
         {['ACCEPTED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'].includes(o.state) && <button className="btn-ghost h-9" disabled={busy} onClick={() => setDialog('cancel')}>Cancel</button>}
       </div>
+      {o.billInvoiceId && !['CANCELLED', 'REJECTED', 'AUTO_REJECTED'].includes(o.state) && (
+        <div className="mt-2 flex flex-wrap gap-2" aria-label={`Print ${o.number}`}>
+          <button className="btn-ghost h-8 text-xs" disabled={busy} onClick={() => void print('bill')}><PrinterIcon className="h-3.5 w-3.5" />Bill</button>
+          <button className="btn-ghost h-8 text-xs" disabled={busy} onClick={() => void print('kot')}><ChefHat className="h-3.5 w-3.5" />KOT</button>
+        </div>
+      )}
 
       {dialog === 'reject' && <ReasonDialog title={`Reject ${o.number}?`} reasons onClose={() => setDialog(null)} onDone={(reason, text) => void act(() => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/reject`, { reason, reasonText: text }, newKey()), `${o.number} rejected. The customer is told.`).then(() => setDialog(null))} />}
       {dialog === 'cancel' && <ReasonDialog title={`Cancel ${o.number}?`} note={`The bill ${o.billNo ?? ''} is cancelled too (a manager approves).`} onClose={() => setDialog(null)} onDone={(_r, text) => {

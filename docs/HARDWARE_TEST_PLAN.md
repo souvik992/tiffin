@@ -147,6 +147,17 @@ Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages).
 | A shop's own design compared with their old bill | |
 | Bill logo on real printers (58 and 80 mm, Posiflex PP8800, a cheap 58 mm): centred, dark enough, print speed, no garbage after the logo | |
 
+## Kitchen tickets (KOT)
+
+| Check | Result |
+|---|---|
+| Two prep stations on two real printers: a bill with items of both prints one ticket each, only their own items | |
+| Cart KOT button, then more items, then billing: the second ticket says ADD-ON KOT 2 and has only the new items | |
+| An item removed after sending, and a cleared cart after sending: CANCEL lines print | |
+| "With the bill" mode on the receipt printer: bill, then one ticket per station (customer KOT design) | |
+| An uploaded .tiffinkot design at 58 and 80 mm looks like its preview | |
+| Online order accepted with "print KOT only": no bill; ODS Bill button prints it once, the second time asks a manager | |
+
 ## Accounting sign-off (CA)
 GST rates and inclusive/exclusive treatment, odd-paisa rule, discount before tax, round-off, invoice numbering
 and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, Inbox, Lock, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
+import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, ChefHat, Inbox, Lock, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
 import { useAddons } from '../lib/addons.ts';
@@ -34,6 +34,7 @@ export function Billing() {
   const [showHeld, setShowHeld] = useState(false);
   const [heldCount, setHeldCount] = useState(0);
   const [showCustomer, setShowCustomer] = useState(false);
+  const [showKot, setShowKot] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [editLine, setEditLine] = useState<CartLine | null>(null);
   const [panel, setPanel] = useState<'x' | 'drawer' | 'availability' | null>(null);
@@ -179,7 +180,7 @@ export function Billing() {
         )}
       </div>
 
-      {shift && <CartPanel mobileOpen={cartOpen} onCloseMobile={() => setCartOpen(false)} cart={cart} busy={pending > 0} onQty={changeQty} onLine={setEditLine} onClear={() => setConfirmClear(true)} onHold={() => void holdBill()} onCustomer={() => setShowCustomer(true)}
+      {shift && <CartPanel mobileOpen={cartOpen} onCloseMobile={() => setCartOpen(false)} cart={cart} busy={pending > 0} onQty={changeQty} onLine={setEditLine} onClear={() => setConfirmClear(true)} onHold={() => void holdBill()} onCustomer={() => setShowCustomer(true)} onKot={() => setShowKot(true)}
         lastBill={lastBill} onNewBill={() => { setLastBill(null); setCartOpen(false); }}
         onDiscount={async (d) => {
           const c = cartRef.current; if (!c) return;
@@ -204,6 +205,7 @@ export function Billing() {
       {modifierItem && catalog && <ModifierDialog item={modifierItem} catalog={catalog} onClose={() => setModifierItem(null)} onAdd={(ids) => { void addItem(modifierItem, ids); setModifierItem(null); }} />}
       {showClose && <CloseShift onClose={() => setShowClose(false)} onClosed={() => { setShift(null); setCart(null); setLastBill(null); }} />}
       {showHeld && <HeldBillsDialog onClose={() => setShowHeld(false)} onResume={(id) => void resumeBill(id)} />}
+      {showKot && cart && <KotDialog cart={cart} onClose={() => setShowKot(false)} onDone={(c) => { setCart(c); setShowKot(false); }} />}
       {showCustomer && cart && <CustomerDialog cart={cart} onClose={() => setShowCustomer(false)} onSaved={(c) => { setCart(c); setShowCustomer(false); }} />}
       {editLine && <LineDialog line={editLine} onClose={() => setEditLine(null)} onSave={async (input) => {
         let ok = false;
@@ -220,7 +222,7 @@ export function Billing() {
   );
 }
 
-function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onClear, onHold, onCustomer, onDiscount, onCoupon, onPaid, lastBill, onNewBill }: {
+function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onClear, onHold, onCustomer, onDiscount, onCoupon, onPaid, lastBill, onNewBill, onKot }: { onKot: () => void;
   mobileOpen: boolean; onCloseMobile: () => void;
   cart: Cart | null; busy: boolean; onQty: (lineId: string, d: 1 | -1) => void; onLine: (l: CartLine) => void; onClear: () => void; onHold: () => void; onCustomer: () => void;
   onDiscount: (d: Discount | null) => Promise<void>; onCoupon: (code: string | null) => Promise<string | null>; onPaid: (r: FinalizeResult) => void; lastBill: FinalizeResult | null; onNewBill: () => void;
@@ -329,6 +331,12 @@ function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onCle
         <button className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label="Customer and note" title="Customer and note" disabled={!cart || busy} onClick={onCustomer}>
           <UserRound className="h-5 w-5" />
         </button>
+        {cart?.kot && cart.kot.mode !== 'off' && (
+          <button className="relative flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label={`Kitchen ticket (KOT)${cart.kot.pending ? `: ${cart.kot.pending} not sent` : ''}`} title="Kitchen ticket (KOT)" disabled={busy || (cart.kot.pending === 0 && cart.kot.sentTickets === 0)} onClick={onKot}>
+            <ChefHat className="h-5 w-5" />
+            {cart.kot.pending > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">{cart.kot.pending}</span>}
+          </button>
+        )}
         <button className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label="Hold bill" title="Hold bill (park it and start another)" disabled={empty || busy} onClick={onHold}>
           <PauseCircle className="h-5 w-5" />
         </button>
@@ -664,5 +672,30 @@ function TilePhoto({ item }: { item: Item }) {
         ? <img src={api.imageUrl(item.imageFile)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-cover" />
         : item.name.charAt(0)}
     </div>
+  );
+}
+
+/** The cart's kitchen ticket: send what the kitchen has not had yet, or print all tickets again (a manager approves). */
+function KotDialog({ cart, onClose, onDone }: { cart: Cart; onClose: () => void; onDone: (c: Cart) => void }) {
+  const { api, notify, fail, withApproval } = useSession();
+  const [busy, setBusy] = useState(false);
+  const kot = cart.kot!;
+  const warn = (w: string[]) => (w.includes('NO_KITCHEN_PRINTER') ? ' No printer is set up for one of the prep stations (Settings, Printer setup).' : w.includes('NO_RECEIPT_PRINTER') ? ' No receipt printer is set up.' : '');
+  const run = async (fn: () => Promise<string | null>) => {
+    setBusy(true);
+    try { const msg = await fn(); if (msg) notify('success', msg); onDone(await api.getOrder(cart.order.id)); } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  const send = () => run(async () => { const r = await api.sendKot(cart.order.id, newKey()); return `KOT ${r.kotNo} sent to the kitchen (${r.queued} ticket${r.queued === 1 ? '' : 's'}).${warn(r.warnings)}`; });
+  const reprint = () => run(async () => { const key = newKey(); const r = await withApproval('Reprinting kitchen tickets', (o) => api.reprintOrderKot(cart.order.id, o, key)); return r ? `Kitchen tickets printed again (${r.queued}).${warn(r.warnings)}` : null; });
+  return (
+    <Modal title={`Kitchen ticket · Token ${cart.order.tokenNo}`} onClose={onClose}>
+      <p className="text-sm text-muted-foreground">{kot.sentTickets ? `${kot.sentTickets} ticket${kot.sentTickets === 1 ? '' : 's'} sent so far.` : 'Nothing sent to the kitchen yet.'} {kot.pending ? `${kot.pending} item${kot.pending === 1 ? ' is' : 's are'} new or changed.` : 'Everything is with the kitchen.'}</p>
+      <p className="mt-1 text-xs text-muted-foreground">Billing sends whatever is still new by itself. Items removed after sending print as CANCEL.</p>
+      <div className="mt-5 flex flex-col gap-2">
+        <button className="btn-primary" disabled={busy || kot.pending === 0} onClick={() => void send()}><ChefHat className="h-4 w-4" />{kot.sentTickets ? 'Send the new items (ADD-ON KOT)' : 'Send to the kitchen now'}</button>
+        <button className="btn-ghost" disabled={busy || kot.sentTickets === 0} onClick={() => void reprint()}>Print all tickets again (REPRINT)</button>
+        <button className="btn-ghost" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   );
 }

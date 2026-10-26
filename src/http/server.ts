@@ -9,7 +9,9 @@ import { assertPerm } from '../services/permissions.ts';
 import { authenticate, changePin, confirmPin, createUser, deactivateUser, listLoginUsers, listUsers, lockSession, login, loginByMobile, logout, unlockSession, reactivateUser, setupFirstRun, updateUser } from '../services/auth.ts';
 import { deleteModifierGroup, updateModifierGroup } from '../services/catalog.ts';
 import { correctPaymentMode, openDrawer, printXReport, setItemAvailability, xReport } from '../services/counter.ts';
-import { reprintKot } from '../services/printing/jobs.ts';
+import { printOrReprintInvoice, reprintKot } from '../services/printing/jobs.ts';
+import { clearKotDesign, getKotSettings, previewKotDesign, printOrReprintKot, reprintOrderKot, sendKot, setKotDesignFile, setKotMode } from '../services/printing/kot.ts';
+import { createStation, deleteStation, listStations, updateStation } from '../services/stations.ts';
 import { requireApproval } from '../services/auth.ts';
 import { getCatalog, importItemsCsv, itemByBarcode, previewItemsCsv, searchItems, createItem, updateItem, deleteItem, createCategory, updateCategory, deleteCategory, reorderCategories, createTaxGroup, createModifierGroup, setItemModifierGroups } from '../services/catalog.ts';
 import { addLine, applyBillDiscount, applyCoupon, removeCoupon, cancelOrder, createOrder, getCart, holdOrder, listOpenOrders, removeLine, resumeOrder, updateLine, updateOrder } from '../services/orders.ts';
@@ -112,8 +114,8 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('PUT', '/api/items/:id/modifier-groups', {}, (c) => setItemModifierGroups(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ groupIds: arr(str({ max: 64 })) })).groupIds));
   add('POST', '/api/items/import/preview', { idem: false }, (c) => { assertPerm(c.actor, 'catalog.write'); return previewItemsCsv(c.ctx, body(c, obj({ csv: str({ max: MAX_BODY }) })).csv); });
   add('POST', '/api/items/import', {}, (c) => importItemsCsv(c.ctx, c.actor, rid(c), body(c, obj({ csv: str({ max: MAX_BODY }) })).csv));
-  add('POST', '/api/categories', {}, (c) => createCategory(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), sortOrder: opt(int()), kitchenStation: opt(nullable(str({ max: 30 }))) }))));
-  add('PATCH', '/api/categories/:id', {}, (c) => updateCategory(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ name: opt(str({ min: 1, max: 60 })), sortOrder: opt(int()), kitchenStation: opt(nullable(str({ max: 30 }))) }))));
+  add('POST', '/api/categories', {}, (c) => createCategory(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 60 }), sortOrder: opt(int()), prepStationId: opt(nullable(str({ max: 64 }))) }))));
+  add('PATCH', '/api/categories/:id', {}, (c) => updateCategory(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ name: opt(str({ min: 1, max: 60 })), sortOrder: opt(int()), prepStationId: opt(nullable(str({ max: 64 }))) }))));
   add('DELETE', '/api/categories/:id', {}, (c) => deleteCategory(c.ctx, c.actor, rid(c), c.params.id!));
   add('PUT', '/api/categories/order', {}, (c) => reorderCategories(c.ctx, c.actor, rid(c), body(c, obj({ ids: arr(str({ min: 1, max: 64 }), { max: 500 }) })).ids));
   add('POST', '/api/tax-groups', {}, (c) => createTaxGroup(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 40 }), rateBp: int({ min: 0, max: 10000 }), cessBp: opt(int({ min: 0, max: 10000 })), priceIncludesTax: opt(bool) }))));
@@ -155,6 +157,21 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/invoices/:id/credit-note', {}, (c) => createCreditNote(c.ctx, c.actor, rid(c), { invoiceId: c.params.id!, ...body(c, obj({ lines: arr(obj({ invoiceLineId: str({ min: 1, max: 64 }), qtyMilli: int({ min: 1 }) }), { max: 1000 }), reason: str({ min: 1, max: 200 }), refunds: arr(payment, { max: 6 }), override: opt(override) })) }));
   add('GET', '/api/invoices/:id/receipt', {}, (c) => { assertPerm(c.actor, 'invoice.read'); return receiptPreview(c.ctx, c.params.id!, num(c.query, 'width') ?? 80); });
   add('GET', '/api/invoices/:id/prints', {}, (c) => { assertPerm(c.actor, 'invoice.read'); return invoicePrints(c.ctx, c.params.id!); });
+  // kitchen tickets (printing/kot.ts): the cart's KOT button, reprints, the first print of a bill billed without printing
+  add('POST', '/api/orders/:id/kot', {}, (c) => sendKot(c.ctx, c.actor, rid(c), { orderId: c.params.id! }));
+  add('POST', '/api/orders/:id/kot-reprint', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return reprintOrderKot(c.ctx, c.actor, rid(c), { orderId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
+  add('POST', '/api/invoices/:id/kot', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return printOrReprintKot(c.ctx, c.actor, rid(c), { invoiceId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
+  add('POST', '/api/invoices/:id/print', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return printOrReprintInvoice(c.ctx, c.actor, rid(c), { invoiceId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
+  add('GET', '/api/kot', {}, (c) => getKotSettings(c.ctx, c.actor));
+  add('PUT', '/api/kot/mode', {}, (c) => setKotMode(c.ctx, c.actor, rid(c), body(c, obj({ mode: str({ min: 1, max: 20 }) })).mode));
+  add('POST', '/api/kot/designs/:slot/preview', { idem: false }, (c) => previewKotDesign(c.ctx, c.actor, c.params.slot!, body(c, obj({ fileName: opt(str({ max: 200 })), content: opt(str({ max: 40_000 })), widthMm: int({ min: 58, max: 80 }) }))));
+  add('PUT', '/api/kot/designs/:slot', {}, (c) => setKotDesignFile(c.ctx, c.actor, rid(c), c.params.slot!, body(c, obj({ fileName: str({ min: 1, max: 200 }), content: str({ min: 1, max: 40_000 }) }))));
+  add('DELETE', '/api/kot/designs/:slot', {}, (c) => clearKotDesign(c.ctx, c.actor, rid(c), c.params.slot!));
+  // prep stations (Menu > Prep stations)
+  add('GET', '/api/prep-stations', {}, (c) => { assertPerm(c.actor, 'catalog.read'); return listStations(c.ctx); });
+  add('POST', '/api/prep-stations', {}, (c) => createStation(c.ctx, c.actor, rid(c), body(c, obj({ name: str({ min: 1, max: 30 }) }))));
+  add('PATCH', '/api/prep-stations/:id', {}, (c) => updateStation(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ name: opt(str({ min: 1, max: 30 })), categoryIds: opt(arr(str({ min: 1, max: 64 }), { max: 5000 })), itemIds: opt(arr(str({ min: 1, max: 64 }), { max: 5000 })) }))));
+  add('DELETE', '/api/prep-stations/:id', {}, (c) => deleteStation(c.ctx, c.actor, rid(c), c.params.id!));
   add('POST', '/api/invoices/:id/kot-reprint', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return reprintKot(c.ctx, c.actor, rid(c), { invoiceId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
   add('POST', '/api/payments/:id/correct', {}, (c) => correctPaymentMode(c.ctx, c.actor, rid(c), { paymentId: c.params.id!, ...body(c, obj({ toMode: oneOf('CASH', 'UPI', 'CARD', 'WALLET', 'CREDIT', 'OTHER'), reference: opt(nullable(str({ max: 60 }))), reason: str({ min: 1, max: 200 }), override: opt(override) })) }));
   add('POST', '/api/invoices/:id/reprint', {}, (c) => reprintInvoice(c.ctx, c.actor, rid(c), { invoiceId: c.params.id!, ...body(c, obj({ override: opt(override) })) }));
@@ -183,7 +200,7 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
 
   // ---- printing ----
   add('GET', '/api/printers', {}, (c) => { assertPerm(c.actor, 'print.read'); return listPrinters(c.ctx); });
-  const printerShape = { name: str({ min: 1, max: 60 }), transport: oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb', 'android'), address: opt(nullable(str({ max: 200 }))), widthMm: opt(int()), profile: opt(str({ max: 30 })), isReceipt: opt(bool), drawer: opt(bool), stations: opt(arr(str({ max: 30 }), { max: 20 })), active: opt(bool) };
+  const printerShape = { name: str({ min: 1, max: 60 }), transport: oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb', 'android'), address: opt(nullable(str({ max: 200 }))), widthMm: opt(int()), profile: opt(str({ max: 30 })), isReceipt: opt(bool), drawer: opt(bool), stations: opt(arr(str({ max: 64 }), { max: 20 })), active: opt(bool) };
   add('POST', '/api/printers', {}, (c) => createPrinter(c.ctx, c.actor, rid(c), body(c, obj(printerShape))));
   add('PATCH', '/api/printers/:id', {}, (c) => updatePrinter(c.ctx, c.actor, rid(c), c.params.id!, body(c, obj({ ...printerShape, name: opt(str({ min: 1, max: 60 })), transport: opt(oneOf('memory', 'tcp', 'file', 'spooler', 'serial', 'usb')) }))));
   add('DELETE', '/api/printers/:id', {}, (c) => deletePrinter(c.ctx, c.actor, rid(c), c.params.id!));

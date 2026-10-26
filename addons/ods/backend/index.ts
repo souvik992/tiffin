@@ -10,6 +10,7 @@ import { makePlaces } from './places.ts';
 import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
+import { readPrintOnAccept, savePrintOnAccept } from './store.ts';
 import { MIGRATIONS, apiKeysView, mapView, readFeeTaxGroup, saveMapStyle, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
@@ -68,6 +69,12 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     return { search, map };
   });
   host.route('GET', '/tax-groups', {}, () => host.billing.menu(host.ctx).taxGroups);
+  // printing: on accepting, and the ODS's Bill and KOT buttons
+  host.route('GET', '/print-options', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readPrintOnAccept(host), buttons: Boolean(host.printing) }; });
+  host.route('PUT', '/print-options', {}, (c) => ({ ...savePrintOnAccept(host, c.actor, body(c)), buttons: Boolean(host.printing) }));
+  for (const what of ['bill', 'kot'] as const) {
+    host.route('POST', `/orders/:id/print-${what}`, {}, (c) => conn.print(c.actor, c.params.id!, what, c.requestId, body(c).override as { userId: string; pin: string } | undefined));
+  }
 
   // ---- order hub
   host.route('GET', '/hub', {}, () => conn.link());

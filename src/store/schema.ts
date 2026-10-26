@@ -410,6 +410,49 @@ const V13 = `
 ALTER TABLE app_session ADD COLUMN locked_at INTEGER;
 `;
 
+// V14: kitchen order tickets.
+//  - prep_station: the kitchen's stations (Tandoor, Chinese, Bar...). A category or an item is mapped to one (the item's
+//    own station wins); printers list the station ids they print ('*' = every station). The old free-text
+//    category.kitchen_station and printer station names become stations here (kitchen_station is kept, no longer read).
+//  - kot_line: what was sent to the kitchen, per order (signed quantities: a later ticket can cancel). An order's next KOT
+//    prints only the difference between its lines and what was sent, so sending from the cart and then billing never
+//    prints an item twice. sale_order.kot_count numbers the tickets of an order (2 and up print as ADD-ON).
+const V14 = `
+CREATE TABLE prep_station (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER
+);
+CREATE UNIQUE INDEX prep_station_name ON prep_station(lower(name)) WHERE deleted_at IS NULL;
+ALTER TABLE category ADD COLUMN prep_station_id TEXT REFERENCES prep_station(id);
+ALTER TABLE item ADD COLUMN prep_station_id TEXT REFERENCES prep_station(id);
+ALTER TABLE sale_order ADD COLUMN kot_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sale_order ADD COLUMN fulfilment TEXT CHECK (fulfilment IN ('DELIVERY','PICKUP'));
+
+CREATE TABLE kot_line (
+  id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES sale_order(id), kot_no INTEGER NOT NULL,
+  item_id TEXT NOT NULL REFERENCES item(id), name TEXT NOT NULL, modifiers_json TEXT NOT NULL DEFAULT '[]', note TEXT,
+  qty_milli INTEGER NOT NULL CHECK (qty_milli <> 0), prep_station_id TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX kot_line_order ON kot_line(order_id, kot_no);
+
+INSERT INTO prep_station (id, name, sort_order, created_at, updated_at)
+  SELECT lower(hex(randomblob(16))), name, 0, CAST(strftime('%s','now') AS INTEGER) * 1000, CAST(strftime('%s','now') AS INTEGER) * 1000
+  FROM (
+    SELECT trim(kitchen_station) AS name FROM category WHERE deleted_at IS NULL AND trim(ifnull(kitchen_station, '')) <> ''
+    UNION
+    SELECT trim(j.value) FROM printer, json_each(printer.stations) j WHERE trim(j.value) NOT IN ('', '*')
+  )
+  GROUP BY lower(name);
+UPDATE category SET prep_station_id = (SELECT p.id FROM prep_station p WHERE lower(p.name) = lower(trim(category.kitchen_station)))
+  WHERE trim(ifnull(kitchen_station, '')) <> '';
+UPDATE printer SET stations = (
+  SELECT ifnull(json_group_array(x), '[]') FROM (
+    SELECT CASE WHEN trim(j.value) = '*' THEN '*' ELSE (SELECT p.id FROM prep_station p WHERE lower(p.name) = lower(trim(j.value))) END AS x
+    FROM json_each(printer.stations) j WHERE trim(j.value) <> ''
+  )
+) WHERE stations <> '[]';
+`;
+
 // V10: printers on Android (USB through Android's USB host API, Bluetooth including the built-in printer of Sunmi-type
 // POS machines), reached through the Android app: printers gain an 'android' transport (address usb:vid:pid[:serial]
 // or bt:MAC). Same 12-step rebuild as V3/V4; printer still has no indexes, triggers or views.
@@ -461,5 +504,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 11, name: 'item_description', sql: V11 },
   { version: 12, name: 'counter_extras', sql: V12 },
   { version: 13, name: 'session_lock', sql: V13 },
+  { version: 14, name: 'kitchen_tickets', sql: V14 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
