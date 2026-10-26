@@ -115,17 +115,21 @@ They are not encrypted (the owner's choice, docs/DECISIONS.md), so secure the se
 ## Swiggy and Zomato (through UrbanPiper)
 
 Orders from Swiggy and Zomato come through UrbanPiper (`src/urbanpiper.ts`; their guide: https://api-docs.urbanpiper.com/downstream).
-On the admin page, open a store and fill in **Swiggy & Zomato (UrbanPiper)**:
+One UrbanPiper account serves all stores. On the admin page:
 
-1. **UrbanPiper account**: the test account (pos-int.urbanpiper.com) until UrbanPiper certifies the setup, then the live
-   address from their certification email.
-2. **API username, API key, Biz ID**: from UrbanPiper's sandbox email (or the Postman collection's `Authorization:
-   apikey <username>:<key>` and `X-UPR-Biz-Id` headers). The key stays on the hub and is never shown again.
-3. **Store ID at UrbanPiper** (your own id for the store; the hub store address by default), city, address, phone, and
-   Swiggy and/or Zomato. **Save details**.
-4. **Test connection** (lists the business's webhooks; changes nothing), **Set up order links** (registers the hub's
-   address `/v1/urbanpiper/<Biz ID>` for 9 webhook events with a secret header; UrbanPiper allows 5 calls a minute, so
-   this takes about 2 minutes), **Send store details**, **Send menu**.
+1. **Hub settings > Swiggy & Zomato (UrbanPiper account)**: the test account (pos-int.urbanpiper.com) until UrbanPiper
+   certifies the setup, then the live address from their certification email; **API username, API key, Biz ID** from
+   UrbanPiper's sandbox email (or the Postman collection's `Authorization: apikey <username>:<key>` and `X-UPR-Biz-Id`
+   headers). The key stays on the hub and is never shown again. **Save account**, **Test connection** (lists the
+   account's webhooks; changes nothing), **Set up order links** (registers `/v1/urbanpiper/<Biz ID>` for 9 webhook
+   events with a secret header, for all stores; UrbanPiper allows 5 calls a minute, so this takes about 2 minutes; refused
+   while the hub runs on localhost, which UrbanPiper cannot reach).
+2. **Each store** (Stores > the store > Swiggy & Zomato): its own **Store ID at UrbanPiper** (the hub store address by
+   default; one per store), city, address, phone, Swiggy and/or Zomato, packaging charge, on/off. **Save store details**,
+   **Send store details**, **Send menu**.
+
+`npm run urbanpiper-sample -- <store> [swiggy|zomato] [--self] [--cash]` sends a sample order into a hub on this PC, as
+UrbanPiper would (development only).
 
 Then:
 - **Orders** arrive like website orders, numbered S-… (Swiggy) and Z-… (Zomato), priced from the published menu at the

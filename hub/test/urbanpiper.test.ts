@@ -37,7 +37,8 @@ function fakeUrbanPiper() {
 }
 
 const NO_PACKAGING = { mode: 'none' as const, value: 0 };
-const DETAILS = { env: 'staging', username: 'tiffin_pos', apiKey: 'secret-key-123', bizId: '324255', locationRef: 'TIFFIN-KN-1', city: 'Bengaluru', address: '12, 4th Cross, Kalyan Nagar', phone: '08041440067', platforms: ['swiggy', 'zomato'] };
+const ACCOUNT = { env: 'staging', username: 'tiffin_pos', apiKey: 'secret-key-123', bizId: '324255' };
+const DETAILS = { locationRef: 'TIFFIN-KN-1', city: 'Bengaluru', address: '12, 4th Cross, Kalyan Nagar', phone: '08041440067', platforms: ['swiggy', 'zomato'] };
 const ONLINE_MENU = (o: Parameters<typeof menu>[0] = {}) => menu({
   options: { acceptMode: 'manual', acceptTimeoutMin: 5, channels: { app: true, website: true, swiggy: true, zomato: true }, fulfilment: { pickup: true, delivery: true }, payments: { online: true, cod: true } },
   ...o,
@@ -48,9 +49,10 @@ async function setup(h: TestHub) {
   const key = (await h.call('POST', '/v1/pos/pair', { body: { code: store.pairingCode, deviceName: 'Counter 1' } })).json.deviceKey as string;
   assert.equal((await h.call('PUT', '/v1/pos/menu', { key, body: ONLINE_MENU() })).status, 200);
   assert.equal((await h.call('PUT', '/v1/pos/status', { key, body: { accepting: true } })).status, 200);
+  assert.equal((await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: ACCOUNT })).status, 200);
   const saved = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: DETAILS });
   assert.equal(saved.status, 200, JSON.stringify(saved.json));
-  const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_link')!.webhook_token;
+  const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_account')!.webhook_token;
   const hook = (event: string, body: unknown, t = token) => h.call('POST', '/v1/urbanpiper/324255', { body, headers: { [TOKEN_HEADER]: t, 'x-upr-event-type': event } });
   return { key, hook };
 }
@@ -74,38 +76,48 @@ function relay(o: { id?: number; channel?: string; delivery?: 'partner' | 'self'
   };
 }
 
-test('urbanpiper: the admin saves a store\'s details (key never shown again), tests them, and points the webhooks at the hub', async () => {
+test('urbanpiper: one account in Hub settings (key never shown again, tested, webhooks pointed at the hub); each store adds only its own details', async () => {
   const up = fakeUrbanPiper();
   const h = await startHub(undefined, undefined, up.fetch);
   try {
     await h.call('POST', '/v1/admin/stores', { admin: true, body: { slug: 'demo-burger', name: 'Demo Burger Hub' } });
-    assert.equal((await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper')).status, 403, 'admin key needed');
-    const empty = (await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true })).json;
-    assert.equal(empty.set, false);
-    assert.equal(empty.locationRef, 'demo-burger', 'the hub store address is the suggested UrbanPiper store ID');
-    const bad = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, apiKey: '', bizId: 'abc', platforms: [] } });
+    await h.call('POST', '/v1/admin/stores', { admin: true, body: { slug: 'second-shop', name: 'Second Shop' } });
+    assert.equal((await h.call('GET', '/v1/admin/urbanpiper')).status, 403, 'admin key needed');
+    assert.equal((await h.call('GET', '/v1/admin/urbanpiper', { admin: true })).json.set, false);
+    // the account
+    const bad = await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: { ...ACCOUNT, apiKey: '', bizId: 'abc' } });
     assert.equal(bad.status, 400);
-    assert.deepEqual(Object.keys(bad.json.error.details.fields).sort(), ['apiKey', 'bizId', 'platforms']);
-    const live = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, env: 'production', baseUrl: 'http://evil.example.com' } });
+    assert.deepEqual(Object.keys(bad.json.error.details.fields).sort(), ['apiKey', 'bizId']);
+    const live = await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: { ...ACCOUNT, env: 'production', baseUrl: 'http://evil.example.com' } });
     assert.ok(live.json.error.details.fields.baseUrl, 'the live address must be https');
-    const saved = (await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: DETAILS })).json;
+    const saved = (await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: ACCOUNT })).json;
     assert.equal(saved.set, true);
     assert.equal(saved.apiKeyHint, '…-123');
     assert.ok(!JSON.stringify(saved).includes('secret-key-123'), 'the key is never sent back');
-    assert.ok(!JSON.stringify(saved).includes(one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_link')!.webhook_token), 'nor the webhook secret');
+    assert.ok(!JSON.stringify(saved).includes(one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_account')!.webhook_token), 'nor the webhook secret');
     assert.equal(saved.webhookUrl, `${h.base}/v1/urbanpiper/324255`);
-    // leaving the key empty keeps the saved one
-    await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, apiKey: '', city: 'Bangalore' } });
-    assert.equal(one<{ api_key: string }>(h.hub.db, 'SELECT api_key FROM up_link')!.api_key, 'secret-key-123');
+    await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: { ...ACCOUNT, apiKey: '' } });
+    assert.equal(one<{ api_key: string }>(h.hub.db, 'SELECT api_key FROM up_account')!.api_key, 'secret-key-123', 'leaving the key empty keeps it');
 
-    const t = (await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/test', { admin: true })).json;
+    // stores: only their own details; one store ID per store
+    const empty = (await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true })).json;
+    assert.deepEqual([empty.set, empty.locationRef, empty.account], [false, 'demo-burger', { set: true, env: 'staging' }]);
+    const noPlatforms = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, platforms: [] } });
+    assert.deepEqual(Object.keys(noPlatforms.json.error.details.fields), ['platforms']);
+    assert.equal((await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: DETAILS })).json.set, true);
+    const clash = await h.call('PUT', '/v1/admin/stores/second-shop/urbanpiper', { admin: true, body: DETAILS });
+    assert.equal(clash.status, 409);
+    assert.equal((await h.call('PUT', '/v1/admin/stores/second-shop/urbanpiper', { admin: true, body: { ...DETAILS, locationRef: 'TIFFIN-2' } })).status, 200);
+    assert.equal((await h.call('GET', '/v1/admin/urbanpiper', { admin: true })).json.stores, 2);
+
+    const t = (await h.call('POST', '/v1/admin/urbanpiper/test', { admin: true })).json;
     assert.equal(t.ok, true, t.message);
     assert.deepEqual(up.calls[0]!.headers['X-UPR-Biz-Id'], '324255');
     assert.equal(up.calls[0]!.headers.Authorization, 'apikey tiffin_pos:secret-key-123');
 
-    // webhooks: one exists for another address (updated), the rest are created, spaced for UrbanPiper's 5 a minute
+    // webhooks (for the account, all stores): one exists for another address (updated), the rest are created, spaced for 5 a minute
     up.state.webhooks = [{ webhook_id: 7, event_type: 'order_placed', url: 'https://old.example.com/hook', active: true, headers: {} }];
-    const w = (await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/webhooks', { admin: true })).json;
+    const w = (await h.call('POST', '/v1/admin/urbanpiper/webhooks', { admin: true })).json;
     assert.equal(w.ok, true);
     assert.match(w.message, /Setting up 9 webhooks/);
     up.calls.length = 0;
@@ -117,10 +129,10 @@ test('urbanpiper: the admin saves a store\'s details (key never shown again), te
     assert.deepEqual(created, ['hub_menu_publish', 'inventory_update', 'item_state_toggle', 'option_state_toggle', 'order_status_update', 'rider_status_update', 'store_action', 'store_creation']);
     for (const c of up.calls) { assert.equal(c.body.url, `${h.base}/v1/urbanpiper/324255`); assert.ok(c.body.headers[TOKEN_HEADER].startsWith('upt_')); }
 
-    // a wrong key is explained
-    await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, apiKey: 'wrong-key-999' } });
-    assert.match((await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/test', { admin: true })).json.message, /refused the API username, API key or Biz ID/);
-    const view = (await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true })).json;
+    // a wrong key is explained, in the account's activity list
+    await h.call('PUT', '/v1/admin/urbanpiper', { admin: true, body: { ...ACCOUNT, apiKey: 'wrong-key-999' } });
+    assert.match((await h.call('POST', '/v1/admin/urbanpiper/test', { admin: true })).json.message, /refused the API username, API key or Biz ID/);
+    const view = (await h.call('GET', '/v1/admin/urbanpiper', { admin: true })).json;
     assert.ok(view.log.some((l: { ok: boolean; kind: string }) => !l.ok && l.kind === 'Test'), 'the activity list shows it');
   } finally { await h.close(); cleanup(h.dir); }
 });
@@ -325,7 +337,7 @@ test('urbanpiper: POS changes follow by themselves (sold out, menu changes, stor
     assert.equal(view.pending, 0);
     assert.ok(view.log.some((l: { kind: string; ok: boolean }) => /Store off: Kitchen closed/.test(l.kind) && l.ok));
     // callbacks from UrbanPiper land in the activity list
-    const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_link')!.webhook_token;
+    const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_account')!.webhook_token;
     await h.call('POST', '/v1/urbanpiper/324255', { headers: { [TOKEN_HEADER]: token, 'x-upr-event-type': '60014' }, body: { reference: 'ref-store-1', stats: { created: 0, updated: 0, errors: 1 }, stores: [{ ref_id: 'TIFFIN-KN-1', upipr_status: { action: 'U', error: true, err_msg: 'City is not serviceable' } }] } });
     const after = (await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true })).json;
     assert.match(after.log[0].text, /City is not serviceable/);
@@ -355,9 +367,9 @@ test('urbanpiper: packaging charge per item or as a percentage goes out as an it
   const h = await startHub(undefined, undefined, up.fetch);
   try {
     await setup(h);
-    const bad = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, apiKey: '', packMode: 'percent', packValue: '80' } });
+    const bad = await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, packMode: 'percent', packValue: '80' } });
     assert.ok(bad.json.error.details.fields.packValue);
-    const v = (await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, apiKey: '', packMode: 'per_item', packValue: '7.50' } })).json;
+    const v = (await h.call('PUT', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true, body: { ...DETAILS, packMode: 'per_item', packValue: '7.50' } })).json;
     assert.deepEqual([v.packMode, v.packValue], ['per_item', '7.5']);
     await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/menu', { admin: true });
     assert.equal(up.calls.at(-1)!.body.charges[0].structure.value, 7.5);

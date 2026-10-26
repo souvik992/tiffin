@@ -6,6 +6,7 @@ import { networkInterfaces } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { Hub } from '../src/hub.ts';
 import { createHubServer } from '../src/http.ts';
+import { UrbanPiper } from '../src/urbanpiper.ts';
 import { one } from '../src/db.ts';
 
 const dir = process.env.HUB_DATA_DIR ?? join(import.meta.dirname, '..', 'hub-data');
@@ -13,8 +14,9 @@ mkdirSync(dir, { recursive: true });
 const hub = new Hub({ dbPath: join(dir, 'hub.db'), devOtp: true, log: { info: (m, d) => console.log(m, d ?? ''), warn: (m, d) => console.warn(m, d ?? '') } });
 const port = Number(process.env.HUB_PORT ?? 4900);
 const adminKey = process.env.HUB_ADMIN_KEY ?? randomBytes(12).toString('base64url'); // a new one each run unless set
-const server = createHubServer(hub, { adminKey });
-setInterval(() => hub.sweep(), 5000).unref();
+const urbanpiper = new UrbanPiper(hub, { log: { info: (m, d) => console.log(m, d ?? ''), warn: (m, d) => console.warn(m, d ?? '') } });
+const server = createHubServer(hub, { adminKey, urbanpiper });
+setInterval(() => { hub.sweep(); void urbanpiper.pump(); }, 5000).unref();
 server.listen(port, '0.0.0.0', () => {
   const exists = one(hub.db, "SELECT 1 FROM store WHERE slug = 'demo'");
   const code = exists ? hub.pairingCodeForSlug('demo') : hub.createStore('demo', 'Demo store').pairingCode;

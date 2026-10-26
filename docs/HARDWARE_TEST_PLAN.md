@@ -149,7 +149,7 @@ Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages).
 
 | Check | Result |
 |---|---|
-| Hub on an https address; store card saved with the pos-int details; Test connection says connected | |
+| Hub on an https address; Hub settings: account saved with the pos-int details; Test connection says connected; a store saved on its page | |
 | Set up order links: 9 webhooks in Atlas (Settings > Webhooks) pointing at the hub, with the secret header | |
 | Send store details and Send menu: store and menu appear in Atlas; the activity list shows UrbanPiper's results | |
 | Atlas Developer Tools: Swiggy and Zomato test orders (delivery, pickup, cash, options) appear on the ODS, priced right | |

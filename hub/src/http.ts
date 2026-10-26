@@ -89,11 +89,16 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
 
   // ---- Swiggy / Zomato through UrbanPiper: the store's details (admin), and UrbanPiper's webhooks
-  add('GET', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.view(c.params.slug!, base(c)); });
-  add('PUT', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.saveLink(c.params.slug!, c.body, base(c)); });
+  // the one UrbanPiper account (Hub settings)
+  add('GET', '/v1/admin/urbanpiper', (c) => { admin(c); return up.accountView(base(c)); });
+  add('PUT', '/v1/admin/urbanpiper', (c) => { admin(c); return up.saveAccount(c.body, base(c)); });
+  add('DELETE', '/v1/admin/urbanpiper', (c) => { admin(c); return up.removeAccount(); });
+  add('POST', '/v1/admin/urbanpiper/test', (c) => { admin(c); return up.test(); });
+  add('POST', '/v1/admin/urbanpiper/webhooks', (c) => { admin(c); return up.setupWebhooks(base(c)); });
+  // each store at UrbanPiper (store page)
+  add('GET', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.view(c.params.slug!); });
+  add('PUT', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.saveLink(c.params.slug!, c.body); });
   add('DELETE', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.removeLink(c.params.slug!); });
-  add('POST', '/v1/admin/stores/:slug/urbanpiper/test', (c) => { admin(c); return up.test(c.params.slug!); });
-  add('POST', '/v1/admin/stores/:slug/urbanpiper/webhooks', (c) => { admin(c); return up.setupWebhooks(c.params.slug!, base(c)); });
   add('POST', '/v1/admin/stores/:slug/urbanpiper/store', (c) => { admin(c); return up.pushStore(c.params.slug!); });
   add('POST', '/v1/admin/stores/:slug/urbanpiper/menu', (c) => { admin(c); return up.pushMenu(c.params.slug!, base(c)); });
   add('POST', '/v1/urbanpiper/:bizId', (c) => up.webhook(c.params.bizId!, c.req.headers, c.body), { maxBody: 2 * 1024 * 1024 });

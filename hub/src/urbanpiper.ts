@@ -11,8 +11,9 @@ import type { DeviceRef } from './hub.ts';
 import { MOBILE_RE, normaliseMobile } from '../../contract/src/validate.ts';
 
 /**
- * Swiggy and Zomato through UrbanPiper (https://api-docs.urbanpiper.com/downstream). Per hub store, the hub admin saves
- * the store's UrbanPiper details (Atlas business: API username, API key, Biz ID; the store's id there). Then:
+ * Swiggy and Zomato through UrbanPiper (https://api-docs.urbanpiper.com/downstream). The hub admin saves the one
+ * UrbanPiper account in Hub settings (Atlas business: API username, API key, Biz ID; webhooks), and per store its id there,
+ * city, address, platforms and packaging charge. Then:
  *   in    UrbanPiper calls POST /v1/urbanpiper/<bizId> (header x-tiffin-token) for new orders, status changes from the
  *         platform (cancelled, picked up, delivered), rider updates, and the results of what we sent. A new order becomes
  *         a hub order (channel swiggy/zomato, priced from the store's published menu like the POS bill) and goes to the
@@ -41,19 +42,27 @@ const REASON: Record<RejectReason, string> = { ITEM_UNAVAILABLE: 'unspecified', 
 const REASON_TEXT: Record<RejectReason, string> = { ITEM_UNAVAILABLE: 'Item not available', TOO_BUSY: 'Store too busy', CLOSING: 'Store closing', OUT_OF_DELIVERY_AREA: 'Outside the delivery area', OTHER: 'Store could not take the order' };
 
 export interface Fetcher { (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal }): Promise<{ status: number; text(): Promise<string> }> }
+/** The hub's one UrbanPiper account (Atlas business): used for every store. api_key and webhook_token are secrets. */
+interface AccountRow { base_url: string; username: string; api_key: string; biz_id: string; webhook_token: string; updated_at: number }
+/** A store at UrbanPiper: its id there and what differs per store. */
 interface LinkRow {
-  store_id: string; base_url: string; username: string; api_key: string; biz_id: string; location_ref: string; city: string; address: string; phone: string;
-  platforms_json: string; webhook_token: string; enabled: number; items_json: string | null; menu_sig: string | null; store_on: number | null; created_at: number; updated_at: number;
+  store_id: string; location_ref: string; city: string; address: string; phone: string;
+  platforms_json: string; enabled: number; items_json: string | null; menu_sig: string | null; store_on: number | null; created_at: number; updated_at: number;
   pack_mode: 'none' | 'per_item' | 'percent'; pack_value: number;
 }
 /** Packaging charge on Swiggy and Zomato. Both take only item-level packaging: an amount per item, or a share of the item price. */
 export interface Packaging { mode: 'none' | 'per_item' | 'percent'; /** paise per item, or basis points of the item price */ value: number }
+type LogLine = { at: number; dir: 'in' | 'out'; kind: string; ok: boolean; text: string };
+export interface AccountView {
+  set: boolean; env: 'staging' | 'production'; baseUrl: string; username: string; apiKeyHint: string | null; bizId: string;
+  webhookUrl: string | null; webhookUrlProblem: string | null; stores: number; pending: number; log: LogLine[];
+}
 export interface LinkView {
-  set: boolean; env: 'staging' | 'production'; baseUrl: string; username: string; apiKeyHint: string | null; bizId: string; locationRef: string;
-  city: string; address: string; phone: string; platforms: Platform[]; enabled: boolean; webhookUrl: string | null; webhookUrlProblem: string | null;
+  set: boolean; account: { set: boolean; env: 'staging' | 'production' }; locationRef: string;
+  city: string; address: string; phone: string; platforms: Platform[]; enabled: boolean;
   /** Packaging as typed: rupees per item, or a percentage. */
   packMode: Packaging['mode']; packValue: string;
-  menuSent: boolean; pending: number; log: Array<{ at: number; dir: 'in' | 'out'; kind: string; ok: boolean; text: string }>;
+  menuSent: boolean; pending: number; log: LogLine[];
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '');
@@ -74,13 +83,16 @@ export class UrbanPiper {
   private hub: Hub;
   private fetcher: Fetcher;
   private kick: boolean;
+  /** Tests only: webhooks may point at this PC (UrbanPiper itself can never reach it). */
+  private allowLocal: boolean;
   private running: Promise<void> | null = null;
   private log?: { info(m: string, d?: unknown): void; warn(m: string, d?: unknown): void };
 
-  constructor(hub: Hub, o: { fetch?: Fetcher; kick?: boolean; log?: UrbanPiper['log'] } = {}) {
+  constructor(hub: Hub, o: { fetch?: Fetcher; kick?: boolean; allowLocalWebhooks?: boolean; log?: UrbanPiper['log'] } = {}) {
     this.hub = hub;
     this.fetcher = o.fetch ?? (fetch as unknown as Fetcher);
     this.kick = o.kick ?? true;
+    this.allowLocal = o.allowLocalWebhooks ?? false;
     this.log = o.log;
     // never let a problem here break what the hub was doing (the event already happened)
     const safe = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { try { fn(...a); } catch (e) { this.log?.warn('urbanpiper', String(e)); } };
@@ -89,38 +101,47 @@ export class UrbanPiper {
     hub.bus.on('status', safe((storeId: string) => this.onStatus(storeId)));
   }
 
-  // ---------------------------------------------------------------- the store's UrbanPiper details (admin)
+  // ---------------------------------------------------------------- the UrbanPiper account (Hub settings) and each store (store page)
 
+  private account(): AccountRow | undefined { return one<AccountRow>(this.hub.db, 'SELECT * FROM up_account WHERE id = 1'); }
   private link(storeId: string): LinkRow | undefined { return one<LinkRow>(this.hub.db, 'SELECT * FROM up_link WHERE store_id = ?', storeId); }
+  private needAccount(): AccountRow {
+    const a = this.account();
+    if (!a) throw new HubError('NOT_SET_UP', 'Save the UrbanPiper account first (Hub settings > Swiggy & Zomato).', 409);
+    return a;
+  }
   private needLink(slug: string): { s: StoreRow; l: LinkRow } {
     const s = this.hub.store({ slug });
     const l = this.link(s.id);
-    if (!l) throw new HubError('NOT_SET_UP', 'Save the UrbanPiper details first.', 409);
+    if (!l) throw new HubError('NOT_SET_UP', 'Save this store\'s UrbanPiper details first.', 409);
+    this.needAccount();
     return { s, l };
   }
   private platforms(l: LinkRow): Platform[] { return (JSON.parse(l.platforms_json) as Platform[]).filter((p) => PLATFORMS.includes(p)); }
-  /** Where UrbanPiper sends this business's webhooks. Needs the hub's public https address. */
+  private logOf(storeId: string | null): LogLine[] {
+    return many<{ at: number; dir: 'in' | 'out'; kind: string; ok: number; text: string }>(this.hub.db, 'SELECT at, dir, kind, ok, text FROM up_log WHERE store_id IS ? ORDER BY id DESC LIMIT 40', storeId).map((r) => ({ ...r, ok: Boolean(r.ok) }));
+  }
+  private pendingOf(storeId: string | null) { return one<{ n: number }>(this.hub.db, 'SELECT COUNT(*) AS n FROM up_outbox WHERE store_id IS ? AND done_at IS NULL', storeId)?.n ?? 0; }
+  /** Where UrbanPiper sends the account's webhooks. Needs the hub's public https address. */
   webhookUrl(bizId: string, base: string) { return `${base.replace(/\/+$/, '')}/v1/urbanpiper/${encodeURIComponent(bizId)}`; }
-  private baseProblem(base: string) { return /^https:\/\//.test(base) || isLocal(base) ? null : 'UrbanPiper can only send orders to an https:// address. Open this page through the hub\'s https address (or set HUB_PUBLIC_URL).'; }
+  private baseProblem(base: string) {
+    if (isLocal(base) && !this.allowLocal) return 'This hub runs on this PC only (localhost): UrbanPiper cannot send orders here. Put the hub on the internet with an https address first.';
+    return /^https:\/\//.test(base) || isLocal(base) ? null : 'UrbanPiper can only send orders to an https:// address. Open this page through the hub\'s https address (or set HUB_PUBLIC_URL).';
+  }
 
-  view(slug: string, base: string): LinkView {
-    const s = this.hub.store({ slug });
-    const l = this.link(s.id);
-    const log = many<{ at: number; dir: 'in' | 'out'; kind: string; ok: number; text: string }>(this.hub.db, 'SELECT at, dir, kind, ok, text FROM up_log WHERE store_id = ? ORDER BY id DESC LIMIT 40', s.id).map((r) => ({ ...r, ok: Boolean(r.ok) }));
-    const pending = one<{ n: number }>(this.hub.db, 'SELECT COUNT(*) AS n FROM up_outbox WHERE store_id = ? AND done_at IS NULL', s.id)?.n ?? 0;
-    if (!l) return { set: false, env: 'staging', baseUrl: STAGING_URL, username: '', apiKeyHint: null, bizId: '', locationRef: slug, city: '', address: s.menu_json ? (this.hub.menu(s)?.serviceability.location?.label ?? '') : '', phone: '', platforms: ['swiggy', 'zomato'], enabled: true, webhookUrl: null, webhookUrlProblem: null, packMode: 'none', packValue: '', menuSent: false, pending, log };
+  accountView(base: string): AccountView {
+    const a = this.account();
+    const stores = one<{ n: number }>(this.hub.db, 'SELECT COUNT(*) AS n FROM up_link')?.n ?? 0;
+    if (!a) return { set: false, env: 'staging', baseUrl: STAGING_URL, username: '', apiKeyHint: null, bizId: '', webhookUrl: null, webhookUrlProblem: null, stores, pending: this.pendingOf(null), log: this.logOf(null) };
     return {
-      set: true, env: l.base_url === STAGING_URL ? 'staging' : 'production', baseUrl: l.base_url, username: l.username, apiKeyHint: `…${l.api_key.slice(-4)}`, bizId: l.biz_id,
-      locationRef: l.location_ref, city: l.city, address: l.address, phone: l.phone, platforms: this.platforms(l), enabled: Boolean(l.enabled),
-      webhookUrl: this.webhookUrl(l.biz_id, base), webhookUrlProblem: this.baseProblem(base),
-      packMode: l.pack_mode, packValue: l.pack_mode === 'none' ? '' : String(l.pack_value / 100), menuSent: l.menu_sig !== null, pending, log,
+      set: true, env: a.base_url === STAGING_URL ? 'staging' : 'production', baseUrl: a.base_url, username: a.username, apiKeyHint: `…${a.api_key.slice(-4)}`, bizId: a.biz_id,
+      webhookUrl: this.webhookUrl(a.biz_id, base), webhookUrlProblem: this.baseProblem(base), stores, pending: this.pendingOf(null), log: this.logOf(null),
     };
   }
 
-  /** Saves (or changes) a store's UrbanPiper details. The API key can be left out to keep the saved one. */
-  saveLink(slug: string, input: unknown, base: string): LinkView {
-    const s = this.hub.store({ slug });
-    const cur = this.link(s.id);
+  /** Saves (or changes) the UrbanPiper account. The API key can be left out to keep the saved one. */
+  saveAccount(input: unknown, base: string): AccountView {
+    const cur = this.account();
     const b = obj(input);
     const errors: Record<string, string> = {};
     const env = b.env === 'production' ? 'production' : 'staging';
@@ -135,6 +156,44 @@ export class UrbanPiper {
     if (apiKey ? !/^\S{8,200}$/.test(apiKey) : !cur) errors.apiKey = 'Enter the API key (the part after the colon in "apikey username:key").';
     const bizId = str(b.bizId);
     if (!/^\d{1,20}$/.test(bizId)) errors.bizId = 'Enter the Biz ID: a number (the X-UPR-Biz-Id header).';
+    if (Object.keys(errors).length) throw new HubError('VALIDATION', Object.values(errors)[0]!, 400, { fields: errors });
+    const now = this.hub.now();
+    const token = cur?.webhook_token ?? `upt_${randomBytes(24).toString('base64url')}`;
+    exec(this.hub.db, `INSERT INTO up_account (id, base_url, username, api_key, biz_id, webhook_token, updated_at) VALUES (1,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, username = excluded.username, api_key = excluded.api_key, biz_id = excluded.biz_id, updated_at = excluded.updated_at`,
+      baseUrl, username, apiKey || cur!.api_key, bizId, token, now);
+    // another account (or test <-> live): what was sent to the old one counts as not sent
+    if (cur && (cur.biz_id !== bizId || cur.base_url !== baseUrl)) exec(this.hub.db, 'UPDATE up_link SET menu_sig = NULL, items_json = NULL, store_on = NULL');
+    this.note(null, 'out', 'Account', true, `Account saved (${env === 'staging' ? 'test account' : 'live account'}, Biz ID ${bizId}).`);
+    return this.accountView(base);
+  }
+
+  removeAccount() {
+    exec(this.hub.db, 'DELETE FROM up_account');
+    exec(this.hub.db, 'UPDATE up_outbox SET done_at = ?, last_error = ? WHERE done_at IS NULL', this.hub.now(), 'UrbanPiper account removed');
+    exec(this.hub.db, 'UPDATE up_link SET menu_sig = NULL, items_json = NULL, store_on = NULL');
+    this.note(null, 'out', 'Account', true, 'UrbanPiper account removed. Swiggy and Zomato orders are refused until it is saved again.');
+    return { ok: true };
+  }
+
+  view(slug: string): LinkView {
+    const s = this.hub.store({ slug });
+    const l = this.link(s.id), a = this.account();
+    const account = { set: Boolean(a), env: (a && a.base_url !== STAGING_URL ? 'production' : 'staging') as 'staging' | 'production' };
+    const log = this.logOf(s.id), pending = this.pendingOf(s.id);
+    if (!l) return { set: false, account, locationRef: slug, city: '', address: s.menu_json ? (this.hub.menu(s)?.serviceability.location?.label ?? '') : '', phone: '', platforms: ['swiggy', 'zomato'], enabled: true, packMode: 'none', packValue: '', menuSent: false, pending, log };
+    return {
+      set: true, account, locationRef: l.location_ref, city: l.city, address: l.address, phone: l.phone, platforms: this.platforms(l), enabled: Boolean(l.enabled),
+      packMode: l.pack_mode, packValue: l.pack_mode === 'none' ? '' : String(l.pack_value / 100), menuSent: l.menu_sig !== null, pending, log,
+    };
+  }
+
+  /** Saves (or changes) a store's details at UrbanPiper. */
+  saveLink(slug: string, input: unknown): LinkView {
+    const s = this.hub.store({ slug });
+    const cur = this.link(s.id);
+    const b = obj(input);
+    const errors: Record<string, string> = {};
     const locationRef = str(b.locationRef) || slug;
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(locationRef)) errors.locationRef = 'Use letters, digits, dots, dashes or underscores (up to 128).';
     const city = str(b.city);
@@ -143,35 +202,29 @@ export class UrbanPiper {
     if (phone && !/^[0-9+\- ]{6,15}$/.test(phone)) errors.phone = 'Enter a phone number (digits only).';
     const platforms = PLATFORMS.filter((p) => arr(b.platforms).includes(p));
     if (!platforms.length) errors.platforms = 'Choose Swiggy, Zomato or both.';
-    if (Object.keys(errors).length) throw new HubError('VALIDATION', Object.values(errors)[0]!, 400, { fields: errors });
-    const clash = one<{ slug: string }>(this.hub.db, 'SELECT s.slug FROM up_link u JOIN store s ON s.id = u.store_id WHERE u.biz_id = ? AND u.location_ref = ? AND u.store_id <> ?', bizId, locationRef, s.id);
-    if (clash) throw new HubError('VALIDATION', `Store "${clash.slug}" already uses this UrbanPiper store ID. Each store needs its own.`, 409, { fields: { locationRef: 'Already used by another store.' } });
-    // one secret per UrbanPiper business: its webhooks are shared by all its stores
-    const token = (cur && cur.biz_id === bizId ? cur.webhook_token : one<{ webhook_token: string }>(this.hub.db, 'SELECT webhook_token FROM up_link WHERE biz_id = ? LIMIT 1', bizId)?.webhook_token) ?? `upt_${randomBytes(24).toString('base64url')}`;
-    const now = this.hub.now();
-    const enabled = b.enabled === false ? 0 : 1;
     // packaging on the platforms: rupees per item (to paise) or a percentage (to basis points); typed text, parsed here
     const packMode: Packaging['mode'] = b.packMode === 'per_item' || b.packMode === 'percent' ? b.packMode : 'none';
     let packValue = 0;
     if (packMode !== 'none') {
       const m = /^(\d{1,5})(?:\.(\d{1,2}))?$/.exec(str(b.packValue));
       packValue = m ? Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0')) : -1;
-      if (packValue <= 0 || (packMode === 'percent' && packValue > 5000)) {
-        const fields = { packValue: packMode === 'percent' ? 'Enter a percentage from 0.01 to 50.' : 'Enter the rupees per item, like 10 or 7.50.' };
-        throw new HubError('VALIDATION', fields.packValue, 400, { fields });
-      }
+      if (packValue <= 0 || (packMode === 'percent' && packValue > 5000)) errors.packValue = packMode === 'percent' ? 'Enter a percentage from 0.01 to 50.' : 'Enter the rupees per item, like 10 or 7.50.';
     }
+    if (Object.keys(errors).length) throw new HubError('VALIDATION', Object.values(errors)[0]!, 400, { fields: errors });
+    const clash = one<{ slug: string }>(this.hub.db, 'SELECT s.slug FROM up_link u JOIN store s ON s.id = u.store_id WHERE u.location_ref = ? AND u.store_id <> ?', locationRef, s.id);
+    if (clash) throw new HubError('VALIDATION', `Store "${clash.slug}" already uses this UrbanPiper store ID. Each store needs its own.`, 409, { fields: { locationRef: 'Already used by another store.' } });
+    const now = this.hub.now();
+    const enabled = b.enabled === false ? 0 : 1;
     if (cur) {
-      exec(this.hub.db, `UPDATE up_link SET base_url = ?, username = ?, api_key = ?, biz_id = ?, location_ref = ?, city = ?, address = ?, phone = ?, platforms_json = ?, webhook_token = ?, enabled = ?, pack_mode = ?, pack_value = ?, updated_at = ?,
-        menu_sig = CASE WHEN biz_id = ? AND location_ref = ? AND base_url = ? THEN menu_sig ELSE NULL END, items_json = CASE WHEN biz_id = ? AND location_ref = ? AND base_url = ? THEN items_json ELSE NULL END, store_on = CASE WHEN biz_id = ? AND location_ref = ? AND base_url = ? THEN store_on ELSE NULL END
-        WHERE store_id = ?`, baseUrl, username, apiKey || cur.api_key, bizId, locationRef, city, address, phone, JSON.stringify(platforms), token, enabled, packMode, packValue, now,
-        bizId, locationRef, baseUrl, bizId, locationRef, baseUrl, bizId, locationRef, baseUrl, s.id);
+      exec(this.hub.db, `UPDATE up_link SET location_ref = ?, city = ?, address = ?, phone = ?, platforms_json = ?, enabled = ?, pack_mode = ?, pack_value = ?, updated_at = ?,
+        menu_sig = CASE WHEN location_ref = ? THEN menu_sig ELSE NULL END, items_json = CASE WHEN location_ref = ? THEN items_json ELSE NULL END, store_on = CASE WHEN location_ref = ? THEN store_on ELSE NULL END
+        WHERE store_id = ?`, locationRef, city, address, phone, JSON.stringify(platforms), enabled, packMode, packValue, now, locationRef, locationRef, locationRef, s.id);
     } else {
-      exec(this.hub.db, 'INSERT INTO up_link (store_id, base_url, username, api_key, biz_id, location_ref, city, address, phone, platforms_json, webhook_token, enabled, pack_mode, pack_value, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        s.id, baseUrl, username, apiKey, bizId, locationRef, city, address, phone, JSON.stringify(platforms), token, enabled, packMode, packValue, now, now);
+      exec(this.hub.db, 'INSERT INTO up_link (store_id, location_ref, city, address, phone, platforms_json, enabled, pack_mode, pack_value, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        s.id, locationRef, city, address, phone, JSON.stringify(platforms), enabled, packMode, packValue, now, now);
     }
-    this.note(s.id, 'out', 'Settings', true, `Details saved (${env === 'staging' ? 'test account' : 'live account'}, ${platforms.map((p) => NAME[p]).join(' and ')}${enabled ? '' : ', orders off'}).`);
-    return this.view(slug, base);
+    this.note(s.id, 'out', 'Settings', true, `Store details saved (${platforms.map((p) => NAME[p]).join(' and ')}${enabled ? '' : ', orders off'}).`);
+    return this.view(slug);
   }
 
   removeLink(slug: string) {
@@ -184,11 +237,11 @@ export class UrbanPiper {
 
   // ---------------------------------------------------------------- calls to UrbanPiper
 
-  private async call(l: LinkRow, method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+  private async call(a: AccountRow, method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
     let r: { status: number; text(): Promise<string> };
     try {
-      r = await this.fetcher(l.base_url + path, {
-        method, headers: { Authorization: `apikey ${l.username}:${l.api_key}`, 'X-UPR-Biz-Id': l.biz_id, 'Content-Type': 'application/json', Accept: 'application/json' },
+      r = await this.fetcher(a.base_url + path, {
+        method, headers: { Authorization: `apikey ${a.username}:${a.api_key}`, 'X-UPR-Biz-Id': a.biz_id, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(20_000),
       });
     } catch { throw new Retry('UrbanPiper could not be reached. Check the hub\'s internet connection.'); }
@@ -204,52 +257,53 @@ export class UrbanPiper {
     const m = str(json?.message) || str(json?.error?.message) || str(json?.error) || str(json?.detail);
     return `UrbanPiper refused (${status})${m ? `: ${m.slice(0, 300)}` : '.'}`;
   }
-  /** An admin action now: ok with UrbanPiper's message, or the reason in words. */
-  private async now(l: LinkRow, kind: string, method: string, path: string, body?: unknown): Promise<{ ok: boolean; message: string; json: any }> {
+  /** An admin action now: ok with UrbanPiper's message, or the reason in words. storeId null: the account's activity. */
+  private async now(storeId: string | null, kind: string, method: string, path: string, body?: unknown): Promise<{ ok: boolean; message: string; json: any }> {
+    const a = this.needAccount();
     try {
-      const r = await this.call(l, method, path, body);
+      const r = await this.call(a, method, path, body);
       const ok = r.status >= 200 && r.status < 300 && r.json?.status !== 'error';
       const message = ok ? (str(r.json?.message) || 'Done.') : this.refusal(r.status, r.json);
-      this.note(l.store_id, 'out', kind, ok, message);
+      this.note(storeId, 'out', kind, ok, message);
       return { ok, message, json: r.json };
     } catch (e) {
       const message = (e as Error).message;
-      this.note(l.store_id, 'out', kind, false, message);
+      this.note(storeId, 'out', kind, false, message);
       return { ok: false, message, json: null };
     }
   }
 
-  /** A harmless check that the details work: lists the business's webhooks. */
-  async test(slug: string) {
-    const { l } = this.needLink(slug);
-    const r = await this.now(l, 'Test', 'GET', '/external/api/v1/webhooks/');
+  /** A harmless check that the account works: lists its webhooks. */
+  async test() {
+    const a = this.needAccount();
+    const r = await this.now(null, 'Test', 'GET', '/external/api/v1/webhooks/');
     if (!r.ok) return { ok: false, message: r.message };
     const list = this.webhookList(r.json);
-    return { ok: true, message: `Connected to UrbanPiper (${l.base_url === STAGING_URL ? 'test account' : 'live account'}). ${list.length} webhook${list.length === 1 ? '' : 's'} set up for this business.` };
+    return { ok: true, message: `Connected to UrbanPiper (${a.base_url === STAGING_URL ? 'test account' : 'live account'}). ${list.length} webhook${list.length === 1 ? '' : 's'} set up for this business.` };
   }
   private webhookList(j: any): Array<{ webhook_id: number; event_type: string; url: string; headers?: Record<string, string>; active?: boolean }> {
     return arr(Array.isArray(j) ? j : j?.webhooks ?? j?.objects ?? j?.data ?? j?.results);
   }
 
-  /** Points UrbanPiper's webhooks for this business at this hub. Their API takes 5 calls a minute, so they go out spaced. */
-  async setupWebhooks(slug: string, base: string) {
-    const { l } = this.needLink(slug);
+  /** Points the account's UrbanPiper webhooks at this hub (all stores share them). Their API takes 5 calls a minute, so they go out spaced. */
+  async setupWebhooks(base: string) {
+    const a = this.needAccount();
     const problem = this.baseProblem(base);
     if (problem) throw new HubError('VALIDATION', problem);
-    const r = await this.now(l, 'Order links', 'GET', '/external/api/v1/webhooks/');
+    const r = await this.now(null, 'Order links', 'GET', '/external/api/v1/webhooks/');
     if (!r.ok) return { ok: false, message: r.message };
-    const url = this.webhookUrl(l.biz_id, base);
+    const url = this.webhookUrl(a.biz_id, base);
     const have = this.webhookList(r.json);
     let queued = 0, kept = 0;
     for (const ev of EVENTS) {
       const w = have.find((x) => x.event_type === ev);
-      if (w && w.url === url && w.active !== false && obj(w.headers)[TOKEN_HEADER] === l.webhook_token) { kept++; continue; }
-      const body = { active: true, event_type: ev, url, retrial_interval_units: 'seconds', headers: { 'content-type': 'application/json', [TOKEN_HEADER]: l.webhook_token } };
-      this.enqueue(l.store_id, 'webhook', w ? 'PUT' : 'POST', w ? `/external/api/v1/webhooks/${w.webhook_id}/` : '/external/api/v1/webhooks/', body, `Order link: ${ev}`, 1000 + queued * 13_000);
+      if (w && w.url === url && w.active !== false && obj(w.headers)[TOKEN_HEADER] === a.webhook_token) { kept++; continue; }
+      const body = { active: true, event_type: ev, url, retrial_interval_units: 'seconds', headers: { 'content-type': 'application/json', [TOKEN_HEADER]: a.webhook_token } };
+      this.enqueue(null, 'webhook', w ? 'PUT' : 'POST', w ? `/external/api/v1/webhooks/${w.webhook_id}/` : '/external/api/v1/webhooks/', body, `Order link: ${ev}`, 1000 + queued * 13_000);
       queued++;
     }
     const message = queued ? `Setting up ${queued} webhook${queued === 1 ? '' : 's'} to ${url}. UrbanPiper allows 5 a minute, so this takes about ${Math.ceil(queued * 13 / 60)} minute${queued > 4 ? 's' : ''}; follow it in the activity list.` : `All ${kept} webhooks already point to ${url}.`;
-    this.note(l.store_id, 'out', 'Order links', true, message);
+    this.note(null, 'out', 'Order links', true, message);
     return { ok: true, message };
   }
 
@@ -258,7 +312,7 @@ export class UrbanPiper {
     const { s, l } = this.needLink(slug);
     const m = this.hub.menu(s);
     if (!m) throw new HubError('NOT_PUBLISHED', 'The shop\'s POS has not sent its menu and settings to the hub yet. Connect the POS and turn on online orders first.', 409);
-    const r = await this.now(l, 'Store details', 'POST', '/external/api/v1/stores/', this.storeBody(s, l, m));
+    const r = await this.now(s.id, 'Store details', 'POST', '/external/api/v1/stores/', this.storeBody(s, l, m));
     return { ok: r.ok, message: r.ok ? 'Store details sent. UrbanPiper processes them in the background; the result shows in the activity list.' : r.message };
   }
 
@@ -282,7 +336,7 @@ export class UrbanPiper {
     if (!m) throw new HubError('NOT_PUBLISHED', 'The shop\'s POS has not sent its menu to the hub yet.', 409);
     const built = buildMenu(m, this.platforms(l), { mode: l.pack_mode, value: l.pack_value }, (img) => (/^https:\/\//.test(base) ? `${base.replace(/\/+$/, '')}/v1/stores/${encodeURIComponent(s.slug)}/images/${img}` : null));
     if (built.errors.length) return { ok: false, message: built.errors.join(' '), warnings: built.warnings };
-    const r = await this.now(l, 'Menu', 'POST', `/external/api/v1/inventory/locations/${encodeURIComponent(l.location_ref)}/`, built.body);
+    const r = await this.now(s.id, 'Menu', 'POST', `/external/api/v1/inventory/locations/${encodeURIComponent(l.location_ref)}/`, built.body);
     if (r.ok) {
       exec(this.hub.db, 'UPDATE up_link SET menu_sig = ?, items_json = ? WHERE store_id = ?', built.sig, JSON.stringify(built.available), s.id);
       exec(this.hub.db, "INSERT INTO setting (key, value_json, updated_at) VALUES ('urbanpiper.publicBase', ?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at", JSON.stringify(base), this.hub.now());
@@ -295,7 +349,7 @@ export class UrbanPiper {
   private onMoved(storeId: string, o: Order, by: string) {
     if (!o.external || by === 'aggregator') return;
     const up = one<{ up_id: string; can_reject: number }>(this.hub.db, 'SELECT up_id, can_reject FROM up_order WHERE order_id = ?', o.id);
-    if (!up || !this.link(storeId)) return;
+    if (!up || !this.link(storeId) || !this.account()) return;
     const name = NAME[o.external.platform];
     let body: Record<string, unknown> | null = null;
     switch (o.state) {
@@ -316,7 +370,7 @@ export class UrbanPiper {
   /** The POS published its menu: availability changes now, other changes as a new menu (once the menu was sent by hand). */
   private onMenu(storeId: string) {
     const l = this.link(storeId);
-    if (!l || !l.enabled || l.menu_sig === null) return;
+    if (!l || !l.enabled || l.menu_sig === null || !this.account()) return;
     const s = this.hub.store({ id: storeId });
     const m = this.hub.menu(s);
     if (!m) return;
@@ -345,7 +399,7 @@ export class UrbanPiper {
   /** Taking orders (POS accepting, not paused by the hub) switches the store on or off on the platforms. */
   private onStatus(storeId: string) {
     const l = this.link(storeId);
-    if (!l || !l.enabled) return;
+    if (!l || !l.enabled || !this.account()) return;
     const s = this.hub.store({ id: storeId });
     const on = Boolean(s.accepting) && !s.paused_reason ? 1 : 0;
     if (l.store_on === on) return;
@@ -371,7 +425,7 @@ export class UrbanPiper {
     if (!o || o.storeId !== dev.storeId) throw new HubError('NOT_FOUND', 'Order not found.', 404);
     const up = one<{ up_id: string }>(this.hub.db, 'SELECT up_id FROM up_order WHERE order_id = ?', orderId);
     if (!o.external || !up) throw new HubError('NOT_PLATFORM_ORDER', 'This is not a Swiggy or Zomato order.', 409);
-    if (!this.link(dev.storeId)) throw new HubError('NOT_SET_UP', 'UrbanPiper is not set up for this store on the hub.', 409);
+    if (!this.link(dev.storeId) || !this.account()) throw new HubError('NOT_SET_UP', 'UrbanPiper is not set up for this store on the hub.', 409);
     if (TERMINAL.includes(o.state)) throw new HubError('ORDER_CLOSED', 'This order is already finished.', 409);
     const b = obj(input) as Partial<PlatformAction> & Record<string, unknown>;
     const name = NAME[o.external.platform], label = (what: string) => `${name} ${o.external!.orderId} (${o.number}): ${what}`;
@@ -432,7 +486,7 @@ export class UrbanPiper {
 
   // ---------------------------------------------------------------- outbox
 
-  private enqueue(storeId: string, kind: string, method: string, path: string, body: unknown, label: string, delayMs = 0, orderId: string | null = null) {
+  private enqueue(storeId: string | null, kind: string, method: string, path: string, body: unknown, label: string, delayMs = 0, orderId: string | null = null) {
     const now = this.hub.now();
     exec(this.hub.db, 'INSERT INTO up_outbox (store_id, kind, method, path, body_json, label, order_id, next_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)', storeId, kind, method, path, JSON.stringify(body), label, orderId, now + delayMs, now);
     if (this.kick && delayMs === 0) void this.pump();
@@ -444,19 +498,21 @@ export class UrbanPiper {
     return this.running;
   }
   private async pumpOnce() {
-    const due = many<{ id: number; store_id: string; kind: string; method: string; path: string; body_json: string; label: string; order_id: string | null; attempts: number }>(this.hub.db,
+    const due = many<{ id: number; store_id: string | null; kind: string; method: string; path: string; body_json: string; label: string; order_id: string | null; attempts: number }>(this.hub.db,
       'SELECT id, store_id, kind, method, path, body_json, label, order_id, attempts FROM up_outbox WHERE done_at IS NULL AND next_at <= ? ORDER BY id LIMIT 20', this.hub.now());
     for (const row of due) {
-      const l = this.link(row.store_id);
+      const acct = this.account();
+      const l = row.store_id ? this.link(row.store_id) : null;
       const finish = (ok: boolean, text: string) => {
         exec(this.hub.db, 'UPDATE up_outbox SET done_at = ?, last_error = ? WHERE id = ?', this.hub.now(), ok ? null : text, row.id);
         this.note(row.store_id, 'out', row.label, ok, text);
         // the store should know when Swiggy / Zomato did not take something about one of its orders
-        if (!ok && row.order_id) try { this.hub.addNotice(row.store_id, row.order_id, `Not taken by ${row.label}: ${text}`); } catch { /* order gone */ }
+        if (!ok && row.order_id && row.store_id) try { this.hub.addNotice(row.store_id, row.order_id, `Not taken by ${row.label}: ${text}`); } catch { /* order gone */ }
       };
-      if (!l) { finish(false, 'Not sent: the UrbanPiper details were removed.'); continue; }
+      if (!acct) { finish(false, 'Not sent: the UrbanPiper account was removed.'); continue; }
+      if (row.store_id && !l) { finish(false, 'Not sent: the store\'s UrbanPiper details were removed.'); continue; }
       try {
-        const r = await this.call(l, row.method, row.path, JSON.parse(row.body_json));
+        const r = await this.call(acct, row.method, row.path, JSON.parse(row.body_json));
         const code = str(r.json?.err_code);
         if ((r.status >= 200 && r.status < 300 && r.json?.status !== 'error') || code === 'err_order_already_in_status') finish(true, str(r.json?.message) || 'Done.');
         else finish(false, this.refusal(r.status, r.json));
@@ -478,9 +534,10 @@ export class UrbanPiper {
 
   /** POST /v1/urbanpiper/<bizId>. Throws 401 for a wrong secret, 422 (UrbanPiper does not retry) for what can never work. */
   webhook(bizId: string, headers: Record<string, string | string[] | undefined>, body: unknown): unknown {
-    const links = many<LinkRow>(this.hub.db, 'SELECT * FROM up_link WHERE biz_id = ?', bizId);
+    const a = this.account();
     const got = String(headers[TOKEN_HEADER] ?? '');
-    if (!links.length || !links.some((l) => sameSecret(l.webhook_token, got))) throw new HubError('FORBIDDEN', 'Unknown UrbanPiper business or wrong secret.', 401);
+    if (!a || a.biz_id !== bizId || !sameSecret(a.webhook_token, got)) throw new HubError('FORBIDDEN', 'Unknown UrbanPiper business or wrong secret.', 401);
+    const links = many<LinkRow>(this.hub.db, 'SELECT * FROM up_link');
     const code = String(headers['x-upr-event-type'] ?? '');
     const kind = EVENT_CODE[code] ?? (obj(obj(body).order).details ? 'order' : `Event ${code || '?'}`);
     const b = obj(body);
@@ -504,7 +561,7 @@ export class UrbanPiper {
     if (!upId) throw new HubError('VALIDATION', 'The order has no id.', 422);
     const ref = str(obj(ord.store).merchant_ref_id);
     const l = links.find((x) => x.location_ref === ref) ?? (links.length === 1 && !ref ? links[0] : undefined);
-    if (!l) { this.note(links[0]!.store_id, 'in', 'Order', false, `An order for UrbanPiper store "${ref}" was refused: no hub store has that UrbanPiper store ID.`); throw new HubError('UNKNOWN_STORE', `No store here has the UrbanPiper store ID "${ref}".`, 422); }
+    if (!l) { this.note(null, 'in', 'Order', false, `An order for UrbanPiper store "${ref}" was refused: no hub store has that UrbanPiper store ID.`); throw new HubError('UNKNOWN_STORE', `No store here has the UrbanPiper store ID "${ref}".`, 422); }
     const seen = this.orderFor(upId);
     if (seen) return { order_ref_id: seen.o.number };
     if (!l.enabled) { this.note(l.store_id, 'in', 'Order', false, `Order ${upId} refused: orders from UrbanPiper are switched off for this store.`); throw new HubError('STORE_OFF', 'Orders from UrbanPiper are switched off for this store.', 422); }
@@ -554,7 +611,7 @@ export class UrbanPiper {
   /** Results of what we sent (store, menu, items on/off, ...): kept for the activity list. */
   private callback(links: LinkRow[], kind: string, b: Record<string, any>) {
     const refs = [str(b.location_ref_id), str(obj(b.location).ref_id), str(obj(b.store).ref_id), ...arr(b.stores).map((x) => str(obj(x).ref_id)), ...arr(b.status).map((x) => str(obj(obj(x).location).ref_id))].filter(Boolean);
-    const l = links.find((x) => refs.includes(x.location_ref)) ?? links[0]!;
+    const l = links.find((x) => refs.includes(x.location_ref)) ?? (links.length === 1 ? links[0] : undefined);
     const problems: string[] = [];
     const walk = (v: unknown, depth: number) => {
       if (depth > 6 || problems.length > 5) return;
@@ -570,7 +627,7 @@ export class UrbanPiper {
     const stats = obj(b.stats);
     const extra = Object.keys(stats).length ? ` (${Object.entries(stats).map(([k, v]) => `${k} ${v}`).join(', ')})` : '';
     const platform = str(b.platform) ? ` on ${str(b.platform)}` : '';
-    this.note(l.store_id, 'in', kind, problems.length === 0 && b.status !== 'error', problems.length ? `Failed${platform}: ${problems.join('; ')}` : `Done${platform}${extra}.`);
+    this.note(l?.store_id ?? null, 'in', kind, problems.length === 0 && b.status !== 'error', problems.length ? `Failed${platform}: ${problems.join('; ')}` : `Done${platform}${extra}.`);
   }
 }
 

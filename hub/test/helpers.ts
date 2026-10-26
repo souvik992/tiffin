@@ -40,7 +40,7 @@ export interface TestHub {
 /** upFetch: a stand-in UrbanPiper for the hub's calls to it (its outbox is then sent only when a test calls up.pump()). */
 export async function startHub(dir = mkdtempSync(join(tmpdir(), 'hub-test-')), clock = { t: Date.parse('2026-10-16T12:00:00+05:30') }, upFetch?: Fetcher): Promise<TestHub> {
   const hub = new Hub({ dbPath: join(dir, 'hub.db'), now: () => clock.t, devOtp: true, onlinePayments: false });
-  const up = new UrbanPiper(hub, { fetch: upFetch ?? (async () => { throw new Error('no UrbanPiper in this test'); }), kick: false });
+  const up = new UrbanPiper(hub, { fetch: upFetch ?? (async () => { throw new Error('no UrbanPiper in this test'); }), kick: false, allowLocalWebhooks: true });
   const server: Server = createHubServer(hub, { adminKey: 'admin-test-key', heartbeatMs: 100, urbanpiper: up });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;

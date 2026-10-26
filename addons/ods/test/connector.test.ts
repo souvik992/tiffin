@@ -259,8 +259,9 @@ test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy pric
     saveOnlineConfig(s.host, s.env.owner, rid(), { enabled: true, channels: { app: false, website: true, swiggy: true, zomato: false }, acceptMode: 'manual', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } });
     saveMenuSync(s.host, s.env.owner, 'swiggy', { mode: 'all', items: [], pricing: 'custom', markupBp: 1000, prices: {} });
     await s.conn.publish(true);
-    s.up.saveLink('demo', { username: 'u', apiKey: 'secret-key-1', bizId: '42', locationRef: 'DEMO-1', city: 'Bengaluru', platforms: ['swiggy'] }, s.base);
-    const token = (s.hub.db.prepare('SELECT webhook_token FROM up_link').get() as { webhook_token: string }).webhook_token;
+    s.up.saveAccount({ username: 'u', apiKey: 'secret-key-1', bizId: '42' }, s.base);
+    s.up.saveLink('demo', { locationRef: 'DEMO-1', city: 'Bengaluru', platforms: ['swiggy'] });
+    const token = (s.hub.db.prepare('SELECT webhook_token FROM up_account').get() as { webhook_token: string }).webhook_token;
     const hook = (event: string, body: unknown) => s.call('POST', '/v1/urbanpiper/42', body, { 'x-tiffin-token': token, 'x-upr-event-type': event });
     const relay = {
       customer: { name: 'Ravi', phone: '9876500000', address: { line_1: 'Flat 2', city: 'Bengaluru', pin: '560043', latitude: 13.03, longitude: 77.646 } },
@@ -301,5 +302,23 @@ test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy pric
     await hook('60008', { order_id: 777, new_state: 'Cancelled', message: 'Rider could not find the customer' });
     await until(() => getOrder(s.host, hubOrder.id)!.state === 'CANCELLED', 'cancelled');
     assert.equal(getOrder(s.host, hubOrder.id)!.alert, `Swiggy cancelled it (Rider could not find the customer). Cancel bill ${acc.billNo} (manager approval).`);
+  } finally { await s.close(); }
+});
+
+test('ODS connector: a delivery order on the ODS: on the way (rider) and delivered reach the hub', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const placed = await s.order('9000000777', { fulfilment: 'DELIVERY' });
+    await until(() => getOrder(s.host, placed.order.id) !== null, 'order arrives');
+    s.conn.accept(s.env.cashier, placed.order.id, 20, rid());
+    await until(() => s.hubState(placed.order.id) === 'ACCEPTED', 'accepted on the hub');
+    s.conn.step(s.env.cashier, placed.order.id, 'PREPARING');
+    s.conn.step(s.env.cashier, placed.order.id, 'READY');
+    s.conn.step(s.env.cashier, placed.order.id, 'OUT_FOR_DELIVERY', { rider: { name: 'Ravi', phone: '9000000001' } });
+    await until(() => s.hubState(placed.order.id) === 'OUT_FOR_DELIVERY', 'on the way on the hub');
+    s.conn.step(s.env.cashier, placed.order.id, 'DELIVERED');
+    await until(() => s.hubState(placed.order.id) === 'DELIVERED', 'delivered on the hub');
+    assert.deepEqual(pendingOutbox(s.host).map((r) => r.action), [], 'nothing left to send');
   } finally { await s.close(); }
 });
