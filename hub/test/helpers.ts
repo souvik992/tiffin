@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { Hub } from '../src/hub.ts';
 import { createHubServer } from '../src/http.ts';
+import { UrbanPiper } from '../src/urbanpiper.ts';
+import type { Fetcher } from '../src/urbanpiper.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 import { DEFAULT_SERVICEABILITY } from '../../contract/src/serviceability.ts';
 import type { Hours } from '../../contract/src/serviceability.ts';
@@ -29,15 +31,17 @@ export function menu(o: Partial<PublishedMenu> = {}): PublishedMenu {
 }
 
 export interface TestHub {
-  hub: Hub; base: string; clock: { t: number }; dir: string;
-  call(method: string, path: string, o?: { body?: unknown; key?: string; admin?: boolean; idem?: string; token?: string }): Promise<{ status: number; json: any }>;
+  hub: Hub; base: string; clock: { t: number }; dir: string; up: UrbanPiper;
+  call(method: string, path: string, o?: { body?: unknown; key?: string; admin?: boolean; idem?: string; token?: string; headers?: Record<string, string> }): Promise<{ status: number; json: any }>;
   close(): Promise<void>;
   restart(): Promise<TestHub>;
 }
 
-export async function startHub(dir = mkdtempSync(join(tmpdir(), 'hub-test-')), clock = { t: Date.parse('2026-10-16T12:00:00+05:30') }): Promise<TestHub> {
+/** upFetch: a stand-in UrbanPiper for the hub's calls to it (its outbox is then sent only when a test calls up.pump()). */
+export async function startHub(dir = mkdtempSync(join(tmpdir(), 'hub-test-')), clock = { t: Date.parse('2026-10-16T12:00:00+05:30') }, upFetch?: Fetcher): Promise<TestHub> {
   const hub = new Hub({ dbPath: join(dir, 'hub.db'), now: () => clock.t, devOtp: true, onlinePayments: false });
-  const server: Server = createHubServer(hub, { adminKey: 'admin-test-key', heartbeatMs: 100 });
+  const up = new UrbanPiper(hub, { fetch: upFetch ?? (async () => { throw new Error('no UrbanPiper in this test'); }), kick: false, allowLocalWebhooks: true });
+  const server: Server = createHubServer(hub, { adminKey: 'admin-test-key', heartbeatMs: 100, urbanpiper: up });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const call: TestHub['call'] = async (method, path, o = {}) => {
@@ -47,12 +51,13 @@ export async function startHub(dir = mkdtempSync(join(tmpdir(), 'hub-test-')), c
     if (o.admin) headers['x-admin-key'] = 'admin-test-key';
     if (o.idem) headers['idempotency-key'] = o.idem;
     if (o.token) headers['x-order-token'] = o.token;
+    Object.assign(headers, o.headers);
     const r = await fetch(base + path, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
     const t = await r.text();
     return { status: r.status, json: t ? JSON.parse(t) : null };
   };
   const close = () => new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); hub.close(); });
-  const t: TestHub = { hub, base, clock, dir, call, close, restart: async () => { await close(); return startHub(dir, clock); } };
+  const t: TestHub = { hub, base, clock, dir, up, call, close, restart: async () => { await close(); return startHub(dir, clock, upFetch); } };
   return t;
 }
 

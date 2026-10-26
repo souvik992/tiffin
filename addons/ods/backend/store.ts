@@ -48,7 +48,7 @@ export function setState(host: HostApi, id: string, state: OrderState, extra: { 
 }
 
 // ---- outbox: every change for the hub is stored first, then sent until the hub confirms it (survives restarts)
-export interface OutboxRow { id: number; order_id: string; action: 'received' | 'accept' | 'reject' | 'state'; body_json: string; idem_key: string; attempts: number }
+export interface OutboxRow { id: number; order_id: string; action: 'received' | 'accept' | 'reject' | 'state' | 'platform-action'; body_json: string; idem_key: string; attempts: number }
 export function enqueue(host: HostApi, orderId: string, action: OutboxRow['action'], body: unknown, idemKey: string) {
   host.db.run('INSERT OR IGNORE INTO ods_outbox (order_id, action, body_json, idem_key, created_at) VALUES (?,?,?,?,?)', orderId, action, JSON.stringify(body), idemKey, host.ctx.clock.now());
 }

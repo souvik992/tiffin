@@ -43,6 +43,29 @@ CREATE TABLE IF NOT EXISTS order_attempt (
 );
 CREATE INDEX IF NOT EXISTS order_attempt_at ON order_attempt(store_id, at);
 CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+-- Swiggy / Zomato through UrbanPiper (src/urbanpiper.ts). up_account: the hub's one UrbanPiper account; api_key and
+-- webhook_token are secrets (never sent to the admin page). up_link: a store at UrbanPiper; items_json: availability
+-- last sent; menu_sig: menu last sent.
+CREATE TABLE IF NOT EXISTS up_account (
+  id INTEGER PRIMARY KEY CHECK (id = 1), base_url TEXT NOT NULL, username TEXT NOT NULL, api_key TEXT NOT NULL, biz_id TEXT NOT NULL,
+  webhook_token TEXT NOT NULL, updated_at INTEGER NOT NULL
+);
+-- pack_mode/pack_value: packaging charge on the platforms: none, per_item (paise per item), percent (basis points of the item price).
+CREATE TABLE IF NOT EXISTS up_link (
+  store_id TEXT PRIMARY KEY REFERENCES store(id), location_ref TEXT NOT NULL UNIQUE, city TEXT NOT NULL, address TEXT NOT NULL, phone TEXT NOT NULL,
+  platforms_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, items_json TEXT, menu_sig TEXT, store_on INTEGER,
+  pack_mode TEXT NOT NULL DEFAULT 'none', pack_value INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+-- up_order: the platform's order (UrbanPiper id) for each hub order; can_reject: Swiggy lets the store reject it directly
+CREATE TABLE IF NOT EXISTS up_order (up_id TEXT PRIMARY KEY, store_id TEXT NOT NULL, order_id TEXT NOT NULL UNIQUE, platform TEXT NOT NULL, can_reject INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS up_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT, kind TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, body_json TEXT NOT NULL,
+  label TEXT NOT NULL, order_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, done_at INTEGER, last_error TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS up_outbox_due ON up_outbox(done_at, next_at);
+CREATE TABLE IF NOT EXISTS up_log (id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT, at INTEGER NOT NULL, dir TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL, text TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS up_log_store ON up_log(store_id, id);
 `;
 
 export type Db = DatabaseSync;
@@ -50,6 +73,9 @@ export type Db = DatabaseSync;
 export function openHubDb(path: string): Db {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // the first UrbanPiper build (never released) kept the account on each store: replace those tables
+  const oldLink = (db.prepare('PRAGMA table_info(up_link)').all() as Array<{ name: string }>).some((c) => c.name === 'api_key');
+  if (oldLink) db.exec('DROP TABLE up_link; DROP TABLE IF EXISTS up_outbox;');
   db.exec(SCHEMA);
   // columns added after the first release (CREATE TABLE IF NOT EXISTS does not add them to an existing database)
   const storeCols = new Set((db.prepare('PRAGMA table_info(store)').all() as Array<{ name: string }>).map((c) => c.name));

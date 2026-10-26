@@ -1,7 +1,7 @@
 import type { HostApi } from '../../../src/addons/host.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
 import { REJECT_REASONS } from '../../../contract/src/types.ts';
-import type { RejectReason } from '../../../contract/src/types.ts';
+import type { PlatformAction, RejectReason } from '../../../contract/src/types.ts';
 import { readOnlineConfig, saveOnlineConfig } from './onlineConfig.ts';
 import type { OnlineInput } from './onlineConfig.ts';
 import { readServiceability, saveServiceability } from './serviceability.ts';
@@ -113,6 +113,8 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     const rider = b.rider && typeof b.rider === 'object' ? { name: String((b.rider as Record<string, unknown>).name ?? '').trim().slice(0, 60), phone: String((b.rider as Record<string, unknown>).phone ?? '').trim().slice(0, 15) || null } : undefined;
     return conn.step(c.actor, c.params.id!, to, { rider, reasonText: typeof b.reasonText === 'string' ? b.reasonText.slice(0, 200) : undefined, override: b.override as { userId: string; pin: string } | undefined });
   });
+  // Swiggy / Zomato: items out of stock, the customer's number, another rider, rider check
+  host.route('POST', '/orders/:id/platform-action', {}, (c) => conn.platformAction(c.actor, c.params.id!, body(c) as unknown as PlatformAction, c.requestId));
 
   // ---- map
   host.route('GET', '/tiles/:z/:x/:y', { auth: false }, async (c) => { // <img> tags cannot sign in; these are public map pictures

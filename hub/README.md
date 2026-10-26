@@ -112,6 +112,52 @@ owner types the hub address and the code into the POS.
 Files live in `backups/<storeId>/` next to `hub.db` (never in the database); the newest 30 backups per store are kept.
 They are not encrypted (the owner's choice, docs/DECISIONS.md), so secure the server and its disk.
 
+## Swiggy and Zomato (through UrbanPiper)
+
+Orders from Swiggy and Zomato come through UrbanPiper (`src/urbanpiper.ts`; their guide: https://api-docs.urbanpiper.com/downstream).
+One UrbanPiper account serves all stores. On the admin page:
+
+1. **Hub settings > Swiggy & Zomato (UrbanPiper account)**: the test account (pos-int.urbanpiper.com) until UrbanPiper
+   certifies the setup, then the live address from their certification email; **API username, API key, Biz ID** from
+   UrbanPiper's sandbox email (or the Postman collection's `Authorization: apikey <username>:<key>` and `X-UPR-Biz-Id`
+   headers). The key stays on the hub and is never shown again. **Save account**, **Test connection** (lists the
+   account's webhooks; changes nothing), **Set up order links** (registers `/v1/urbanpiper/<Biz ID>` for 9 webhook
+   events with a secret header, for all stores; UrbanPiper allows 5 calls a minute, so this takes about 2 minutes; refused
+   while the hub runs on localhost, which UrbanPiper cannot reach).
+2. **Each store** (Stores > the store > Swiggy & Zomato): its own **Store ID at UrbanPiper** (the hub store address by
+   default; one per store), city, address, phone, Swiggy and/or Zomato, packaging charge, on/off. **Save store details**,
+   **Send store details**, **Send menu**.
+
+`npm run urbanpiper-sample -- <store> [swiggy|zomato] [--self] [--cash]` sends a sample order into a hub on this PC, as
+UrbanPiper would (development only).
+
+Then:
+- **Orders** arrive like website orders, numbered S-… (Swiggy) and Z-… (Zomato), priced from the published menu at the
+  channel price (the POS bill); the platform's order number, OTP, total, charges, discounts and notes travel with it.
+  The same order sent twice makes one order. Unknown stores and other platforms are refused with 422 (not retried).
+- **Accept / Ready / Out for delivery / Delivered / Reject / Cancel** in the POS go back as order status updates
+  (Acknowledged with the preparation time for Zomato, Food Ready, Dispatched with the rider, Completed, Cancelled with a
+  reason code). When the platform's rider delivers, only the platform marks the order picked up and delivered.
+- **From the platform**: cancellations (also after accepting: the POS asks to cancel the bill), the rider's name, phone
+  and progress, and pickup and delivery.
+- **After the first "Send menu"**: menu changes from the POS are sent by themselves; items sold out or back on, and the
+  store not taking orders (no shift, or paused here), switch them off and on at Swiggy and Zomato.
+- **Requests from the ODS about one order**: Swiggy, before the food is ready: **Item out of stock** (Swiggy asks the
+  customer to change the order and the store gets the customer's masked number and a PIN, or the order is cancelled).
+  Zomato: **Customer's number**, **Ask for another rider** (bulk orders only) and **Rider check** (temperature, mask).
+  The platform's answers, and any request UrbanPiper refuses, appear on the order.
+- **Packaging charge on Swiggy and Zomato** (in the card): none, rupees per item, or a percentage of the item price; sent
+  with the menu as an item-level charge (both platforms take only that). GST on it is set in Atlas (Zomato) or by the
+  Swiggy contact. Cess stays inside the item price (UrbanPiper has GST taxes only).
+- Calls to UrbanPiper go through an outbox that retries while UrbanPiper cannot be reached or is busy. Everything sent
+  and received is listed under **Activity** on the store's page.
+- The menu is checked against the platforms' rules first (unique names, Zomato ignoring numbers in names, descriptions,
+  meat named in non-veg items, offer and alcohol words, veg marking). Prices that include GST are sent without it, with
+  CGST and SGST as taxes, so the customer pays the POS price.
+
+Needs the hub on the internet with an https address (UrbanPiper sends orders to it). Not tested against UrbanPiper's
+real test account yet (docs/HARDWARE_TEST_PLAN.md).
+
 ## What the hub already handles
 
 - Orders placed while the shop's internet is down wait on the hub. The POS collects them when it reconnects.
@@ -130,7 +176,7 @@ See `docs/ONLINE_ORDERS_PLAN.md` for the failure cases (F1 to F13).
 - The payment gateway (online payment).
 - Hosting the hub (and backups of the hub database itself, including the shops' online backups).
 - The store apps (the demo page stands in for them).
-- Swiggy/Zomato.
+- Swiggy/Zomato: category timing groups (menu sections for certain hours).
 - More than one hub process: one process per database for now.
 - Telling the POS when the hub admin pauses its store (the ODS still shows "accepting").
 - Admin accounts: one shared admin key, no per-person logins or audit log.

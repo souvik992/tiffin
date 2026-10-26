@@ -10,6 +10,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hub } from './hub.ts';
 import { createHubServer } from './http.ts';
+import { UrbanPiper } from './urbanpiper.ts';
 
 const dir = process.env.HUB_DATA_DIR ?? './hub-data';
 mkdirSync(dir, { recursive: true });
@@ -20,8 +21,9 @@ const hub = new Hub({
 });
 if (!process.env.HUB_ADMIN_KEY) log.warn('HUB_ADMIN_KEY is not set: store admin is disabled (use scripts/admin.ts on this machine)');
 else log.info('hub admin page: /admin');
-const server = createHubServer(hub, { adminKey: process.env.HUB_ADMIN_KEY, publicUrl: process.env.HUB_PUBLIC_URL || undefined });
-const sweeper = setInterval(() => { try { hub.sweep(); } catch (e) { log.warn('sweep failed', String(e)); } }, 5000);
+const urbanpiper = new UrbanPiper(hub, { log }); // Swiggy / Zomato (set up per store on the admin page)
+const server = createHubServer(hub, { adminKey: process.env.HUB_ADMIN_KEY, publicUrl: process.env.HUB_PUBLIC_URL || undefined, urbanpiper });
+const sweeper = setInterval(() => { try { hub.sweep(); } catch (e) { log.warn('sweep failed', String(e)); } void urbanpiper.pump().catch((e) => log.warn('urbanpiper outbox failed', String(e))); }, 5000);
 const port = Number(process.env.HUB_PORT ?? 4900);
 server.listen(port, process.env.HUB_HOST ?? '0.0.0.0', () => log.info(`order hub on http://localhost:${port} (data: ${dir})`));
 const stop = () => { clearInterval(sweeper); server.close(); server.closeAllConnections(); hub.close(); process.exit(0); };

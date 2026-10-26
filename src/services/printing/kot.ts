@@ -88,7 +88,11 @@ export function pendingKot(ctx: Ctx, orderId: string): KLine[] {
 /** The KOT state of an open order, for the cart: tickets sent so far and lines waiting to be sent. */
 export function kotStatus(ctx: Ctx, orderId: string) {
   const o = get<{ kot_count: number }>(ctx.db, 'SELECT kot_count FROM sale_order WHERE id = ?', orderId);
-  return { mode: kotMode(ctx), sentTickets: o?.kot_count ?? 0, pending: pendingKot(ctx, orderId).length };
+  // nothing sent yet (the usual case, checked on every cart change): every kitchen line is pending; one cheap count
+  const pending = (o?.kot_count ?? 0) === 0
+    ? get<{ n: number }>(ctx.db, `SELECT count(*) n FROM sale_order_line l JOIN item i ON i.id = l.item_id WHERE l.order_id = ? AND ifnull(i.sku, '') NOT IN (${FEE_SKUS.map(() => '?').join(',')})`, orderId, ...FEE_SKUS)!.n
+    : pendingKot(ctx, orderId).length;
+  return { mode: kotMode(ctx), sentTickets: o?.kot_count ?? 0, pending };
 }
 
 // ---------------------------------------------------------------- printing

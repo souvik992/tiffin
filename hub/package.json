@@ -9,6 +9,7 @@
     "start": "node src/main.ts",
     "dev": "node scripts/dev.ts",
     "admin": "node scripts/admin.ts",
-    "test": "node --test --test-concurrency=1 \"test/*.test.ts\""
+    "test": "node --test --test-concurrency=1 \"test/*.test.ts\"",
+    "urbanpiper-sample": "node scripts/urbanpiper-sample.ts"
   }
 }
