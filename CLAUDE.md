@@ -64,6 +64,6 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 2. Code-signing certificate, update server, licensing (needs the owner's decisions; installer and auto-update are built).
 3. Encryption at rest (SQLCipher native module or BitLocker: undecided).
 4. Raster text for ₹ and Hindi.
-5. Online orders phase 2+ (docs/ONLINE_ORDERS_PLAN.md): customer web app, SMS OTP, payment gateway, hosting the hub; human review of the add-on loader. Swiggy/Zomato through UrbanPiper is built (branch urbanpiper): test against the pos-int account, then certification.
+5. Online orders phase 2+ (docs/ONLINE_ORDERS_PLAN.md): customer web app, SMS OTP, payment gateway, hosting the hub; human review of the add-on loader. Swiggy/Zomato through UrbanPiper is built (on main since 0.3.12): test against the pos-int account, then certification.
 6. LAN multi-device.
 7. Opt-in cloud sync (the outbox table is already written).
