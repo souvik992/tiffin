@@ -12,11 +12,12 @@ import { MenuCategories } from './MenuCategories.tsx';
 import { MenuImport } from './MenuImport.tsx';
 import { MenuPhotos } from './MenuPhotos.tsx';
 import { MenuAddons } from './MenuAddons.tsx';
+import { MenuStations } from './MenuStations.tsx';
 
-type Tab = 'items' | 'categories' | 'addons' | 'import' | 'photos';
-const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['addons', 'Add-on groups'], ['import', 'Bulk upload'], ['photos', 'Bulk photos']];
+type Tab = 'items' | 'categories' | 'stations' | 'addons' | 'import' | 'photos';
+const TABS: Array<[Tab, string]> = [['items', 'Items'], ['categories', 'Categories'], ['stations', 'Prep stations'], ['addons', 'Add-on groups'], ['import', 'Bulk upload'], ['photos', 'Bulk photos']];
 const TAB_KEY = 'pos.menu.tab';
-const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'addons' || t === 'import' || t === 'photos' ? t : 'items'; } catch { return 'items'; } };
+const readTab = (): Tab => { try { const t = sessionStorage.getItem(TAB_KEY); return t === 'categories' || t === 'stations' || t === 'addons' || t === 'import' || t === 'photos' ? t : 'items'; } catch { return 'items'; } };
 
 /** Menu creation: items (with veg / non-veg), categories and bulk upload. Changes appear on the billing screen at once. */
 export function MenuItems() {
@@ -45,6 +46,7 @@ export function MenuItems() {
       {!catalog ? <p className="text-sm text-muted-foreground">Loading…</p>
         : tab === 'items' ? <ItemsTab catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'categories' ? <MenuCategories catalog={catalog} canEdit={canEdit} reload={load} />
+        : tab === 'stations' ? <MenuStations catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'addons' ? <MenuAddons catalog={catalog} canEdit={canEdit} reload={load} />
         : tab === 'photos' ? <MenuPhotos catalog={catalog} canEdit={canEdit} reload={load} />
         : <MenuImport canEdit={canEdit} reload={load} onDone={() => setTab('items')} />}

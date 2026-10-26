@@ -187,6 +187,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Sales channel badges (Swiggy, Zomato, Website, App) on ODS tiles, the finished list and the channel row; globe icon in the side menu: number of new orders waiting, else a green/red dot
 - [ ] Official Swiggy/Zomato logo files (their partner programmes provide them)
 - [x] Online-order buzzer on every screen (ODS 1.0.2): rings loudly and repeats while an order waits to be accepted, with a "New online order" banner (Silence, Open ODS); stops on accept/reject; the ODS Sound switch controls it; the desktop app lets it ring without a tap first
+- [x] Buzzer in the automatic accept mode (ODS 1.0.9): an order accepted automatically never waits, so it used to make no sound; now a new order rings twice and a banner shows it for 20 seconds on every screen ("Accepted automatically: the bill and kitchen ticket are printing"); orders already there when the POS starts do not ring. Tested in a browser with a test POS and hub (tones counted); not yet heard on the shop PC or an Android device
 - [x] Menu photos sent to the hub (only missing ones, checked against their content name; removed with the item's photo); `image` on published menu items
 - [x] Live ODS screen: New / Preparing / Ready / On the way, sound on new orders, accept countdown, accept with preparation time (bill + KOT print at once), reject with reason, rider name and phone, delivered / collected, cancel with manager approval (cancels the bill)
 - [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
@@ -236,3 +237,13 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Android: printers that need a vendor SDK (PAX, some iMin)
 - [ ] Android: printing on a real Bluetooth / USB / Sunmi built-in printer, and the backup copy to a real USB stick (emulator: the print reached the app's printer service, which answered correctly; folder picker needs a person)
 - [ ] Android: tried on a real POS machine (speed, printer, power cut during a bill)
+
+## Kitchen tickets (KOT), POS 0.3.11 / ODS 1.0.9
+- [x] Prep stations (Menu creation > Prep stations): create, rename, remove; a station gets categories and single items (the item's own station wins); printers list station ids or All stations (old free-text kitchen stations became stations in migration 14)
+- [x] KOT split by prep station; only what the kitchen has not had (kot_line per order): ADD-ON KOT n, CANCEL lines, a cleared cart after a KOT prints a cancel ticket; no prices, no delivery/packaging charges
+- [x] Settings > Store settings > Kitchen tickets: on prep station printers (default), with the bill (receipt printer, one per station), or off
+- [x] Three KOT designs (.tiffinkot): customer KOT (standard = the shop's sample ticket), prep station KOT, online order KOT; upload, preview at 58/80 mm, back to standard (docs/KOT_TEMPLATES.md, templates/kot/)
+- [x] Cart KOT button (count of items not sent): send now, or print all again (REPRINT, manager approves); Orders: reprint kitchen ticket
+- [x] Online orders: "When an order is accepted, print" the bill and/or the KOT (manual or automatic accept); ODS Bill and KOT buttons (first print free, then a reprint with approval); online KOT shows channel, online number, delivery/pickup, customer
+- [ ] KOT on a real kitchen printer (and with the bill on a real receipt printer); table numbers / dine-in on the KOT (the POS has no tables)
+

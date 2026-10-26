@@ -13,8 +13,10 @@ import { createHubServer } from '../../../hub/src/http.ts';
 import { register } from '../backend/index.ts';
 import { saveOnlineConfig } from '../backend/onlineConfig.ts';
 import { saveServiceability } from '../backend/serviceability.ts';
-import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup, saveMenuSync } from '../backend/store.ts';
+import { MIGRATIONS, getOrder, pendingOutbox, readPrintOnAccept, saveFeeTaxGroup, saveMenuSync, savePrintOnAccept } from '../backend/store.ts';
 import { removeItemImage, setItemImage } from '../../../src/services/images.ts';
+import { parseEscPos } from '../../../src/services/printing/virtual.ts';
+import { all } from '../../../src/store/db.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 import type { Hours } from '../../../contract/src/serviceability.ts';
 
@@ -245,5 +247,31 @@ test('ODS menu sync: each channel lists its own items at its own prices; descrip
     await until(() => getOrder(s.host, placed.json.order.id) !== null, 'arrives');
     const acc = s.conn.accept(s.env.cashier, placed.json.order.id, 10, rid());
     assert.equal(acc.billTotal, aq.total, 'the GST bill equals what the app customer pays');
+  } finally { await s.close(); }
+});
+
+test('ODS connector: what prints on accepting (bill and/or KOT) is the owner\'s choice; Bill and KOT buttons print once freely, then reprints need a manager', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    assert.throws(() => savePrintOnAccept(s.host, s.env.manager, { bill: false, kot: true }), /permission|allowed|owner/i);
+    savePrintOnAccept(s.host, s.env.owner, { bill: false, kot: true });
+    const placed = await s.order('9000000901', { fulfilment: 'DELIVERY' });
+    await until(() => getOrder(s.host, placed.order.id) !== null, 'arrives');
+    const acc = s.conn.accept(s.env.cashier, placed.order.id, 15, rid());
+    const jobs = (kind: string) => all<{ payload: Uint8Array }>(s.env.ctx.db, 'SELECT payload FROM print_job WHERE kind = ? AND ref_id = ?', kind, acc.billInvoiceId!);
+    assert.equal(jobs('RECEIPT').length, 0, 'no bill printed on accepting');
+    const kot = jobs('KOT').map((j) => parseEscPos(j.payload).text);
+    assert.ok(kot.length >= 1 && kot.every((t) => t.includes('ONLINE ORDER - KOT') && t.includes(placed.order.number) && t.includes('DELIVERY')), kot.join('\n---\n'));
+    // the Bill button: first print free, then a reprint (manager)
+    s.conn.print(s.env.cashier, placed.order.id, 'bill', rid());
+    assert.equal(jobs('RECEIPT').length, 1);
+    assert.throws(() => s.conn.print(s.env.cashier, placed.order.id, 'bill', rid()), /manager|approve/i);
+    const manager = s.env.manager;
+    s.conn.print(s.env.cashier, placed.order.id, 'bill', rid(), { userId: manager.userId, pin: '2345' });
+    assert.equal(jobs('RECEIPT').length, 2);
+    // the KOT button: the tickets already went out, so it is a reprint
+    assert.throws(() => s.conn.print(s.env.cashier, placed.order.id, 'kot', rid()), /manager|approve/i);
+    assert.deepEqual(readPrintOnAccept(s.host), { bill: false, kot: true });
   } finally { await s.close(); }
 });

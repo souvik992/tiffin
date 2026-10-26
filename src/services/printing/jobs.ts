@@ -4,7 +4,8 @@ import { runCommand } from '../commands.ts';
 import { audit } from '../audit.ts';
 import { assertPerm } from '../permissions.ts';
 import { loadSettings } from '../settings.ts';
-import { buildKot, buildReceipt, buildTestPage, sampleReceiptData } from './receipt.ts';
+import { buildReceipt, buildTestPage, sampleReceiptData } from './receipt.ts';
+import { queuePendingKot, reprintOrderKot } from './kot.ts';
 import { designOptions } from './receiptDesign.ts';
 import { EscPos } from './escpos.ts';
 import type { ReceiptData } from './receipt.ts';
@@ -46,67 +47,33 @@ const printers = (ctx: Ctx, where: string) => all<PrinterRow>(ctx.db, `SELECT * 
 export interface PrintSummary { receipts: number; kitchenTickets: number; warnings: Array<'NO_RECEIPT_PRINTER' | 'NO_KITCHEN_PRINTER'> }
 
 /**
- * Queues the customer receipt (and, for first prints of a sale, kitchen tickets). Runs inside the caller's transaction.
- * Returns what was queued, with warnings when nothing could print, so billing never fails silently.
+ * Queues the customer receipt and the kitchen tickets not sent yet (printing/kot.ts). Runs inside the caller's
+ * transaction. Returns what was queued, with warnings when nothing could print, so billing never fails silently.
+ * print.receipt false: no receipt now (online orders whose bill the ODS prints by hand).
  */
-export function queueInvoicePrints(ctx: Ctx, f: InvoiceFull, opts: { copyNo: number; kot: boolean }): PrintSummary {
+export function queueInvoicePrints(ctx: Ctx, f: InvoiceFull, opts: { copyNo: number; kot: boolean; receipt?: boolean; cashierName?: string | null }): PrintSummary {
   const out: PrintSummary = { receipts: 0, kitchenTickets: 0, warnings: [] };
-  let receiptPrinters = 0, kotWanted = false, kotTargets = 0;
+  let receiptPrinters = 0;
   const settings = loadSettings(ctx);
   const design = designOptions(ctx);
   const hasCash = f.payments.some((p) => p.mode === 'CASH');
-  for (const pr of printers(ctx, 'is_receipt = 1')) {
+  if (opts.receipt !== false) for (const pr of printers(ctx, 'is_receipt = 1')) {
     receiptPrinters++;
     const bytes = buildReceipt(receiptDataFrom(f), { cols: colsFor(pr.width_mm), copyNo: opts.copyNo, footer: settings.receiptFooter, drawer: pr.drawer === 1 && hasCash && opts.copyNo === 1, ...design });
     if (enqueueJob(ctx, { kind: 'RECEIPT', refId: f.invoice.id, printerId: pr.id, payload: bytes, dedupeKey: `receipt:${f.invoice.id}:${pr.id}:${opts.copyNo}` })) out.receipts++;
   }
+  if (opts.receipt !== false && receiptPrinters === 0) out.warnings.push('NO_RECEIPT_PRINTER');
   if (opts.kot && f.invoice.docType === 'TAX_INVOICE') {
-    const k = queueKitchenTickets(ctx, f, 'kot', false);
-    out.kitchenTickets = k.queued; kotWanted = k.wanted; kotTargets = k.targets;
+    const k = queuePendingKot(ctx, f.invoice.orderId, opts.cashierName ?? null);
+    out.kitchenTickets = k.queued;
+    for (const w of k.warnings) if (!out.warnings.includes(w)) out.warnings.push(w);
   }
-  if (receiptPrinters === 0) out.warnings.push('NO_RECEIPT_PRINTER');
-  if (kotWanted && kotTargets === 0) out.warnings.push('NO_KITCHEN_PRINTER');
   return out;
 }
 
-/** Kitchen tickets for a bill, one per kitchen station and printer. `tag` keeps each print run apart (first print, reprint n). */
-function queueKitchenTickets(ctx: Ctx, f: InvoiceFull, tag: string, reprint: boolean): { queued: number; wanted: boolean; targets: number } {
-  let queued = 0, kotWanted = false, kotTargets = 0;
-  {
-    const rows = all<{ id: string; station: string | null }>(ctx.db,
-      `SELECT il.id, c.kitchen_station AS station FROM invoice_line il LEFT JOIN item i ON i.id = il.item_id LEFT JOIN category c ON c.id = i.category_id WHERE il.invoice_id = ?`, f.invoice.id);
-    const stationOf = new Map(rows.map((r) => [r.id, r.station ?? '']));
-    const stations = new Set(f.lines.map((l) => stationOf.get(l.id) ?? ''));
-    const kotPrinters = printers(ctx, "stations <> '[]'");
-    const note = get<{ note: string | null }>(ctx.db, 'SELECT note FROM sale_order WHERE id = ?', f.invoice.orderId)?.note ?? null;
-    for (const st of stations) {
-      const lines = f.lines.filter((l) => (stationOf.get(l.id) ?? '') === st);
-      if (st !== '') kotWanted = true;
-      for (const pr of kotPrinters) {
-        const list = JSON.parse(pr.stations) as string[];
-        if (!(list.includes('*') || (st !== '' && list.includes(st)))) continue;
-        if (st !== '') kotTargets++;
-        const bytes = buildKot({ tokenNo: f.invoice.tokenNo, channel: f.orderChannel, createdAt: f.invoice.issuedAt, station: st, orderNote: note, reprint,
-          lines: lines.map((l) => ({ name: l.name, qtyMilli: l.qtyMilli, modifiers: l.modifiers, note: l.note })) }, colsFor(pr.width_mm));
-        if (enqueueJob(ctx, { kind: 'KOT', refId: f.invoice.id, printerId: pr.id, payload: bytes, dedupeKey: `${tag}:${f.invoice.id}:${pr.id}:${st}` })) queued++;
-      }
-    }
-  }
-  return { queued, wanted: kotWanted, targets: kotTargets };
-}
-
-/** KOT reprint (the kitchen lost the ticket): every station's ticket again, marked REPRINT. A manager approves, like a bill reprint. */
+/** KOT reprint (the kitchen lost the ticket): every ticket of the bill again, marked REPRINT. A manager approves, like a bill reprint. */
 export function reprintKot(ctx: Ctx, actor: Actor, requestId: string, input: { invoiceId: string }, approve: (perm: 'invoice.reprint') => string) {
-  return runCommand(ctx, requestId, 'kot.reprint', actor, () => {
-    const approver = approve('invoice.reprint');
-    const f = loadInvoiceFull(ctx, input.invoiceId);
-    if (f.invoice.docType !== 'TAX_INVOICE') throw new AppError('VALIDATION', 'Kitchen tickets belong to bills, not credit notes.');
-    const prior = get<{ n: number }>(ctx.db, "SELECT count(DISTINCT substr(dedupe_key, 1, instr(dedupe_key, ':'))) n FROM print_job WHERE kind = 'KOT' AND ref_id = ?", f.invoice.id)!.n;
-    const k = queueKitchenTickets(ctx, f, `kot-reprint-${Math.max(prior, 1)}`, true);
-    if (k.targets === 0 && k.queued === 0) throw new AppError('NO_KITCHEN_PRINTER', 'No kitchen printer is set up for these items. Set one up in Settings > Printer setup.', 409);
-    audit(ctx, actor.userId, 'kot.reprint', 'invoice', f.invoice.id, { approver, tickets: k.queued });
-    return { queued: k.queued };
-  });
+  return reprintOrderKot(ctx, actor, requestId, { invoiceId: input.invoiceId }, approve);
 }
 
 export function reprintInvoice(ctx: Ctx, actor: Actor, requestId: string, input: { invoiceId: string; override?: { userId: string; pin: string } }, approve: (perm: 'invoice.reprint') => string) {
@@ -118,6 +85,21 @@ export function reprintInvoice(ctx: Ctx, actor: Actor, requestId: string, input:
     const queued = queueInvoicePrints(ctx, f, { copyNo, kot: false }).receipts;
     audit(ctx, actor.userId, 'invoice.reprint', 'invoice', f.invoice.id, { copyNo, approver });
     return { queued, copyNo };
+  });
+}
+
+/**
+ * A bill's print button where printing on billing can be off (online orders, the ODS): the first print needs no
+ * approval; after that it is a reprint, marked DUPLICATE, which a manager approves.
+ */
+export function printOrReprintInvoice(ctx: Ctx, actor: Actor, requestId: string, input: { invoiceId: string }, approve: (perm: 'invoice.reprint') => string) {
+  if (get(ctx.db, "SELECT 1 FROM print_job WHERE kind = 'RECEIPT' AND ref_id = ? LIMIT 1", input.invoiceId)) return reprintInvoice(ctx, actor, requestId, input, approve);
+  return runCommand(ctx, requestId, 'invoice.print', actor, () => {
+    assertPerm(actor, 'invoice.read');
+    const f = loadInvoiceFull(ctx, input.invoiceId);
+    const queued = queueInvoicePrints(ctx, f, { copyNo: 1, kot: false }).receipts;
+    audit(ctx, actor.userId, 'invoice.print', 'invoice', f.invoice.id);
+    return { queued, copyNo: 1 };
   });
 }
 
@@ -160,20 +142,22 @@ export function validateAddress(transport: PrinterRow['transport'], address: str
   }
 }
 
-function checkPrinter(i: PrinterInput) {
+function checkPrinter(i: PrinterInput, ctx: Ctx) {
   if (!i.name?.trim() || i.name.length > 60) throw new AppError('VALIDATION', 'Printer name is required (max 60 characters).');
   if (!['memory', 'tcp', 'file', 'spooler', 'serial', 'usb', 'android'].includes(i.transport)) throw new AppError('VALIDATION', 'Unknown printer connection.');
   i.address = validateAddress(i.transport, i.address);
   if (i.widthMm !== undefined && i.widthMm !== 58 && i.widthMm !== 80) throw new AppError('VALIDATION', 'Paper width must be 58 or 80 mm.');
   if (i.profile !== undefined && !(i.profile in PROFILES)) throw new AppError('VALIDATION', 'Unknown data speed setting.');
   const stations = i.stations ?? [];
-  if (!Array.isArray(stations) || stations.some((s) => typeof s !== 'string' || s.length > 30)) throw new AppError('VALIDATION', 'Invalid stations list.');
-  return stations;
+  if (!Array.isArray(stations) || stations.some((s) => typeof s !== 'string' || s.length > 64)) throw new AppError('VALIDATION', 'Invalid stations list.');
+  // '*' = every prep station; otherwise prep station ids (Menu > Prep stations)
+  for (const s of stations) if (s !== '*' && !get(ctx.db, 'SELECT 1 FROM prep_station WHERE id = ? AND deleted_at IS NULL', s)) throw new AppError('VALIDATION', 'Choose prep stations from the list (Menu > Prep stations).');
+  return [...new Set(stations)];
 }
 export function createPrinter(ctx: Ctx, actor: Actor, requestId: string, input: PrinterInput) {
   return runCommand(ctx, requestId, 'printer.create', actor, () => {
     assertPerm(actor, 'printer.manage');
-    const stations = checkPrinter(input);
+    const stations = checkPrinter(input, ctx);
     const id = ctx.ids.next();
     run(ctx.db, 'INSERT INTO printer(id, name, transport, address, width_mm, profile, is_receipt, drawer, stations, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       id, input.name.trim(), input.transport, input.address ?? null, input.widthMm ?? 80, input.profile ?? 'generic', input.isReceipt ? 1 : 0, input.drawer ? 1 : 0, JSON.stringify(stations), input.active === false ? 0 : 1, ctx.clock.now());
@@ -194,7 +178,7 @@ export function updatePrinter(ctx: Ctx, actor: Actor, requestId: string, id: str
       widthMm: input.widthMm ?? cur.width_mm, profile: input.profile ?? cur.profile, isReceipt: input.isReceipt ?? cur.is_receipt === 1,
       drawer: input.drawer ?? cur.drawer === 1, stations: input.stations ?? (JSON.parse(cur.stations) as string[]), active: input.active ?? cur.active === 1,
     };
-    const stations = checkPrinter(merged);
+    const stations = checkPrinter(merged, ctx);
     run(ctx.db, 'UPDATE printer SET name=?, transport=?, address=?, width_mm=?, profile=?, is_receipt=?, drawer=?, stations=?, active=? WHERE id=?',
       merged.name.trim(), merged.transport, merged.address ?? null, merged.widthMm ?? 80, merged.profile ?? 'generic', merged.isReceipt ? 1 : 0, merged.drawer ? 1 : 0, JSON.stringify(stations), merged.active ? 1 : 0, id);
     // Jobs waiting for a printer that is now off would wait forever: release them as failed so the cashier sees them.

@@ -7,6 +7,7 @@ import { emit } from './outbox.ts';
 import { assertPerm } from './permissions.ts';
 import { camel, camelAll } from './camel.ts';
 import { parsePaise } from '../core/money.ts';
+import { checkStationId } from './stations.ts';
 
 const MAX_PRICE = 1_000_000_000; // Rs 1 crore per unit
 
@@ -23,11 +24,11 @@ function clean(s: unknown, label: string, max: number, required = true): string 
 }
 
 export function getCatalog(ctx: Ctx) {
-  const categories = camelAll<Record<string, unknown>>(all(ctx.db, `SELECT c.id, c.name, c.sort_order, c.kitchen_station,
+  const categories = camelAll<Record<string, unknown>>(all(ctx.db, `SELECT c.id, c.name, c.sort_order, c.prep_station_id,
       (SELECT count(*) FROM item i WHERE i.category_id = c.id AND i.deleted_at IS NULL) AS item_count
     FROM category c WHERE c.deleted_at IS NULL ORDER BY c.sort_order, c.name`));
   const taxGroups = camelAll(all(ctx.db, 'SELECT id, name, rate_bp, cess_bp, price_includes_tax FROM tax_group WHERE deleted_at IS NULL ORDER BY rate_bp'));
-  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description, unavailable_on FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
+  const items = camelAll<Record<string, unknown>>(all(ctx.db, 'SELECT id, category_id, name, short_name, sku, barcode, hsn_code, tax_group_id, price, unit, is_veg, image_file, description, unavailable_on, prep_station_id FROM item WHERE deleted_at IS NULL AND active = 1 ORDER BY name'));
   const links = all<{ item_id: string; group_id: string }>(ctx.db, 'SELECT item_id, group_id FROM item_modifier_group');
   const byItem = new Map<string, string[]>();
   for (const l of links) byItem.set(l.item_id, [...(byItem.get(l.item_id) ?? []), l.group_id]);
@@ -54,29 +55,29 @@ export function itemByBarcode(ctx: Ctx, code: string) {
   return camel(get(ctx.db, 'SELECT id, category_id, name, price, unit, barcode FROM item WHERE barcode = ? AND deleted_at IS NULL AND active = 1', code)) ?? null;
 }
 
-export function createCategory(ctx: Ctx, actor: Actor, requestId: string, input: { name: string; sortOrder?: number; kitchenStation?: string | null }) {
+export function createCategory(ctx: Ctx, actor: Actor, requestId: string, input: { name: string; sortOrder?: number; prepStationId?: string | null }) {
   return runCommand(ctx, requestId, 'category.create', actor, () => {
     assertPerm(actor, 'catalog.write');
     const name = clean(input.name, 'Category name', 60)!.replace(/\s+/g, ' ');
     if (categoriesByKey(ctx).has(categoryKey(name))) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
     const id = ctx.ids.next();
-    run(ctx.db, 'INSERT INTO category(id, name, sort_order, kitchen_station, updated_at) VALUES (?,?,?,?,?)', id, name, input.sortOrder ?? 0, clean(input.kitchenStation, 'Kitchen station', 30, false), ctx.clock.now());
+    run(ctx.db, 'INSERT INTO category(id, name, sort_order, prep_station_id, updated_at) VALUES (?,?,?,?,?)', id, name, input.sortOrder ?? 0, checkStationId(ctx, input.prepStationId), ctx.clock.now());
     audit(ctx, actor.userId, 'category.create', 'category', id);
     emit(ctx, 'category', id, 'upsert', { id, name });
     return { id };
   });
 }
 
-export function updateCategory(ctx: Ctx, actor: Actor, requestId: string, id: string, input: { name?: string; sortOrder?: number; kitchenStation?: string | null }) {
+export function updateCategory(ctx: Ctx, actor: Actor, requestId: string, id: string, input: { name?: string; sortOrder?: number; prepStationId?: string | null }) {
   return runCommand(ctx, requestId, 'category.update', actor, () => {
     assertPerm(actor, 'catalog.write');
-    const cur = get<{ name: string; sort_order: number; kitchen_station: string | null }>(ctx.db, 'SELECT name, sort_order, kitchen_station FROM category WHERE id = ? AND deleted_at IS NULL', id);
+    const cur = get<{ name: string; sort_order: number; prep_station_id: string | null }>(ctx.db, 'SELECT name, sort_order, prep_station_id FROM category WHERE id = ? AND deleted_at IS NULL', id);
     if (!cur) throw new AppError('NOT_FOUND', 'Category not found.', 404);
     const name = input.name === undefined ? cur.name : clean(input.name, 'Category name', 60)!.replace(/\s+/g, ' ');
     const same = categoriesByKey(ctx).get(categoryKey(name));
     if (same && same.id !== id) throw new AppError('DUPLICATE', 'A category with this name already exists.', 409);
-    const station = input.kitchenStation === undefined ? cur.kitchen_station : clean(input.kitchenStation, 'Kitchen station', 30, false);
-    run(ctx.db, 'UPDATE category SET name=?, sort_order=?, kitchen_station=?, version=version+1, updated_at=? WHERE id=?', name, input.sortOrder ?? cur.sort_order, station, ctx.clock.now(), id);
+    const station = input.prepStationId === undefined ? cur.prep_station_id : checkStationId(ctx, input.prepStationId);
+    run(ctx.db, 'UPDATE category SET name=?, sort_order=?, prep_station_id=?, version=version+1, updated_at=? WHERE id=?', name, input.sortOrder ?? cur.sort_order, station, ctx.clock.now(), id);
     audit(ctx, actor.userId, 'category.update', 'category', id);
     emit(ctx, 'category', id, 'upsert', { id, name });
     return { id };

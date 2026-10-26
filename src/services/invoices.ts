@@ -50,7 +50,7 @@ export function validatePayments(ps: PaymentInput[], total: number): PaymentInpu
 
 const taxOf = (v: { cgst: number; sgst: number; igst: number; cess: number }) => v.cgst + v.sgst + v.igst + v.cess;
 
-export function finalizeInvoice(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; payments: PaymentInput[]; override?: Override }) {
+export function finalizeInvoice(ctx: Ctx, actor: Actor, requestId: string, input: { orderId: string; payments: PaymentInput[]; override?: Override; print?: { receipt?: boolean; kot?: boolean } }) {
   return runCommand(ctx, requestId, 'invoice.finalize', actor, (h) => {
     assertPerm(actor, 'invoice.finalize');
     assertDiskOk(ctx);
@@ -97,7 +97,7 @@ export function finalizeInvoice(ctx: Ctx, actor: Actor, requestId: string, input
     audit(ctx, actor.userId, 'invoice.finalize', 'invoice', invoiceId, { invoiceNo: rec.invoiceNo, total: rec.grandTotal });
     const full = loadInvoiceFull(ctx, invoiceId);
     emit(ctx, 'invoice', invoiceId, 'create', full);
-    const print = queueInvoicePrints(ctx, full, { copyNo: 1, kot: true });
+    const print = queueInvoicePrints(ctx, full, { copyNo: 1, kot: input.print?.kot !== false, receipt: input.print?.receipt !== false, cashierName: actor.name });
     ctx.hooks.fault?.('finalize.before_commit');
 
     h.after(() => { ctx.hooks.fault?.('finalize.after_commit'); appendJournal(ctx, { v: 1, type: 'invoice', at: now, full, stock }); });

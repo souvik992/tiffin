@@ -61,6 +61,22 @@ const FEE_TAX = 'ods_fee_tax_group';
 /** Settings ending in "_key" are secret: the POS never lists them (src/services/settings.ts). */
 const GOOGLE_KEY = 'ods_google_maps_key';
 export const readFeeTaxGroup = (host: HostApi): string | null => host.getSetting(FEE_TAX) || null;
+
+/** What prints when an online order is accepted (by staff or automatically): the bill, the kitchen tickets. Default: both. */
+export interface PrintOnAccept { bill: boolean; kot: boolean }
+const PRINT_ON_ACCEPT = 'ods_print_on_accept';
+export function readPrintOnAccept(host: HostApi): PrintOnAccept {
+  try { const v = JSON.parse(host.getSetting(PRINT_ON_ACCEPT) || '{}') as Partial<PrintOnAccept>; return { bill: v.bill !== false, kot: v.kot !== false }; } catch { return { bill: true, kot: true }; }
+}
+export function savePrintOnAccept(host: HostApi, actor: Actor, input: unknown): PrintOnAccept {
+  host.assertPerm(actor, 'settings.write');
+  const b = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  if (typeof b.bill !== 'boolean' || typeof b.kot !== 'boolean') throw new host.AppError('VALIDATION', 'Choose what prints on accepting.');
+  const v = { bill: b.bill, kot: b.kot };
+  host.setSetting(PRINT_ON_ACCEPT, JSON.stringify(v));
+  host.audit(host.ctx, actor.userId, 'ods.print_on_accept', 'settings', PRINT_ON_ACCEPT, v);
+  return v;
+}
 export function saveFeeTaxGroup(host: HostApi, taxGroupId: string | null) {
   if (taxGroupId !== null && !host.db.get('SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', taxGroupId)) throw new host.AppError('VALIDATION', 'Choose a GST rate from the list.');
   host.setSetting(FEE_TAX, taxGroupId ?? '');

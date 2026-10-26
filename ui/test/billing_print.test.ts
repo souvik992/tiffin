@@ -28,17 +28,20 @@ test('UI client: printers — add USB / Wi-Fi / Bluetooth printers, edit, test p
     await s.signIn('Cashier', '1111');
     await assert.rejects(s.api.createPrinter({ name: 'X', transport: 'tcp', address: '10.0.0.5', widthMm: 80, isReceipt: false, drawer: false, stations: [] }), is('FORBIDDEN'));
     await s.signIn('Manager', '2345');
+    // printers list prep station ids (Menu > Prep stations)
+    const st = Object.fromEntries((await s.api.prepStations()).map((x) => [x.name, x.id]));
+    const kitchen = st['Kitchen']!, bar = st['Bar']!;
     const usb = await s.api.createPrinter({ name: 'Counter USB', transport: 'spooler', address: 'EPSON TM-T82 Receipt', widthMm: 80, isReceipt: true, drawer: true, stations: [] });
-    const wifi = await s.api.createPrinter({ name: 'Kitchen Wi-Fi', transport: 'tcp', address: '192.168.1.60', widthMm: 80, isReceipt: false, drawer: false, stations: ['kitchen'] });
-    const bt = await s.api.createPrinter({ name: 'Bluetooth 58', transport: 'serial', address: 'com6', widthMm: 58, isReceipt: false, drawer: false, stations: ['bar'] });
+    const wifi = await s.api.createPrinter({ name: 'Kitchen Wi-Fi', transport: 'tcp', address: '192.168.1.60', widthMm: 80, isReceipt: false, drawer: false, stations: [kitchen] });
+    const bt = await s.api.createPrinter({ name: 'Bluetooth 58', transport: 'serial', address: 'com6', widthMm: 58, isReceipt: false, drawer: false, stations: [bar] });
     await assert.rejects(s.api.createPrinter({ name: 'Bad', transport: 'serial', address: 'COM6;calc', widthMm: 58, isReceipt: false, drawer: false, stations: [] }), is('VALIDATION'));
     let list = await s.api.printers();
     assert.equal(list.find((p) => p.id === bt.id)!.address, 'COM6'); // normalised
     assert.deepEqual(list.find((p) => p.id === wifi.id)!.stats, { queued: 0, failed: 0, lastError: null, lastPrintedAt: null });
 
-    await s.api.updatePrinter(wifi.id, { address: '192.168.1.61:9100', stations: ['kitchen', 'bar'] });
+    await s.api.updatePrinter(wifi.id, { address: '192.168.1.61:9100', stations: [kitchen, bar] });
     list = await s.api.printers();
-    assert.deepEqual(list.find((p) => p.id === wifi.id)!.stations, ['kitchen', 'bar']);
+    assert.deepEqual(list.find((p) => p.id === wifi.id)!.stations, [kitchen, bar]);
     const t = await s.api.testPrint(usb.id);
     assert.ok(t.jobId);
     const off = await s.api.updatePrinter(usb.id, { active: false });

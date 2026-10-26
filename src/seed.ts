@@ -4,6 +4,7 @@ import type { Actor } from './services/ctx.ts';
 import { setupFirstRun, createUser } from './services/auth.ts';
 import { createCategory, createItem, createModifierGroup, setItemModifierGroups } from './services/catalog.ts';
 import { createPrinter } from './services/printing/jobs.ts';
+import { createStation } from './services/stations.ts';
 import { all } from './store/db.ts';
 import { pathToFileURL } from 'node:url';
 import type { Ctx } from './services/ctx.ts';
@@ -21,8 +22,9 @@ export function seedDemo(ctx: Ctx) {
   createUser(ctx, owner, rid(), { name: 'Cashier', role: 'cashier', pin: '1111', mobile: '9000000003' });
   const tg = Object.fromEntries(all<{ id: string; rate_bp: number }>(ctx.db, 'SELECT id, rate_bp FROM tax_group').map((t) => [t.rate_bp, t.id]));
   const cats: Record<string, string> = {};
-  for (const [name, station] of [['Burgers', 'kitchen'], ['Wraps', 'kitchen'], ['Sides', 'kitchen'], ['Beverages', 'bar'], ['Desserts', 'bar']] as const) {
-    cats[name] = createCategory(ctx, owner, rid(), { name, kitchenStation: station }).id;
+  const kitchen = createStation(ctx, owner, rid(), { name: 'Kitchen' }).id, bar = createStation(ctx, owner, rid(), { name: 'Bar' }).id;
+  for (const [name, station] of [['Burgers', kitchen], ['Wraps', kitchen], ['Sides', kitchen], ['Beverages', bar], ['Desserts', bar]] as const) {
+    cats[name] = createCategory(ctx, owner, rid(), { name, prepStationId: station }).id;
   }
   const items: Array<[string, string, number, number, string?]> = [
     ['Classic Veg Burger', 'Burgers', 9900, 500], ['Cheese Burger', 'Burgers', 12900, 500], ['Chicken Burger', 'Burgers', 14900, 500], ['Double Patty Burger', 'Burgers', 19900, 500],
@@ -37,7 +39,7 @@ export function seedDemo(ctx: Ctx) {
   const extras = createModifierGroup(ctx, owner, rid(), { name: 'Add-ons', minSelect: 0, maxSelect: 3, modifiers: [{ name: 'Extra cheese', price: 2000 }, { name: 'Extra patty', price: 4000 }, { name: 'Jalapenos', price: 1000 }] });
   for (const n2 of ['Classic Veg Burger', 'Cheese Burger', 'Chicken Burger', 'Double Patty Burger']) setItemModifierGroups(ctx, owner, rid(), ids[n2]!, [extras.id]);
   createPrinter(ctx, owner, rid(), { name: 'Counter receipt (virtual)', transport: 'memory', widthMm: 80, isReceipt: true, drawer: true });
-  createPrinter(ctx, owner, rid(), { name: 'Kitchen (virtual)', transport: 'memory', widthMm: 80, stations: ['kitchen', 'bar'] });
+  createPrinter(ctx, owner, rid(), { name: 'Kitchen (virtual)', transport: 'memory', widthMm: 80, stations: [kitchen, bar] });
   return { owner };
 }
 

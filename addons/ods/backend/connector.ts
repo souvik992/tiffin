@@ -11,6 +11,7 @@ import { readOnlineConfig } from './onlineConfig.ts';
 import { readServiceability } from './serviceability.ts';
 import { listsItem, readMenuSync, savePublishedAt, SYNC_CHANNELS } from './store.ts';
 import type { MenuSync, SyncChannel } from './store.ts';
+import { readPrintOnAccept } from './store.ts';
 import { enqueue, getOrder, listOrders, outboxDone, outboxFailed, pendingOutbox, readFeeTaxGroup, saveOrder, setState } from './store.ts';
 import type { LocalOrder } from './store.ts';
 
@@ -359,6 +360,7 @@ export class Connector {
     const svc = readServiceability(this.host);
     const prep = prepMinutes ?? (o.fulfilment === 'PICKUP' ? svc.pickup.etaMinutes : this.prepDefault);
     if (!Number.isInteger(prep) || prep < 1 || prep > 180) throw new this.host.AppError('VALIDATION', 'Preparation time must be 1 to 180 minutes.');
+    const printOnAccept = readPrintOnAccept(this.host);
     const who = o.customer.name ? `${o.customer.name} ` : '';
     const addr = o.address ? ` | ${o.address.line1}${o.address.landmark ? `, ${o.address.landmark}` : ''}, ${o.address.pincode}` : '';
     const bill = this.host.billing.bill(this.host.ctx, actor, `ods-${requestId}`.slice(0, 120), {
@@ -367,6 +369,8 @@ export class Connector {
       lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note, ...this.billPrice(o.channel, l.itemId) })),
       fees: { delivery: price.deliveryFee, packaging: price.packagingFee, taxGroupId: readFeeTaxGroup(this.host) },
       paymentMode: o.payment === 'COD' ? 'CASH' : 'UPI',
+      fulfilment: o.fulfilment,
+      print: { receipt: printOnAccept.bill, kot: printOnAccept.kot }, // POS 0.3.11; older POS print both
     });
     this.host.db.tx(() => {
       setState(this.host, orderId, 'ACCEPTED', { billInvoiceId: bill.invoiceId, billNo: bill.invoiceNo, billTotal: bill.grandTotal, alert: price.differs ? `Billed at the POS price Rs ${(bill.grandTotal / 100).toFixed(2)} (customer was shown Rs ${(o.total / 100).toFixed(2)}).` : null, patch: { prepMinutes: prep, posBillNo: bill.invoiceNo } });
@@ -415,6 +419,17 @@ export class Connector {
     this.bus.emit('change');
     void this.flush();
     return getOrder(this.host, orderId)!;
+  }
+
+  /** The ODS's Bill and KOT buttons: the first print needs no approval (printing on accepting may be off); a reprint needs a manager. */
+  print(actor: Actor, orderId: string, what: 'bill' | 'kot', requestId: string, override?: { userId: string; pin: string }) {
+    const lo = getOrder(this.host, orderId);
+    if (!lo) throw new this.host.AppError('NOT_FOUND', 'Order not found.', 404);
+    if (!lo.billInvoiceId) throw new this.host.AppError('NOT_BILLED', 'Accept the order first: it has no bill yet.', 409);
+    if (!this.host.printing) throw new this.host.AppError('UPDATE_POS', 'Update the POS to print from the ODS (POS 0.3.11 or newer).', 409);
+    const r = what === 'bill' ? this.host.printing.bill(actor, `ods-print-${requestId}`.slice(0, 120), lo.billInvoiceId, override) : this.host.printing.kot(actor, `ods-kot-${requestId}`.slice(0, 120), lo.billInvoiceId, override);
+    this.host.audit(this.host.ctx, actor.userId, `ods.print_${what}`, 'ods_order', orderId);
+    return r;
   }
 
   newRequestId() { return randomUUID(); }

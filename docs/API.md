@@ -11,6 +11,7 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 |---|---|---|
 | GET `/api/ping`, `/api/login-users` | public | active users (id, name, role, hasMobile) for the approval dialog and for staff without a mobile number; numbers are never shown |
 | POST `/api/setup` | public, once | creates outlet, counter, owner, GST groups |
+| Kitchen tickets: GET `/api/kot`, PUT `/api/kot/mode` `{ mode: stations\|with_bill\|off }`, POST `/api/kot/designs/:slot/preview` `{ widthMm, fileName?, content? }`, PUT/DELETE `/api/kot/designs/:slot` (slot customer, station, online); POST `/api/orders/:id/kot` (send what is new), `/api/orders/:id/kot-reprint` `{ override? }`, `/api/invoices/:id/kot` and `/api/invoices/:id/print` (first print, then reprint with approval); GET/POST/PATCH/DELETE `/api/prep-stations` (PATCH `{ name?, categoryIds?, itemIds? }`). docs/KOT_TEMPLATES.md | | |
 | POST `/api/auth/login` `{ mobile, pin }` (sign-in) or `{ userId, pin }` (unlock after inactivity; staff without a mobile number); `/api/auth/logout`; GET `/api/me` | | an unknown number and a wrong PIN get the same answer |
 | GET `/api/catalog`, `/api/items/search?q=`, `/api/items/by-barcode/:code` | C | |
 | POST/PATCH/DELETE `/api/items`, POST `/api/categories`, `/api/tax-groups`, `/api/modifier-groups`, PUT `/api/items/:id/modifier-groups` | M | |

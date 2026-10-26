@@ -1,0 +1,78 @@
+{
+  "format": "tiffin-kot",
+  "version": 1,
+  "name": "Standard KOT",
+  "description": "Token and prep station in big letters, then the items with their notes.",
+  "blocks": [
+    {
+      "type": "text",
+      "text": "{{outlet.name}}",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "KITCHEN ORDER TICKET",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "kot-title",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "TOKEN",
+      "align": "center",
+      "if": "kot.token"
+    },
+    {
+      "type": "text",
+      "text": "{{kot.token-station}}",
+      "align": "center",
+      "size": "big",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "{{order.type}}",
+      "align": "center"
+    },
+    {
+      "type": "field",
+      "label": "Order: {{order.no}}",
+      "value": "{{kot.date}}"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "items"
+    },
+    {
+      "type": "text",
+      "text": "Order note: {{order.note}}"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "field",
+      "label": "Items: {{kot.items}}",
+      "value": "Qty: {{kot.qty}}"
+    },
+    {
+      "type": "blank"
+    },
+    {
+      "type": "text",
+      "text": "** END **",
+      "align": "center",
+      "bold": true
+    }
+  ]
+}

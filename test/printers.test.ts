@@ -29,8 +29,8 @@ test('migrations v3 and v4: a version 2 database keeps its printers and print jo
       assert.equal(currentSchemaVersion(db), MIGRATIONS.at(-1)!.version);
       assert.deepEqual(all<Record<string, unknown>>(db, 'SELECT id, name, transport, address, width_mm, is_receipt, drawer, stations, active, created_at FROM printer ORDER BY id').map((r) => ({ ...r })), [
         { id: 'p1', name: 'Counter', transport: 'spooler', address: 'POS-80', width_mm: 80, is_receipt: 1, drawer: 1, stations: '[]', active: 1, created_at: 5 },
-        { id: 'p2', name: 'Kitchen', transport: 'tcp', address: '192.168.1.50:9100', width_mm: 58, is_receipt: 0, drawer: 0, stations: '["kitchen"]', active: 1, created_at: 6 },
-      ]);
+        { id: 'p2', name: 'Kitchen', transport: 'tcp', address: '192.168.1.50:9100', width_mm: 58, is_receipt: 0, drawer: 0, stations: JSON.stringify([get<{ id: string }>(db, "SELECT id FROM prep_station WHERE name = 'kitchen'")!.id]), active: 1, created_at: 6 },
+      ]); // v14: the station name "kitchen" became a prep station, and the printer now lists its id
       assert.equal(get<{ p: string }>(db, "SELECT printer_id p FROM print_job WHERE id = 'j1'")!.p, 'p1');
       run(db, "INSERT INTO printer(id, name, transport, address, created_at) VALUES ('p3', 'Bluetooth', 'serial', 'COM5', 8)");
       run(db, "INSERT INTO printer(id, name, transport, address, created_at) VALUES ('p5', 'USB direct', 'usb', '0416:5011', 9)"); // v4: driverless USB

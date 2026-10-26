@@ -19,7 +19,7 @@ const code = (fn: () => unknown): string => { try { fn(); } catch (e) { if (e in
 test('migrations: fresh database, idempotent reopen, checksum tamper and too-new schema are detected', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pos-mig-')); const path = join(dir, 'm.db');
   try {
-    const a = openDb(path); assert.equal(currentSchemaVersion(a), MIGRATIONS.length); a.close();
+    const a = openDb(path); assert.equal(currentSchemaVersion(a), MIGRATIONS.at(-1)!.version); a.close(); // versions may skip a number (branches)
     const b = openDb(path); assert.equal(get<{ n: number }>(b, 'SELECT count(*) n FROM schema_migrations')!.n, MIGRATIONS.length);
     run(b, 'UPDATE schema_migrations SET checksum = ? WHERE version = 1', sha256('tampered')); b.close();
     assert.throws(() => openDb(path), /modified after being applied/);

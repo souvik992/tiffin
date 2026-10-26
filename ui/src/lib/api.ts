@@ -15,7 +15,15 @@ export interface Coupon {
 }
 export type CouponInput = Omit<Coupon, 'id' | 'uses' | 'status'>;
 export interface StaffUser { id: string; name: string; role: Role; mobile: string | null; active: boolean; locked: boolean; createdAt: number; you: boolean }
-export interface Category { id: string; name: string; sortOrder: number; kitchenStation: string | null; itemCount: number }
+export interface Category { id: string; name: string; sortOrder: number; prepStationId: string | null; itemCount: number }
+/** Menu > Prep stations: where an item is made; kitchen tickets split by station. */
+export interface PrepStation { id: string; name: string; sortOrder: number; categoryIds: string[]; itemIds: string[]; itemCount: number; printers: Array<{ id: string; name: string }> }
+export type KotMode = 'stations' | 'with_bill' | 'off';
+export type KotSlot = 'customer' | 'station' | 'online';
+export interface KotDesignMeta { name: string; description: string | null; fileName: string; uploadedAt: number; uploadedBy: string }
+export interface KotSettings { mode: KotMode; slots: Record<KotSlot, { custom: KotDesignMeta | null; name: string }>; extension: string }
+export interface KotPrint { queued: number; kotNo: number | null; warnings: Array<'NO_KITCHEN_PRINTER' | 'NO_RECEIPT_PRINTER'> }
+export interface KotStatus { mode: KotMode; sentTickets: number; pending: number }
 export interface ImportPreview {
   rows: number;
   errors: Array<{ row: number; message: string }>;
@@ -26,6 +34,8 @@ export interface TaxGroup { id: string; name: string; rateBp: number; cessBp: nu
 export interface Item {
   id: string; categoryId: string | null; name: string; shortName: string | null; sku: string | null; barcode: string | null;
   hsnCode: string | null; taxGroupId: string; price: number; unit: string; isVeg: number | null; imageFile: string | null; description: string | null; modifierGroupIds: string[];
+  /** Its own prep station (wins over its category's), or null. */
+  prepStationId: string | null;
   /** false when marked "not available today" (back by itself tomorrow) */
   availableToday: boolean;
 }
@@ -49,7 +59,7 @@ export interface Order {
   /** The coupon on this bill; problem = why it does not apply right now. */
   coupon: { code: string; description: string | null; problem: string | null } | null;
 }
-export interface Cart { order: Order; lines: CartLine[]; totals: Totals }
+export interface Cart { order: Order; lines: CartLine[]; totals: Totals; kot?: KotStatus }
 export interface OpenOrder {
   id: string; status: 'DRAFT' | 'HELD'; tokenNo: number; channel: string; updatedAt: number; createdAt: number; lineCount: number;
   customerPhone: string | null; customerName: string | null; note: string | null; createdByName: string | null; grandTotal: number;
@@ -231,8 +241,8 @@ export function createApi(o: ApiOptions) {
     removeItemImage: (id: string, key?: string) => change<{ itemId: string; imageFile: null }>('DELETE', `/items/${enc(id)}/image`, {}, key),
     /** URL for an <img>. Photos are served without sign-in, by their stored name only. */
     imageUrl: (file: string) => `${base}/api/images/${enc(file)}`,
-    createCategory: (input: { name: string; kitchenStation: string | null }, key?: string) => change<{ id: string }>('POST', '/categories', input, key),
-    updateCategory: (id: string, input: { name?: string; kitchenStation?: string | null }, key?: string) => change<{ id: string }>('PATCH', `/categories/${enc(id)}`, input, key),
+    createCategory: (input: { name: string; prepStationId: string | null }, key?: string) => change<{ id: string }>('POST', '/categories', input, key),
+    updateCategory: (id: string, input: { name?: string; prepStationId?: string | null }, key?: string) => change<{ id: string }>('PATCH', `/categories/${enc(id)}`, input, key),
     deleteCategory: (id: string, key?: string) => change<{ id: string }>('DELETE', `/categories/${enc(id)}`, {}, key),
     reorderCategories: (ids: string[], key?: string) => change<{ ids: string[] }>('PUT', '/categories/order', { ids }, key),
     previewImport: (csv: string) => request<ImportPreview>('POST', '/items/import/preview', { csv }),
@@ -321,6 +331,18 @@ export function createApi(o: ApiOptions) {
     },
     invoice: (id: string) => get<InvoiceDetail>(`/invoices/${enc(id)}`),
     reprintKot: (id: string, override?: Override, key?: string) => change<{ queued: number }>('POST', `/invoices/${enc(id)}/kot-reprint`, override ? { override } : {}, key),
+    // kitchen tickets
+    sendKot: (orderId: string, key?: string) => change<KotPrint & KotStatus>('POST', `/orders/${enc(orderId)}/kot`, {}, key),
+    reprintOrderKot: (orderId: string, override?: Override, key?: string) => change<KotPrint>('POST', `/orders/${enc(orderId)}/kot-reprint`, override ? { override } : {}, key),
+    kotSettings: () => get<KotSettings>('/kot'),
+    setKotMode: (mode: KotMode, key?: string) => change<KotSettings>('PUT', '/kot/mode', { mode }, key),
+    previewKotDesign: (slot: KotSlot, widthMm: 58 | 80, file?: { fileName: string; content: string }) => request<{ name: string; description: string | null; widthMm: number; cols: number; lines: string[] }>('POST', `/kot/designs/${slot}/preview`, { widthMm, ...(file ?? {}) }),
+    setKotDesign: (slot: KotSlot, file: { fileName: string; content: string }, key?: string) => change<KotSettings>('PUT', `/kot/designs/${slot}`, file, key),
+    clearKotDesign: (slot: KotSlot, key?: string) => change<KotSettings>('DELETE', `/kot/designs/${slot}`, {}, key),
+    prepStations: () => get<PrepStation[]>('/prep-stations'),
+    createPrepStation: (name: string, key?: string) => change<{ id: string }>('POST', '/prep-stations', { name }, key),
+    updatePrepStation: (id: string, input: { name?: string; categoryIds?: string[]; itemIds?: string[] }, key?: string) => change<{ id: string }>('PATCH', `/prep-stations/${enc(id)}`, input, key),
+    deletePrepStation: (id: string, key?: string) => change<{ id: string }>('DELETE', `/prep-stations/${enc(id)}`, {}, key),
     correctPayment: (paymentId: string, input: { toMode: PayMode; reference: string | null; reason: string }, override?: Override, key?: string) => change<{ invoiceId: string }>('POST', `/payments/${enc(paymentId)}/correct`, override ? { ...input, override } : input, key),
     xReport: () => get<ZReport>('/shifts/current/x-report'),
     printXReport: (key?: string) => change<{ queued: number }>('POST', '/shifts/current/x-report/print', {}, key),

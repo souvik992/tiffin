@@ -187,11 +187,11 @@ test('UI client: inventory over HTTP — materials, purchase with backend totals
 test('UI client: menu module over HTTP — categories, veg / non-veg items, edits, and the bulk-upload template', async () => {
   const s = await start(); try {
     await s.signIn('Cashier', '1111');
-    await assert.rejects(s.api.createCategory({ name: 'Starters', kitchenStation: 'kitchen' }), is('FORBIDDEN'));
+    await assert.rejects(s.api.createCategory({ name: 'Starters', prepStationId: null }), is('FORBIDDEN'));
     await s.signIn('Manager', '2345');
 
-    const { id: starters } = await s.api.createCategory({ name: 'Starters', kitchenStation: 'kitchen' });
-    await assert.rejects(s.api.createCategory({ name: 'starters', kitchenStation: null }), is('DUPLICATE'));
+    const { id: starters } = await s.api.createCategory({ name: 'Starters', prepStationId: null });
+    await assert.rejects(s.api.createCategory({ name: 'starters', prepStationId: null }), is('DUPLICATE'));
     let cat = await s.api.catalog();
     const order = [starters, ...cat.categories.map((c) => c.id).filter((x) => x !== starters)];
     await s.api.reorderCategories(order);
