@@ -176,3 +176,14 @@ Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages).
 ## Accounting sign-off (CA)
 GST rates and inclusive/exclusive treatment, odd-paisa rule, discount before tax, round-off, invoice numbering
 and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month. Swiggy/Zomato bills: GST on food paid by the platform (section 9(5)), packaging charges, store-funded platform discounts, payment mode OTHER until the platform pays out.
+
+## Tiffin Data Manager (separate app)
+| Check | Result |
+|---|---|
+| Dev build and packaged build (win-unpacked) over a temporary shop: owner-only sign-in, dashboard, all data, bills view only, backup now; view only while a "POS" program runs (automated e2e) | Passed 2026-10-27, Windows 11 dev PC |
+| Installer on a PC without the POS: installs per user, opens a backup file from a USB drive (view only) | |
+| Installer on a PC with an older POS (e.g. 0.1.1) and real bills: view only with the "update the POS" message, the POS still opens afterwards | |
+| With the POS open: switches to view only within a few seconds; back to changes after the POS closes | |
+| Restore on a shop PC with the POS closed; then the POS opens with the restored data | |
+| Uninstalling it leaves the POS and its data untouched | |
+

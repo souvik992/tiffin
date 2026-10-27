@@ -9,6 +9,7 @@ data/
 
 # build output
 ui/dist/
+ui/dist-manager/
 desktop/dist/
 desktop/release/
 addons/dist/

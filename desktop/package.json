@@ -14,7 +14,11 @@
     "typecheck": "tsc -p .",
     "dist": "node scripts/build.mjs && electron-builder --win --config electron-builder.config.cjs",
     "dist:dir": "node scripts/build.mjs && electron-builder --win dir --config electron-builder.config.cjs",
-    "test:e2e": "node scripts/build.mjs && node --test test/app.e2e.test.ts"
+    "test:e2e": "node scripts/build.mjs && node --test test/app.e2e.test.ts",
+    "start:manager": "node scripts/build-manager.mjs && node scripts/electron.mjs dist-manager/main.cjs",
+    "dist:manager": "node scripts/build-manager.mjs && electron-builder --win --config electron-builder.manager.cjs",
+    "test:e2e:manager": "node scripts/build-manager.mjs && node --test test/manager.e2e.test.ts",
+    "icon:manager": "node -e \"process.env.ICON_LETTER='D';process.env.ICON_BG='oklch(35% .06 50)';process.env.ICON_OUT='manager-icon.png';require('child_process').spawnSync(process.execPath,['scripts/electron.mjs','scripts/make-icon.cjs'],{stdio:'inherit',env:process.env})\""
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

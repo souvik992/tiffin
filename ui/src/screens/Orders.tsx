@@ -3,6 +3,7 @@ import { ArrowLeftRight, Ban, ChefHat, Monitor, Printer, Undo2 } from 'lucide-re
 import { newKey } from '../lib/api.ts';
 import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode } from '../lib/api.ts';
 import { useAddons } from '../lib/addons.ts';
+import { useAppMode } from '../lib/appMode.tsx';
 import { formatPaise, formatQty } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell } from '../components/ui.tsx';
@@ -28,6 +29,7 @@ export function Orders() {
   const [statusKey, setStatusKey] = useState(0);
   const [correcting, setCorrecting] = useState<Payment | null>(null);
   const { addons } = useAddons();
+  const { manager } = useAppMode(); // Tiffin Data Manager: bills are view only
   const panels = addons.flatMap((a) => (a.invoicePanels ?? []).map((P, i) => ({ key: `${a.id}:${i}`, P })));
 
   const load = useCallback(() => {
@@ -101,7 +103,7 @@ export function Orders() {
               <div key={p.id} className="flex items-center justify-between gap-2 text-muted-foreground">
                 <span>Paid by {MODE_LABEL[p.mode]}{p.reference ? ` (${p.reference})` : ''}{p.originalMode && p.originalMode !== p.mode ? <span className="ml-1 text-xs text-primary">(changed from {MODE_LABEL[p.originalMode]})</span> : null}</span>
                 <span className="flex items-center gap-1">
-                  {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost h-8 px-2 text-xs" onClick={() => setCorrecting(p)} aria-label="Change payment mode"><ArrowLeftRight className="h-3.5 w-3.5" />Change</button>}
+                  {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost h-8 px-2 text-xs" onClick={() => setCorrecting(p)} aria-label="Change payment mode"><ArrowLeftRight className="h-3.5 w-3.5" />Change</button>}
                   <span className="text-foreground">{formatPaise(p.amount)}</span>
                 </span>
               </div>
@@ -109,12 +111,12 @@ export function Orders() {
           </div>
           {panels.map(({ key, P }) => <P key={key} invoiceId={open.invoice.id} />)}
           {open.invoice.status === 'CANCELLED' && <p className="mt-3 text-sm text-destructive">Cancelled{open.invoice.cancelReason ? `: ${open.invoice.cancelReason}` : ''}</p>}
-          <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>
+          {!manager && <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>}
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button className="btn-ghost" onClick={() => setScreenPrint(open)}><Monitor className="h-4 w-4" />Print on screen</button>
-            <button className="btn-ghost" onClick={() => void reprint(open.invoice.id)}><Printer className="h-4 w-4" />Reprint</button>
-            {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost" onClick={() => void reprintKot(open.invoice.id)}><ChefHat className="h-4 w-4" />Reprint kitchen ticket</button>}
-            {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <>
+            {!manager && <button className="btn-ghost" onClick={() => void reprint(open.invoice.id)}><Printer className="h-4 w-4" />Reprint</button>}
+            {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost" onClick={() => void reprintKot(open.invoice.id)}><ChefHat className="h-4 w-4" />Reprint kitchen ticket</button>}
+            {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <>
               <button className="btn-ghost" onClick={() => setRefunding(open)}><Undo2 className="h-4 w-4" />Refund items</button>
               <button className="btn-ghost text-destructive" onClick={() => setCancelling(open)}><Ban className="h-4 w-4" />Cancel bill</button>
             </>}
