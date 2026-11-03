@@ -28,7 +28,7 @@
   button.link { border: 0; background: none; color: var(--primary); padding: 0; }
   button:disabled { opacity: .5; cursor: default; }
   label { display: block; font-size: 13px; margin: 10px 0 3px; font-weight: 600; }
-  input, select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
+  input, select, textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .err { color: var(--bad); font-size: 13px; margin-top: 4px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -169,7 +169,7 @@
   const keyStore = { get: () => { try { return sessionStorage.getItem('hubAdminKey') || ''; } catch { return ''; } },
     set: (v) => { try { v ? sessionStorage.setItem('hubAdminKey', v) : sessionStorage.removeItem('hubAdminKey'); } catch { /* private window */ } } };
   let key = keyStore.get(), overview = null, timer = null, settingsDirty = false;
-  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false, up: new Map() };
+  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false, up: new Map(), licence: new Map() };
 
   if (location.protocol === 'http:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) $('insecure').classList.remove('hidden');
 
@@ -239,7 +239,7 @@
   window.addEventListener('hashchange', () => { ui.pausing = false; show(); refresh(); });
 
   function signOut(msg) { key = ''; keyStore.set(''); overview = null; clearInterval(timer); timer = null; $('loginErr').textContent = msg || ''; show(); }
-  const typing = () => document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName) && document.activeElement.closest('#store, #storeList');
+  const typing = () => document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.closest('#store, #storeList');
 
   async function refresh() {
     if (!key) return;
@@ -365,6 +365,8 @@
     catch (e) { box.replaceChildren(h('p', {}, h('a', { href: '#stores' }, '← All stores')), h('div', { class: 'card err' }, e.message)); return; }
     const p = s.published, link = ui.links.get(slug);
     const upState = await loadUp(slug).catch((e) => ({ error: e.message }));
+    const sales = await api('GET', `/v1/admin/stores/${encodeURIComponent(slug)}/sales`).catch((e) => ({ error: e.message }));
+    const lic = await api('GET', `/v1/admin/stores/${encodeURIComponent(slug)}/licence`).catch((e) => ({ error: e.message }));
     const err = h('div', { class: 'err' });
     const pauseInput = h('input', { maxlength: '200', placeholder: 'This store is not taking online orders right now.' });
     box.replaceChildren(
@@ -393,12 +395,47 @@
           h('td', { class: 'num' }, d.revokedAt ? h('span', { class: 'muted' }, `Revoked ${when(d.revokedAt)}`) : h('button', { class: 'danger', onclick: () => revoke(s, d) }, 'Revoke'))))))
         : h('p', { class: 'muted', style: 'margin:0' }, 'No POS connected yet. Make a connection link and send it to the shop.')),
 
+      h('h2', {}, 'Sales (DinePOS)'),
+      sales.error ? h('div', { class: 'card err' }, sales.error) : salesCard(sales),
+      h('h2', {}, 'Licence (DinePOS)'),
+      lic.error ? h('div', { class: 'card err' }, lic.error) : licenceCard(slug, lic),
+
       h('h2', {}, 'Swiggy & Zomato (UrbanPiper)'),
       upState.error ? h('div', { class: 'card err' }, upState.error) : upCard(slug, upState, Boolean(p)),
 
       h('h2', {}, 'Store settings'),
       p ? storeSettings(p) : h('div', { class: 'card muted' }, 'Nothing published yet. The settings appear here once the shop’s POS connects and turns on online orders.'),
       p ? h('p', { class: 'muted' }, `Set by the shop in its POS (Settings > Online orders and Serviceability) and sent here with menu version ${s.menuVersion}. Change them there.`) : null);
+  }
+
+  // ------------------------------------------------------------ DinePOS outlets: sales sent up, licence renewals down
+  const MODE = { cash: 'Cash', card: 'Card', upi: 'UPI', due: 'Due', complimentary: 'Complimentary', other: 'Other', online: 'Paid online' };
+  function salesCard(v) {
+    if (!v.days.length) return h('div', { class: 'card muted' }, 'No sales received. A DinePOS outlet sends its bills and day-end reports here once it is connected to this hub.');
+    return h('div', { class: 'card scroll' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, `Last received ${ago(v.lastSyncAt)}. An open day is added up from the bills received so far; a closed day shows its Z report.`),
+      h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Business day'), h('th', { class: 'num' }, 'Bills'), h('th', { class: 'num' }, 'Net sales'), h('th', { class: 'num' }, 'GST'), h('th', {}, 'Payments'), h('th', { class: 'num' }, 'Voids'), h('th', { class: 'num' }, 'Cash short/over'))),
+        h('tbody', {}, v.days.map((d) => h('tr', {},
+          h('td', {}, d.businessDate, ' ', d.closed ? chip('ok', 'Closed') : chip('plain', 'Open')),
+          h('td', { class: 'num' }, d.bills), h('td', { class: 'num' }, rupees(d.netSalesPaise)), h('td', { class: 'num' }, d.taxPaise == null ? '-' : rupees(d.taxPaise)),
+          h('td', {}, d.byMode.length ? d.byMode.map((m) => `${MODE[m.mode] || m.mode} ${rupees(m.amountPaise)}`).join(', ') : '-'),
+          h('td', { class: 'num' }, d.voids ? `${d.voids} (${rupees(d.voidPaise)})` : '0'),
+          h('td', { class: 'num' }, d.cashDifferencePaise == null ? '-' : d.cashDifferencePaise === 0 ? 'Matched' : `${d.cashDifferencePaise < 0 ? 'Short' : 'Over'} ${rupees(Math.abs(d.cashDifferencePaise))}`))))));
+  }
+  function licenceCard(slug, lic) {
+    const err = h('div', { class: 'err' });
+    const input = h('textarea', { rows: '3', style: 'font-family:monospace', placeholder: 'Paste the licence key from the DinePOS key generator', oninput: (e) => ui.licence.set(slug, e.target.value) });
+    input.value = ui.licence.get(slug) || '';
+    const save = async (key) => { try { await api('PUT', `/v1/admin/stores/${encodeURIComponent(slug)}/licence`, { key }); ui.licence.delete(slug); renderStore(slug); } catch (e) { err.textContent = e.message; } };
+    return h('div', { class: 'card' },
+      lic.set ? [kv('Licensed to', lic.licensee || '-'), kv('Ends', lic.expiresAt ? lic.expiresAt.slice(0, 10) : '-'), kv('For PC', lic.hardwareId || '-'), kv('Put here', when(lic.updatedAt))]
+        : h('p', { class: 'muted', style: 'margin-top:0' }, 'No licence key here. Paste a renewed key and the outlet’s POS installs it by itself within an hour (or at once from Settings › Cloud sync).'),
+      h('label', { style: 'margin-top:10px;display:block' }, lic.set ? 'Replace with a renewed key' : 'Licence key'), input,
+      h('div', { class: 'hint' }, 'The POS checks the key itself: it must be genuine, made for that PC and end later than the key it has.'),
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => save(input.value) }, 'Save key'),
+        lic.set ? h('button', { class: 'danger', onclick: () => { if (confirm('Remove the key from the hub? The POS keeps the key it has installed.')) save(''); } }, 'Remove from hub') : null),
+      err);
   }
 
   function storeSettings(p) {

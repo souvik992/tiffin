@@ -112,6 +112,21 @@ owner types the hub address and the code into the POS.
 Files live in `backups/<storeId>/` next to `hub.db` (never in the database); the newest 30 backups per store are kept.
 They are not encrypted (the owner's choice, docs/DECISIONS.md), so secure the server and its disk.
 
+## DinePOS outlets: sales sync and licence renewals
+
+A DinePOS outlet connected to this hub (the same pairing as its online orders) sends its sales up and fetches licence
+renewals (`src/sync.ts`). Neither side needs the other to work: the outlet bills offline and catches up later.
+
+| Endpoint | What |
+|---|---|
+| `POST /v1/pos/sync/batches` (device key) | `{streamId, fromSeq, events[]}`: the outlet's outbox (`day.closed`, `bill.printed`, `bill.settled`, `bill.voided`) numbered by its own `seq`. Returns `{ackSeq}`, the highest number held. Resending is harmless; a gap (409 `SYNC_GAP`, with `ackSeq`) makes the outlet resend; a different record under a number already held is 409 `SYNC_CONFLICT` |
+| `GET /v1/pos/licence` (device key) | `{key, updatedAt}`: the licence key the vendor put here, or `null` |
+| `GET /v1/admin/stores/<slug>/sales?days=14` | business days, newest first: a closed day from its Z report, an open day added up from its bills |
+| `GET`/`PUT /v1/admin/stores/<slug>/licence` | `{key}` puts a renewed key here (empty removes it); the hub only reads what the key says about itself, the POS verifies it |
+
+Each outlet database is its own stream (`streamId`), so a reinstalled or restored POS never overwrites what an earlier
+one sent; the sales view counts each bill and each business day once. The admin store page shows both.
+
 ## Swiggy and Zomato (through UrbanPiper)
 
 Orders from Swiggy and Zomato come through UrbanPiper (`src/urbanpiper.ts`; their guide: https://api-docs.urbanpiper.com/downstream).

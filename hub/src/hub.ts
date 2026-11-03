@@ -3,6 +3,7 @@ import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { exec, hash, many, one, openHubDb, tx } from './db.ts';
 import { BackupStore } from './backups.ts';
+import { SalesSync } from './sync.ts';
 import type { Db } from './db.ts';
 import { canTransition, label, needsRefund } from '../../contract/src/order.ts';
 import type { OrderFacts, OrderState } from '../../contract/src/order.ts';
@@ -93,6 +94,8 @@ export class Hub {
   now: () => number;
   bus = new EventEmitter();
   backups: BackupStore;
+  /** DinePOS outlets: sales sync up, licence renewals down */
+  sync: SalesSync;
   private opts: HubOptions;
   /** open POS event streams per store, and when the last one closed */
   private streams = new Map<string, number>();
@@ -106,6 +109,7 @@ export class Hub {
     this.now = opts.now ?? Date.now;
     this.bus.setMaxListeners(0);
     this.backups = new BackupStore({ dir: opts.backupDir ?? join(dirname(opts.dbPath), 'backups'), keep: opts.backupKeep, maxBytes: opts.backupMaxBytes, now: this.now });
+    this.sync = new SalesSync(this.db, this.now);
   }
   close() { this.db.close(); }
 

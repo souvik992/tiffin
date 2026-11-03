@@ -85,6 +85,9 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('GET', '/v1/admin/overview', (c) => { admin(c); return hub.adminOverview(); });
   add('PUT', '/v1/admin/settings', (c) => { admin(c); return { settings: hub.saveSettings(c.body) }; });
   add('PUT', '/v1/admin/stores/:slug/pause', (c) => { admin(c); const b = (c.body ?? {}) as { paused?: unknown; reason?: unknown }; return hub.pauseStore(c.params.slug!, b.paused === true, b.reason); });
+  add('GET', '/v1/admin/stores/:slug/sales', (c) => { admin(c); return hub.sync.sales(hub.store({ slug: c.params.slug! }).id, Number(c.query.get('days') ?? 14)); });
+  add('GET', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.licenceInfo(hub.store({ slug: c.params.slug! }).id); });
+  add('PUT', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.setLicence(hub.store({ slug: c.params.slug! }).id, (c.body as { key?: unknown } | null)?.key); });
   add('GET', '/v1/admin/stores/:slug/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.params.slug!, limit: Number(c.query.get('limit') ?? 50) }); });
   add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
 
@@ -108,6 +111,8 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('PUT', '/v1/pos/menu', (c) => hub.publishMenu(device(c), c.body as PublishedMenu), { maxBody: 4 * 1024 * 1024 });
   add('PUT', '/v1/pos/status', (c) => hub.setStatus(device(c), c.body as { accepting: boolean; reason?: string }));
   add('GET', '/v1/pos/orders', (c) => hub.openOrders(device(c)));
+  add('POST', '/v1/pos/sync/batches', (c) => hub.sync.receive(device(c), c.body), { maxBody: 4 * 1024 * 1024 }); // DinePOS sales sync
+  add('GET', '/v1/pos/licence', (c) => hub.sync.licence(device(c)));
   add('GET', '/v1/pos/images', (c) => ({ names: hub.imageNames(device(c)) }));
   add('PUT', '/v1/pos/images/:name', (c) => hub.putImage(device(c), c.params.name!, (c.body as { dataBase64?: unknown } | null)?.dataBase64), { maxBody: 2_100_000 });
   add('POST', '/v1/pos/orders/:id/platform-action', (c) => up.platformAction(device(c), c.params.id!, c.body, idem(c))); // Swiggy / Zomato requests

@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS up_outbox (
 CREATE INDEX IF NOT EXISTS up_outbox_due ON up_outbox(done_at, next_at);
 CREATE TABLE IF NOT EXISTS up_log (id INTEGER PRIMARY KEY AUTOINCREMENT, store_id TEXT, at INTEGER NOT NULL, dir TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL, text TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS up_log_store ON up_log(store_id, id);
+-- DinePOS sales sync and licence renewals (src/sync.ts). sync_stream: one per outlet database; ack_seq: the highest seq held.
+CREATE TABLE IF NOT EXISTS sync_stream (
+  store_id TEXT NOT NULL REFERENCES store(id), stream_id TEXT NOT NULL, first_seq INTEGER NOT NULL, ack_seq INTEGER NOT NULL,
+  created_at INTEGER NOT NULL, last_at INTEGER NOT NULL, PRIMARY KEY (store_id, stream_id)
+);
+CREATE TABLE IF NOT EXISTS sync_event (
+  store_id TEXT NOT NULL, stream_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
+  business_date TEXT, created_at TEXT NOT NULL, received_at INTEGER NOT NULL, PRIMARY KEY (store_id, stream_id, seq)
+);
+CREATE INDEX IF NOT EXISTS sync_event_day ON sync_event(store_id, business_date);
+CREATE TABLE IF NOT EXISTS store_licence (store_id TEXT PRIMARY KEY REFERENCES store(id), licence_key TEXT NOT NULL, updated_at INTEGER NOT NULL);
 `;
 
 export type Db = DatabaseSync;
