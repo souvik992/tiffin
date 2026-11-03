@@ -39,6 +39,25 @@ About 5 minutes after the VM starts, open `https://<public-ip-with-dashes>.sslip
 `https://140-1-2-3.sslip.io/admin`) and enter the admin key. Create the store there and copy its connection link into
 the POS (Settings > Online orders).
 
+## On AWS instead
+
+AWS's free tier runs out (6 months of credits for accounts made since mid-2025, 12 months for older ones; the public
+IPv4 address is charged after that), so Oracle above is the free-for-good choice. On AWS:
+
+1. `node hub/deploy/make-cloud-init.ts` writes `aws-cloud-init.yaml` next to the Oracle one (same admin key).
+2. EC2 > **Launch instance**, region **Asia Pacific (Mumbai)**:
+   - **Image:** Ubuntu Server 24.04. **Type:** the one marked "Free tier eligible" (`t3.micro`).
+   - **Key pair:** create one and keep the `.pem` file (only for repairs).
+   - **Network settings:** allow SSH from **My IP**, and **HTTP** and **HTTPS** from the internet.
+   - **Storage:** 20-30 GB gp3.
+   - **Advanced details > User data:** paste `aws-cloud-init.yaml`.
+3. EC2 > **Elastic IPs** > Allocate, then Associate it with the instance, so the address never changes. Then over SSH
+   (`ssh -i <key>.pem ubuntu@<elastic ip>`) run `sudo tiffin-hub-domain` once to switch to the new address.
+4. Open `https://<elastic-ip-with-dashes>.sslip.io/admin` and enter the admin key; continue as in step 5 above.
+
+Set a billing alert (Billing > Budgets) so the end of the free period is not a surprise. Everything under "Later"
+works the same.
+
 ## Later (over SSH: `ssh -i <key file> ubuntu@<ip>`)
 
 | Task | Command |
