@@ -216,6 +216,35 @@ test('ODS connector: menu photos go to the hub once (checked against their conte
   } finally { await s.close(); }
 });
 
+test('ODS connector: after connecting to another hub (e.g. from a test hub to the live one), the photos go to the new hub too', async () => {
+  const s = await setup();
+  const dir2 = mkdtempSync(join(tmpdir(), 'ods-conn2-'));
+  const hub2 = new Hub({ dbPath: join(dir2, 'hub.db'), devOtp: true });
+  const server2: Server = createHubServer(hub2, { adminKey: 'k', heartbeatMs: 100, urbanpiper: new UrbanPiper(hub2, { kick: false, fetch: async () => ({ status: 200, text: async () => '{}' }) }) });
+  await new Promise<void>((r) => server2.listen(0, '127.0.0.1', () => r()));
+  const base2 = `http://127.0.0.1:${(server2.address() as { port: number }).port}`;
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
+    await s.conn.publish();
+    assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 200, 'on the first hub');
+    // the same POS, same photos, now connected to another hub
+    const store2 = hub2.createStore('live', 'Live');
+    await s.conn.pair(s.env.owner, base2, store2.pairingCode);
+    await until(() => s.conn.link().state === 'connected', 'connected to the second hub');
+    await s.conn.publish();
+    const r = await fetch(`${base2}/v1/stores/live/images/${imageFile}`);
+    assert.equal(r.status, 200, 'the photo reached the second hub');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), Buffer.from(PNG1, 'base64'));
+  } finally {
+    await s.close();
+    await new Promise<void>((r) => { server2.close(() => r()); server2.closeAllConnections(); });
+    hub2.close();
+    rmSync(dir2, { recursive: true, force: true });
+  }
+});
+
 test('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
   const s = await setup();
   try {

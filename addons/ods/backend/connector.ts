@@ -100,6 +100,7 @@ export class Connector {
     this.host.setSetting(STORE, JSON.stringify({ slug: j.slug, name: j.name }));
     this.host.setSetting(SEQ, '0');
     this.host.setSetting(MENU_HASH, '');
+    this.host.setSetting(IMAGES_SIG, ''); // a new hub has none of the photos yet
     this.host.audit(this.host.ctx, actor.userId, 'ods.hub.pair', 'settings', URL_KEY, { hubUrl, store: j.slug });
     this.refresh();
     return this.link();
@@ -276,7 +277,8 @@ export class Connector {
     const readImage = (this.host.billing as { image?: (ctx: unknown, f: string) => { bytes: Buffer; type: string } | null }).image;
     if (!readImage) return; // a POS older than 0.3.3 cannot give the photos
     const want = [...new Set(items.map((i) => i.image).filter((x): x is string => typeof x === 'string'))];
-    const sig = createHash('sha256').update(want.join(',')).digest('hex');
+    // "sent" means sent to this hub and store: another hub (a test one, then the live one) gets them all again
+    const sig = createHash('sha256').update([this.host.getSetting(URL_KEY) ?? '', this.host.getSetting(STORE) ?? '', ...want].join(',')).digest('hex');
     if (sig === this.host.getSetting(IMAGES_SIG)) return;
     const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
     if (!r.ok) return;
