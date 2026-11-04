@@ -245,6 +245,28 @@ test('ODS connector: after connecting to another hub (e.g. from a test hub to th
   }
 });
 
+test('ODS Menu sync > Sync now sends the menu and every photo again, even ones the POS thinks the hub has; it says how many', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
+    await s.conn.publish();
+    const photo = () => fetch(`${s.base}/v1/stores/demo/images/${imageFile}`).then((r) => r.status);
+    assert.equal(await photo(), 200);
+    s.hub.db.prepare('DELETE FROM image').run(); // the hub lost its photos (restored, rebuilt)
+    await s.conn.publish();
+    assert.equal(await photo(), 404, 'an ordinary publish trusts what it sent before');
+    const syncNow = s.sink.routes.find((r) => r.method === 'POST' && r.path.endsWith('/menu-sync/now'))!;
+    const res = await syncNow.handler({ actor: s.env.owner, requestId: rid(), body: {} } as never) as { items: number; photos: number; publishedAt: number };
+    assert.equal(await photo(), 200, 'Sync now put it back');
+    assert.equal(res.photos, 1);
+    assert.ok(res.items > 0 && res.publishedAt > 0);
+    // again: every photo is sent again, not only missing ones
+    assert.equal((await syncNow.handler({ actor: s.env.owner, requestId: rid(), body: {} } as never) as { photos: number }).photos, 1);
+  } finally { await s.close(); }
+});
+
 test('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
   const s = await setup();
   try {

@@ -67,9 +67,9 @@ export function MenuSyncDialog({ channel, readOnly, onClose }: { channel: SyncCh
       key.current = newKey();
       setState(s);
       if (thenSync && s.hub) {
-        const r = await api.request<{ publishedAt: number }>('POST', `${BASE}/menu-sync/now`, {}, newKey());
+        const r = await api.request<{ publishedAt: number; items: number; photos: number }>('POST', `${BASE}/menu-sync/now`, {}, newKey());
         setState({ ...s, publishedAt: r.publishedAt });
-        notify('success', 'Menu sent to the order hub.');
+        notify('success', `Menu sent to the order hub: ${r.items} item${r.items === 1 ? '' : 's'} and ${r.photos} photo${r.photos === 1 ? '' : 's'}.`);
       } else notify('success', 'Menu sync saved. It goes to the order hub within a minute.');
       if (!thenSync) onClose();
     } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(null); }

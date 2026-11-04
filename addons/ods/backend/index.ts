@@ -51,8 +51,10 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
   host.route('POST', '/menu-sync/now', {}, async (c) => {
     host.assertPerm(c.actor, 'settings.write');
     if (!conn.link().paired) throw new host.AppError('NOT_CONNECTED', 'Connect this POS to the order hub first (Order hub, above).', 409);
-    try { await conn.publish(true); } catch (e) { throw new host.AppError('SYNC_FAILED', `The menu could not be sent: ${(e as Error).message}. Check the internet connection.`, 503); }
-    return { publishedAt: readPublishedAt(host) };
+    // everything again: the menu and every photo, whatever was sent before
+    let sent: { items: number; photos: number } | null;
+    try { sent = await conn.publish(true, true); } catch (e) { throw new host.AppError('SYNC_FAILED', `The menu could not be sent: ${(e as Error).message}. Check the internet connection.`, 503); }
+    return { publishedAt: readPublishedAt(host), items: sent?.items ?? 0, photos: sent?.photos ?? 0 };
   });
 
   // ---- which map Serviceability shows (everyone who sees Serviceability; the owner chooses)

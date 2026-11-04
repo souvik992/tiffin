@@ -243,8 +243,15 @@ export class Connector {
 
   // ---------------------------------------------------------------- what the POS publishes
 
-  async publish(force = false) {
-    if (!this.running || !this.host.getSetting(KEY)) return;
+  /**
+   * Sends the menu when it changed (force: always) and the photos the hub lacks. everything (Menu sync > Sync now): the
+   * menu and every photo again, whatever was sent before; any failure is thrown so the owner sees it.
+   */
+  async publish(force = false, everything = false): Promise<{ items: number; photos: number } | null> {
+    if (!this.running || !this.host.getSetting(KEY)) {
+      if (everything) throw new Error('the POS is not connected to the hub right now (online orders off, or the connection dropped)');
+      return null;
+    }
     const cfg = readOnlineConfig(this.host);
     const svc = readServiceability(this.host);
     const m = this.host.billing.menu(this.host.ctx);
@@ -267,30 +274,43 @@ export class Connector {
       this.host.setSetting(MENU_HASH, hash);
       savePublishedAt(this.host, Date.now());
     }
-    await this.syncImages(m.items);
+    const photos = await this.syncImages(m.items, everything);
     const actor = this.host.billing.shiftActor(this.host.ctx);
     await this.f(this.url('/v1/pos/status'), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify(actor ? { accepting: true } : { accepting: false, reason: 'The store is not taking orders right now.' }), signal: AbortSignal.timeout(10_000) });
+    return { items: body.items.length, photos };
   }
 
-  /** Menu photos: only the ones the hub does not have yet (each is checked there against its content-named file). */
-  private async syncImages(items: Array<{ image?: string | null }>) {
+  /**
+   * Menu photos: only the ones the hub does not have yet (each is checked there against its content-named file), or with
+   * `all` every photo again. Returns how many were sent.
+   */
+  private async syncImages(items: Array<{ image?: string | null }>, all = false): Promise<number> {
     const readImage = (this.host.billing as { image?: (ctx: unknown, f: string) => { bytes: Buffer; type: string } | null }).image;
-    if (!readImage) return; // a POS older than 0.3.3 cannot give the photos
+    if (!readImage) return 0; // a POS older than 0.3.3 cannot give the photos
     const want = [...new Set(items.map((i) => i.image).filter((x): x is string => typeof x === 'string'))];
     // "sent" means sent to this hub and store: another hub (a test one, then the live one) gets them all again
     const sig = createHash('sha256').update([this.host.getSetting(URL_KEY) ?? '', this.host.getSetting(STORE) ?? '', ...want].join(',')).digest('hex');
-    if (sig === this.host.getSetting(IMAGES_SIG)) return;
-    const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) return;
-    const have = new Set(((await r.json()) as { names?: string[] }).names ?? []);
+    if (!all && sig === this.host.getSetting(IMAGES_SIG)) return 0;
+    let have = new Set<string>();
+    if (!all) {
+      const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      if (!r.ok) return 0;
+      have = new Set(((await r.json()) as { names?: string[] }).names ?? []);
+    }
+    let sent = 0;
     for (const name of want) {
       if (have.has(name) || !this.running) continue;
       const img = readImage(this.host.ctx, name);
       if (!img) continue;
       const up = await this.f(this.url(`/v1/pos/images/${encodeURIComponent(name)}`), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ dataBase64: img.bytes.toString('base64') }), signal: AbortSignal.timeout(30_000) });
-      if (!up.ok) return; // tried again on the next publish
+      if (!up.ok) {
+        if (all) throw new Error(`the hub refused a photo (${up.status}${up.status === 413 ? ': too large' : ''})`);
+        return sent; // tried again on the next publish
+      }
+      sent++;
     }
     this.host.setSetting(IMAGES_SIG, sig);
+    return sent;
   }
 
   /** Sends waiting changes to the hub, in order. Network trouble: try again later. A refusal (409): resolved locally. */
