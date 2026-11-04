@@ -137,7 +137,7 @@ paths:
   /stores/{storeSlug}:
     get:
       tags: [customer]
-      summary: Store page - branding, open/closed, pickup/delivery and payment options, menu
+      summary: Store page - branding (`website` - texts, photo, phone, address, announcement, colour; set on the hub admin page), open/closed, pickup/delivery and payment options, menu
       parameters: [{ name: storeSlug, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: 'Store and its menu (version included)' }, '404': { $ref: '#/components/responses/Error' } }
 

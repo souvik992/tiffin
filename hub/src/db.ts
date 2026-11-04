@@ -54,6 +54,7 @@ export function openHubDb(path: string): Db {
   // columns added after the first release (CREATE TABLE IF NOT EXISTS does not add them to an existing database)
   const storeCols = new Set((db.prepare('PRAGMA table_info(store)').all() as Array<{ name: string }>).map((c) => c.name));
   if (!storeCols.has('paused_reason')) db.exec('ALTER TABLE store ADD COLUMN paused_reason TEXT'); // set: paused by the hub admin
+  if (!storeCols.has('website_json')) db.exec('ALTER TABLE store ADD COLUMN website_json TEXT'); // website settings (src/website.ts)
   return db;
 }
 
