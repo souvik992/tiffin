@@ -67,10 +67,10 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     // the page has no Node, no popups, no way out of the app
     const probe = await page.evaluate(() => ({
       node: typeof (globalThis as { process?: unknown }).process + '/' + typeof (globalThis as { require?: unknown }).require,
-      popup: window.open('https://example.com') === null,
+      popup: window.open('http://example.invalid/') === null, // not https: blocked without being handed to the real browser (https links open there by design)
     }));
     assert.deepEqual(probe, { node: 'undefined/undefined', popup: true });
-    await page.evaluate(() => { location.href = 'https://example.com/'; });
+    await page.evaluate(() => { location.href = 'https://example.invalid/'; });
     await page.waitForTimeout(500);
     assert.ok(page.url().startsWith('app://pos/'), 'navigation away is blocked');
     // a page cannot reach the backend directly: it does not know the port or the secret, and file:// is not served
@@ -87,7 +87,8 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     assert.ok(pid, 'backend utility process found');
     process.kill(pid!);
     await page.waitForEvent('load', { timeout: 60_000 });
-    await page.getByLabel('Mobile number').waitFor({ timeout: 60_000 }); // signed out after the restart; bills are safe
+    await page.getByRole('heading', { name: 'Sales summary' }).waitFor({ timeout: 60_000 }); // still signed in, on the same screen, after the restart (sign-ins are kept); bills are safe
+    assert.equal(await page.getByLabel('Mobile number').count(), 0, 'no sign-in screen after a backend restart');
     assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
     const newPid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'Tiffin POS backend')?.pid);
     assert.ok(newPid && newPid !== pid);

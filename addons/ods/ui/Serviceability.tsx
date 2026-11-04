@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapPin, Plus, Search, Trash2 } from 'lucide-react';
+import { KeyRound, Layers, MapPin, Plus, Search, Trash2 } from 'lucide-react';
 import L from 'leaflet';
 import leafletCss from 'leaflet/dist/leaflet.css';
 import { BASE, host } from './host.ts';
 import { useOnlineConfig } from './online.ts';
+import { GoogleKey } from './GoogleKey.tsx';
 import type { Hours, ServiceabilityConfig, Slot, Zone } from '../../../contract/src/serviceability.ts';
 
 const { useSession, newKey, messageOf, money } = host;
@@ -16,8 +17,10 @@ const addCss = () => { if (cssAdded) return; cssAdded = true; const s = document
 
 /** Amounts are typed as rupees and stored as paise (the POS's money rules: no floating point). */
 interface ZoneForm { upToKm: string; deliveryFee: string; minOrder: string; freeDeliveryAbove: string; etaMinutes: string }
-/** Which map the POS uses: Google when the owner saved a key in Settings > API keys, else OpenStreetMap. */
-interface MapsInfo { provider: 'google' | 'osm'; attribution: string }
+/** The map in use: the free map unless the owner chose a Google map (which needs the owner's Google key). */
+type MapStyle = 'osm' | 'google-road' | 'google-satellite' | 'google-hybrid';
+interface MapsInfo { provider: 'google' | 'osm'; style: MapStyle; attribution: string }
+interface MapChoices { maps: MapsInfo; style: MapStyle; styles: Array<{ id: MapStyle; label: string; google: boolean; available: boolean }>; google: { set: boolean; hint: string | null } }
 type Saved = ServiceabilityConfig & { feeTaxGroupId: string | null; maps: MapsInfo };
 interface TaxGroup { id: string; name: string; rateBp: number }
 interface Form {
@@ -87,7 +90,8 @@ export function Serviceability() {
       <p className="mb-4 text-sm text-muted-foreground">Where this store delivers, what it charges, and when it takes online orders. Distances are road distances: measured on the road map when the order hub has it, otherwise the straight line times the road factor below.</p>
       <div className="grid gap-4 2xl:grid-cols-2">
         <div className="space-y-4">
-          <LocationCard key={maps?.provider ?? 'none'} form={form} online={online?.enabled === true} readOnly={ro} maps={maps} onChange={(location) => set({ location })} error={errors.location} />
+          <MapCard isOwner={isOwner} onMaps={setMaps} />
+          <LocationCard key={maps?.style ?? 'none'} form={form} online={online?.enabled === true} readOnly={ro} maps={maps} onChange={(location) => set({ location })} error={errors.location} />
         </div>
         <div className="space-y-4">
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Delivery areas">
@@ -164,6 +168,73 @@ export function Serviceability() {
   );
 }
 
+const MAP_NOTES: Record<MapStyle, string> = {
+  osm: 'Free, no key needed. Pictures already seen keep working without the internet. Place search uses free OpenStreetMap data.',
+  'google-road': 'Google road map and Google place search (best for finding shops). Uses your Google key; Google bills beyond its free monthly allowance.',
+  'google-satellite': 'Photos from above, to find the exact building. Uses your Google key and Google place search.',
+  'google-hybrid': 'Photos from above with road and area names. Uses your Google key and Google place search.',
+};
+
+/** Which map the location card shows: the free map, or Google road / satellite / satellite with roads (needs a key). */
+function MapCard({ isOwner, onMaps }: { isOwner: boolean; onMaps: (m: MapsInfo) => void }) {
+  const { api, notify } = useSession();
+  const [choices, setChoices] = useState<MapChoices | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const load = () => api.request<MapChoices>('GET', `${BASE}/map`).then(setChoices).catch((e) => notify('error', messageOf(e)));
+  useEffect(() => { void load(); }, [api]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const choose = async (style: MapStyle) => {
+    setBusy(true);
+    try {
+      const r = await api.request<MapChoices>('PUT', `${BASE}/map`, { style }, newKey());
+      setChoices(r); onMaps(r.maps);
+    } catch (e) { notify('error', messageOf(e)); } finally { setBusy(false); }
+  };
+  const keyChanged = async (saved: boolean) => {
+    if (saved && choices?.style === 'osm') { await choose('google-road'); return; } // a new key: show what it gives
+    const c = await api.request<MapChoices>('GET', `${BASE}/map`).catch(() => null);
+    if (!c) return;
+    setChoices(c);
+    if (c.style !== choices?.style) onMaps(c.maps); // the key was removed: back to the free map
+  };
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Map">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold"><Layers className="h-4 w-4 text-primary" />Map</h3>
+      <p className="mb-3 text-xs text-muted-foreground">Which map to show below and which place search to use. The free map is always there; the Google maps need a Google Maps key.</p>
+      {!choices ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+        <>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Map choice">
+            {choices.styles.map((s) => {
+              const on = choices.style === s.id;
+              return (
+                <button key={s.id} type="button" role="radio" aria-checked={on} disabled={busy || !isOwner || !s.available}
+                  className={`flex min-h-14 flex-col items-start justify-center rounded-xl border-2 px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed ${on ? 'border-primary bg-primary/10 font-semibold' : 'border-border bg-background hover:border-primary disabled:opacity-60 disabled:hover:border-border'}`}
+                  onClick={() => { if (!on) void choose(s.id); }}>
+                  <span>{s.label}</span>
+                  <span className="text-xs font-normal text-muted-foreground">{!s.google ? 'Free' : s.available ? 'Google key' : 'Needs a Google key'}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{MAP_NOTES[choices.style]}</p>
+          {!isOwner && <p className="mt-2 text-xs text-muted-foreground">Only the owner can change the map.</p>}
+          {isOwner && (
+            <div className="mt-3 rounded-xl border border-border">
+              <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium" aria-expanded={keyOpen} onClick={() => setKeyOpen(!keyOpen)}>
+                <KeyRound className="h-4 w-4 text-primary" />Google Maps key
+                <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-normal ${choices.google.set ? 'bg-veg/15 text-veg' : 'bg-muted text-muted-foreground'}`}>{choices.google.set ? `Saved (ends ${choices.google.hint})` : 'Not set'}</span>
+              </button>
+              {keyOpen && <div className="border-t border-border p-3"><GoogleKey onChanged={(saved) => void keyChanged(saved)} /></div>}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function LocationCard({ form, online, readOnly, maps, onChange, error }: { form: Form; online: boolean; readOnly: boolean; maps: MapsInfo | null; onChange: (l: Form['location']) => void; error?: string }) {
   const { api } = useSession();
   const div = useRef<HTMLDivElement>(null);
@@ -208,9 +279,7 @@ function LocationCard({ form, online, readOnly, maps, onChange, error }: { form:
   return (
     <section className="rounded-2xl border border-border bg-card p-4" aria-label="Store location">
       <h3 className="mb-1 flex items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-primary" />Store location
-        {maps && <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">{maps.provider === 'google' ? 'Google Maps' : 'OpenStreetMap (free)'}</span>}
       </h3>
-      {maps?.provider === 'osm' && <p className="mb-2 rounded-lg bg-accent/50 p-2 text-xs">Using the free map. For Google Maps search and map, the owner adds a Google key in <b>Settings &gt; API keys</b>.</p>}
       <p className="mb-3 text-xs text-muted-foreground">Type the shop name, area or road and pick a suggestion, then drag the pin to the exact door (or click the map). Not found? In Google Maps, right-click your shop, click the numbers at the top to copy them, and paste them here. Delivery distances are measured from here.</p>
       {online ? (
         <>

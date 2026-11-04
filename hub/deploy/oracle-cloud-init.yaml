@@ -1,0 +1,112 @@
+#cloud-config
+# Tiffin hub on an Oracle Cloud "Always Free" Ubuntu 24.04 VM (Ampere A1 or AMD micro).
+# Paste this whole file into "Show advanced options > Management > Cloud-init script" when creating the VM.
+# Replace __HUB_ADMIN_KEY__ with a long random secret first (hub/deploy/make-cloud-init.ts does it for you).
+#
+# What it does: installs Node 24 and Caddy, downloads the hub from GitHub, runs it as a service on 127.0.0.1:4900,
+# and puts Caddy in front with a free HTTPS certificate for <public-ip>.sslip.io (or HUB_DOMAIN if you set one).
+# It also opens ports 80 and 443 in the VM's own firewall; the Oracle "security list" must allow them too.
+
+package_update: true
+packages: [git, curl, sqlite3, debian-keyring, debian-archive-keyring, apt-transport-https, gnupg]
+
+write_files:
+  - path: /etc/tiffin-hub.env
+    permissions: '0600'
+    content: |
+      HUB_ADMIN_KEY=__HUB_ADMIN_KEY__
+      HUB_HOST=127.0.0.1
+      HUB_PORT=4900
+      HUB_DATA_DIR=/var/lib/tiffin-hub
+      # Set to your own domain (e.g. hub.example.in) once its DNS points at this VM, then run tiffin-hub-domain.
+      HUB_DOMAIN=
+
+  - path: /etc/systemd/system/tiffin-hub.service
+    content: |
+      [Unit]
+      Description=Tiffin online order hub
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User=tiffinhub
+      EnvironmentFile=/etc/tiffin-hub.env
+      Environment=NODE_ENV=production
+      WorkingDirectory=/opt/tiffin/hub
+      ExecStart=/usr/bin/node src/main.ts
+      Restart=always
+      RestartSec=3
+      NoNewPrivileges=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths=/var/lib/tiffin-hub
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # Points Caddy at HUB_DOMAIN, or <public-ip>.sslip.io when it is empty, and sets HUB_PUBLIC_URL to match.
+  - path: /usr/local/bin/tiffin-hub-domain
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      . /etc/tiffin-hub.env
+      domain="${HUB_DOMAIN:-}"
+      if [ -z "$domain" ]; then
+        ip=$(curl -fsS https://api.ipify.org)
+        domain="${ip//./-}.sslip.io"
+      fi
+      cat > /etc/caddy/Caddyfile <<EOF
+      $domain {
+        encode gzip
+        reverse_proxy 127.0.0.1:4900 {
+          flush_interval -1
+        }
+      }
+      EOF
+      sed -i '/^HUB_PUBLIC_URL=/d' /etc/tiffin-hub.env
+      echo "HUB_PUBLIC_URL=https://$domain" >> /etc/tiffin-hub.env
+      systemctl restart tiffin-hub
+      systemctl reload caddy || systemctl restart caddy
+      echo "Hub address: https://$domain  (admin page: https://$domain/admin)"
+
+  # Downloads the latest hub from GitHub and restarts it.
+  - path: /usr/local/bin/tiffin-hub-update
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      git -C /opt/tiffin fetch --depth 1 origin main
+      git -C /opt/tiffin reset --hard origin/main
+      systemctl restart tiffin-hub
+      echo "Hub updated to $(git -C /opt/tiffin log -1 --format='%h %s')"
+
+  # Daily copy of the hub database, last 14 days kept. Shops' online backup files are under /var/lib/tiffin-hub too.
+  - path: /etc/cron.daily/tiffin-hub-backup
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      mkdir -p /var/backups/tiffin-hub
+      sqlite3 /var/lib/tiffin-hub/hub.db ".backup /var/backups/tiffin-hub/hub-$(date +%F).db"
+      find /var/backups/tiffin-hub -name 'hub-*.db' -mtime +14 -delete
+
+runcmd:
+  # Node 24
+  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  - apt-get install -y nodejs
+  # Caddy (HTTPS reverse proxy with automatic certificates)
+  - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  - curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt -o /etc/apt/sources.list.d/caddy-stable.list
+  - apt-get update && apt-get install -y caddy
+  # Oracle's Ubuntu images block everything but SSH in iptables: open 80 and 443
+  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  - netfilter-persistent save
+  # The hub
+  - useradd --system --home /var/lib/tiffin-hub --shell /usr/sbin/nologin tiffinhub
+  - install -d -o tiffinhub -g tiffinhub -m 0750 /var/lib/tiffin-hub
+  - git clone --depth 1 https://github.com/souvik992/tiffin.git /opt/tiffin
+  - systemctl daemon-reload
+  - systemctl enable --now tiffin-hub
+  - /usr/local/bin/tiffin-hub-domain

@@ -1,8 +1,10 @@
 import { quickCheck, AppError } from './store/db.ts';
+import { platformTextRenderer } from './services/printing/textRender.ts';
+import { pruneSessions } from './services/auth.ts';
 import type { Ctx } from './services/ctx.ts';
 import { pruneCommandLog } from './services/commands.ts';
 import { compactJournal, repairJournal } from './services/journal.ts';
-import { PrintQueue } from './services/printing/queue.ts';
+import { DEFAULT_BACKOFF, PrintQueue } from './services/printing/queue.ts';
 import { FileTransport, MemoryTransport, TcpTransport } from './services/printing/transports.ts';
 import { SpoolerTransport } from './services/printing/spooler.ts';
 import { SerialTransport } from './services/printing/serial.ts';
@@ -13,7 +15,7 @@ import { pruneImages } from './services/images.ts';
 import { AndroidTransport } from './services/printing/android.ts';
 
 export function defaultQueue(ctx: Ctx): PrintQueue {
-  return new PrintQueue(ctx, { memory: new MemoryTransport(), tcp: new TcpTransport(), file: new FileTransport(join(ctx.dataDir, 'print-files')), spooler: new SpoolerTransport(), serial: new SerialTransport(), usb: new UsbTransport(), android: new AndroidTransport() });
+  return new PrintQueue(ctx, { memory: new MemoryTransport(), tcp: new TcpTransport(), file: new FileTransport(join(ctx.dataDir, 'print-files')), spooler: new SpoolerTransport(), serial: new SerialTransport(), usb: new UsbTransport(), android: new AndroidTransport() }, DEFAULT_BACKOFF, platformTextRenderer());
 }
 
 /** Runs once at startup. A failed integrity check refuses to start rather than risk billing on a damaged database. */
@@ -25,6 +27,7 @@ export function startupChecks(ctx: Ctx, queue: PrintQueue) {
   const pruned = pruneCommandLog(ctx, ctx.clock.now() - 7 * 86_400_000);
   const journal = compactJournal(ctx);
   const imagesPruned = pruneImages(ctx);
+  pruneSessions(ctx);
   ctx.logger.info('startup checks passed', { requeued, journalRepaired, pruned, journalCompressed: journal.compressed, imagesPruned });
   return { requeued, journalRepaired, pruned, journalCompressed: journal.compressed };
 }

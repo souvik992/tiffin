@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { all, get, openDb, run, sha256, AppError, currentSchemaVersion } from '../src/store/db.ts';
 import { MIGRATIONS } from '../src/store/schema.ts';
 import { createCtx, silentLogger } from '../src/services/ctx.ts';
-import { authenticate, changePin, createUser, deactivateUser, hashPin, listLoginUsers, login, logout, setupFirstRun, verifyPinHash } from '../src/services/auth.ts';
+import { authenticate, lockSession, unlockSession, changePin, createUser, deactivateUser, hashPin, listLoginUsers, login, logout, setupFirstRun, verifyPinHash } from '../src/services/auth.ts';
 import { audit, verifyAuditChain } from '../src/services/audit.ts';
 import { runCommand } from '../src/services/commands.ts';
 import { importItemsCsv, parseCsv, previewItemsCsv, searchItems, updateItem, deleteItem, itemByBarcode, createItem } from '../src/services/catalog.ts';
@@ -19,7 +19,7 @@ const code = (fn: () => unknown): string => { try { fn(); } catch (e) { if (e in
 test('migrations: fresh database, idempotent reopen, checksum tamper and too-new schema are detected', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pos-mig-')); const path = join(dir, 'm.db');
   try {
-    const a = openDb(path); assert.equal(currentSchemaVersion(a), MIGRATIONS.length); a.close();
+    const a = openDb(path); assert.equal(currentSchemaVersion(a), MIGRATIONS.at(-1)!.version); a.close(); // versions may skip a number (branches)
     const b = openDb(path); assert.equal(get<{ n: number }>(b, 'SELECT count(*) n FROM schema_migrations')!.n, MIGRATIONS.length);
     run(b, 'UPDATE schema_migrations SET checksum = ? WHERE version = 1', sha256('tampered')); b.close();
     assert.throws(() => openDb(path), /modified after being applied/);
@@ -75,16 +75,23 @@ test('login: lockout after 5 failures with backoff, expiry, and reset on success
   } finally { env.cleanup(); }
 });
 
-test('sessions: idle lock, logout, deactivation, and the login list never leaks hashes', () => {
+test('sessions: never signed out by time; locked only by hand (PIN of the same person to resume); logout and deactivation end them; the login list never leaks hashes', () => {
   const env = makeEnv(); try {
     const { token } = login(env.ctx, env.manager.userId, '2345');
     assert.equal(authenticate(env.ctx, token).role, 'manager');
-    env.clock.advance(299_000); authenticate(env.ctx, token); // activity resets the idle timer
-    env.clock.advance(299_000); authenticate(env.ctx, token);
-    env.clock.advance(301_000);
-    assert.equal(code(() => authenticate(env.ctx, token)), 'SESSION_LOCKED');
-    assert.equal(code(() => authenticate(env.ctx, token)), 'UNAUTHENTICATED');
+    env.clock.advance(30 * 86_400_000); // a month without use: still signed in, not locked
+    assert.equal(authenticate(env.ctx, token).role, 'manager');
+    lockSession(env.ctx, token);
+    const locked = (() => { try { authenticate(env.ctx, token); return null; } catch (e) { return e as AppError; } })()!;
+    assert.equal(locked.code, 'SESSION_LOCKED');
+    assert.deepEqual(locked.details, { userId: env.manager.userId, name: 'Manager' }, 'the lock screen shows who');
+    assert.equal(code(() => unlockSession(env.ctx, token, '1111')), 'BAD_PIN', "another person's PIN does not unlock");
+    assert.equal(code(() => authenticate(env.ctx, token)), 'SESSION_LOCKED', 'still locked');
+    assert.equal(unlockSession(env.ctx, token, '2345').userId, env.manager.userId);
+    assert.equal(authenticate(env.ctx, token).role, 'manager');
+    assert.equal(code(() => unlockSession(env.ctx, 'no-such-token', '2345')), 'UNAUTHENTICATED');
     assert.equal(code(() => authenticate(env.ctx, undefined)), 'UNAUTHENTICATED');
+    logout(env.ctx, token);
     const t2 = login(env.ctx, env.cashier.userId, '1111').token;
     logout(env.ctx, t2); assert.equal(code(() => authenticate(env.ctx, t2)), 'UNAUTHENTICATED');
     const t3 = login(env.ctx, env.cashier.userId, '1111').token;

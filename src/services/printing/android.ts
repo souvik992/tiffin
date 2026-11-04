@@ -49,6 +49,14 @@ export async function listAndroidPrinters(env: NodeJS.ProcessEnv = process.env):
     .map((p) => ({ address: p.address as string, name: String(p.name ?? 'Printer').slice(0, 60), detail: String(p.detail ?? '').slice(0, 120), builtin: p.builtin === true }));
 }
 
+/** Draws receipt lines with Android's fonts (Hindi, rupee sign): one "<widthBytes> <height> <base64>" or "-" line per spec. */
+export async function bridgeRender(cfg: { port: number; token: string }, specs: unknown[]): Promise<string> {
+  const payload = Buffer.from(JSON.stringify(specs), 'utf8');
+  const r = await call(cfg, { op: 'render' }, payload, 20_000);
+  if (r.ok !== true || typeof r.lines !== 'string') throw new Error(String(r.error ?? 'Lines could not be drawn.'));
+  return r.lines;
+}
+
 /** Sends the bytes to the printer through the Android app (it chunks and paces them). */
 export class AndroidTransport implements Transport {
   private env: NodeJS.ProcessEnv;

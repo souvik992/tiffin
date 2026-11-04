@@ -1,4 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync, mkdirSync } from 'node:fs';
+import { getCart, getOrderRow } from '../services/orders.ts';
+import { finalizeInvoice } from '../services/invoices.ts';
+import { requireApproval } from '../services/auth.ts';
+import { runPowerShell } from '../services/printing/powershell.ts';
+import { printOrReprintInvoice } from '../services/printing/jobs.ts';
+import { printOrReprintKot } from '../services/printing/kot.ts';
+import { addPaymentGuard } from '../services/paymentGuards.ts';
+import type { PaymentGuard } from '../services/paymentGuards.ts';
 import { builtinModules, createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -45,7 +53,24 @@ export interface HostApi {
   migrations(list: AddonMigration[]): void;
   onStop(fn: () => void | Promise<void>): void;
   /** Online orders as ordinary GST bills (src/services/onlineBilling.ts). */
-  billing: { bill: typeof billOnlineOrder; cancel: typeof cancelOnlineBill; shiftActor: typeof shiftActor; menu: typeof onlineMenu; /** POS 0.3.3: a menu photo's bytes. */ image: typeof onlineImage };
+  billing: {
+    bill: typeof billOnlineOrder; cancel: typeof cancelOnlineBill; shiftActor: typeof shiftActor; menu: typeof onlineMenu; /** POS 0.3.3: a menu photo's bytes. */ image: typeof onlineImage;
+    /** POS 0.3.8: an open bill's state and the backend's own total (what a payment add-on may charge). */
+    order?: (orderId: string) => { id: string; status: string; tokenNo: number | null; grandTotal: number };
+    /** POS 0.3.8: saves an open bill with the given payments (the normal finalize: one transaction, numbering, KOT, print). */
+    finalize?: typeof finalizeInvoice;
+    /** POS 0.3.8: a reason against changing a bill's payment mode by hand (Orders > Change), or null. */
+    paymentGuard?: (g: PaymentGuard) => void;
+  };
+  /** POS 0.3.11: a bill's print buttons. First print without approval; afterwards a reprint, which a manager approves (override). */
+  printing?: {
+    bill: (actor: Actor, requestId: string, invoiceId: string, override?: { userId: string; pin: string }) => { queued: number; copyNo: number };
+    kot: (actor: Actor, requestId: string, invoiceId: string, override?: { userId: string; pin: string }) => { queued: number; kotNo: number | null; warnings: string[] };
+  };
+  /** POS 0.3.8: a manager's approval (or the actor's own permission), as for discounts and cancellations. */
+  requireApproval?: typeof requireApproval;
+  /** POS 0.3.8: runs a constant PowerShell script (Windows); values only in env or stdin, never in the script. */
+  powershell?: typeof runPowerShell;
 }
 
 export interface AddonRoute { method: string; path: string; opts: AddonRouteOptions; handler: (c: AddonRequest) => unknown }
@@ -146,7 +171,18 @@ export function makeHost(ctx: Ctx, id: string, posVersion: string, sink: { route
     },
     migrations: (list) => { sink.migrations.push(...list); },
     onStop: (fn) => { sink.stops.push(fn); },
-    billing: { bill: billOnlineOrder, cancel: cancelOnlineBill, shiftActor, menu: onlineMenu, image: onlineImage },
+    billing: {
+      bill: billOnlineOrder, cancel: cancelOnlineBill, shiftActor, menu: onlineMenu, image: onlineImage,
+      order: (orderId) => { const o = getOrderRow(ctx, orderId); return { id: o.id, status: o.status, tokenNo: o.token_no, grandTotal: getCart(ctx, o.id).totals.grandTotal }; },
+      finalize: finalizeInvoice,
+      paymentGuard: (g) => { sink.stops.push(addPaymentGuard(ctx, g)); },
+    },
+    requireApproval: (c, actor, perm, override, insideTx) => requireApproval(c, actor, perm, override, insideTx),
+    powershell: runPowerShell,
+    printing: {
+      bill: (actor, requestId, invoiceId, override) => printOrReprintInvoice(ctx, actor, requestId, { invoiceId }, (perm) => requireApproval(ctx, actor, perm, override)),
+      kot: (actor, requestId, invoiceId, override) => printOrReprintKot(ctx, actor, requestId, { invoiceId }, (perm) => requireApproval(ctx, actor, perm, override)),
+    },
   };
 }
 

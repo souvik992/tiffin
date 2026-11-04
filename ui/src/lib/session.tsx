@@ -3,13 +3,20 @@ import type { ReactNode } from 'react';
 import { ApiError, createApi } from './api.ts';
 import type { Api, LoginWith, Me, Override } from './api.ts';
 
-// The token lives in sessionStorage: a page reload keeps the cashier signed in, closing the window does not.
-// Storage can be unavailable (private mode, locked-down kiosk); the app then simply asks for the PIN again.
+// The token lives in localStorage: the cashier stays signed in through closing the app, a crash or a restart, until
+// they sign out (the owner's choice: nothing signs out or locks by itself). Only the lock button locks; the backend keeps
+// the lock across restarts too. Storage can be unavailable (private mode, locked-down kiosk); the app then asks for the PIN.
 const TOKEN_KEY = 'pos.session';
-const readToken = (): string | null => { try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const readToken = (): string | null => {
+  try {
+    const old = sessionStorage.getItem(TOKEN_KEY); // before 0.3.9 the token was kept only while the window was open
+    if (old) { localStorage.setItem(TOKEN_KEY, old); sessionStorage.removeItem(TOKEN_KEY); }
+    return localStorage.getItem(TOKEN_KEY);
+  } catch { return null; }
+};
 /** The signed-in session token (for live streams opened with fetch). */
 export const currentToken = readToken;
-const writeToken = (t: string | null) => { try { if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ } };
+const writeToken = (t: string | null) => { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch { /* storage unavailable */ } };
 
 export interface Notice { id: number; kind: 'error' | 'success' | 'info'; text: string }
 
@@ -18,8 +25,12 @@ interface ApprovalRequest { reason: string; resolve: (o: Override | null) => voi
 interface SessionValue {
   api: Api;
   user: Me | null;
-  /** Set when the session expired or locked: the login screen preselects this person. */
+  /** Set when the sign-in ended (deactivated, signed out elsewhere): the login screen preselects this person. */
   lockedUserId: string | null;
+  /** Locked with the lock button: only this person's PIN continues. */
+  locked: { userId: string; name: string } | null;
+  lock: () => Promise<void>;
+  unlock: (pin: string) => Promise<void>;
   signIn: (who: LoginWith, pin: string) => Promise<void>;
   signOut: () => Promise<void>;
   restore: () => Promise<boolean>;
@@ -53,6 +64,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const tokenRef = useRef<string | null>(readToken());
   const [user, setUser] = useState<Me | null>(null);
   const [lockedUserId, setLockedUserId] = useState<string | null>(null);
+  const [locked, setLocked] = useState<{ userId: string; name: string } | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const seq = useRef(0);
@@ -68,36 +80,56 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const api = useMemo(() => createApi({
     getToken: () => tokenRef.current,
-    onAuthLost: (code) => {
+    onAuthLost: (code, details) => {
+      if (code === 'SESSION_LOCKED') { // locked with the lock button (here or before a restart): keep the sign-in, ask for the PIN
+        const d = details as { userId?: string; name?: string } | null;
+        const who = d?.userId ? { userId: d.userId, name: d.name ?? '' } : userRef.current ? { userId: userRef.current.userId, name: userRef.current.name } : null;
+        if (who) { setLocked(who); return; }
+      }
       tokenRef.current = null; writeToken(null);
       setLockedUserId(userRef.current?.userId ?? null);
+      setLocked(null);
       setUser(null);
-      if (code === 'SESSION_LOCKED') notify('info', 'Locked after inactivity. Enter your PIN to continue. The open bill is kept.');
     },
   }), [notify]);
 
   const fail = useCallback((e: unknown) => {
-    if (e instanceof ApiError && (e.code === 'UNAUTHENTICATED' || e.code === 'SESSION_LOCKED')) return; // handled by onAuthLost
+    if (e instanceof ApiError && (e.code === 'UNAUTHENTICATED' || e.code === 'SESSION_LOCKED')) return; // handled by onAuthLost (sign-in or lock screen)
     notify('error', messageOf(e));
   }, [notify]);
 
   const signIn = useCallback(async (who: LoginWith, pin: string) => {
     const r = await api.login(who, pin);
     tokenRef.current = r.token; writeToken(r.token);
-    setLockedUserId(null);
+    setLockedUserId(null); setLocked(null);
+    setUser(r.user);
+  }, [api]);
+
+  const lock = useCallback(async () => {
+    const u = userRef.current;
+    await api.lock();
+    if (u) setLocked({ userId: u.userId, name: u.name });
+  }, [api]);
+  const unlock = useCallback(async (pin: string) => {
+    const r = await api.unlock(pin);
+    setLocked(null);
     setUser(r.user);
   }, [api]);
 
   const signOut = useCallback(async () => {
     try { await api.logout(); } catch { /* signing out locally is enough */ }
     tokenRef.current = null; writeToken(null);
-    setLockedUserId(null);
+    setLockedUserId(null); setLocked(null);
     setUser(null);
   }, [api]);
 
   const restore = useCallback(async () => {
     if (!tokenRef.current) return false;
-    try { setUser(await api.me()); return true; } catch { tokenRef.current = null; writeToken(null); return false; }
+    try { setUser(await api.me()); return true; } catch (e) {
+      if (e instanceof ApiError && e.code === 'SESSION_LOCKED') return true; // locked before the restart: the lock screen shows
+      if (e instanceof ApiError && (e.code === 'NETWORK' || e.status >= 500)) return false; // backend not up yet: keep the sign-in
+      tokenRef.current = null; writeToken(null); return false;
+    }
   }, [api]);
 
   const withApproval = useCallback(async <T,>(reason: string, run: (o?: Override) => Promise<T>): Promise<T | null> => {
@@ -122,6 +154,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [notify]);
 
-  const value: SessionValue = { api, user, lockedUserId, signIn, signOut, restore, notices, notify, dismiss, fail, withApproval, approval };
+  const value: SessionValue = { api, user, lockedUserId, locked, lock, unlock, signIn, signOut, restore, notices, notify, dismiss, fail, withApproval, approval };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

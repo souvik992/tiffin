@@ -7,7 +7,7 @@ import { isMobile, mobileDigits } from '../lib/pin.ts';
 import { Setup } from './Setup.tsx';
 
 /**
- * Sign-in: mobile number and PIN. After an inactivity lock, the same person unlocks with the PIN alone.
+ * Sign-in: mobile number and PIN. When a sign-in ended (e.g. deactivated elsewhere), the same person can use the PIN alone.
  * Staff made before mobile numbers existed pick their name until the owner adds a number in Settings > Users.
  */
 export function Login() {
@@ -65,7 +65,7 @@ export function Login() {
   if (locked) {
     return (
       <Centered>
-        {header(`Locked after inactivity. ${locked.name}, enter your PIN to continue.`)}
+        {header(`${locked.name}, enter your PIN to continue.`)}
         <PinPad key={locked.id} busy={busy} label={`PIN for ${locked.name}`} onSubmit={(pin) => void submit({ userId: locked.id }, pin)} />
         {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
         <button className="btn-ghost mt-4" onClick={() => { setOtherUser(true); setError(''); }}>Sign in as someone else</button>

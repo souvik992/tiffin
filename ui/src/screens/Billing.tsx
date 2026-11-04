@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { BadgePercent, Banknote, Bell, CircleAlert, CreditCard, LogOut, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
+import { BadgePercent, Banknote, Bell, CircleAlert, ClipboardList, CreditCard, ChefHat, Inbox, Lock, LogOut, PackageX, PauseCircle, Plus, RotateCw, Search, Smartphone, Split, Ticket, Trash2, UserRound, Wallet, X } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
-import type { Cart, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
+import type { Cart, CartLine, Catalog, Discount, FinalizeResult, Item, PayMode, PrintJob, Shift, StockItem, ZReport } from '../lib/api.ts';
+import { useAddons } from '../lib/addons.ts';
+import type { CheckoutPlugin } from '../addonHost.ts';
 import { formatPaise, formatPrice, formatQty, formatRateBp, formatStockQty, parsePercentBp, parseRupees } from '../lib/money.ts';
 import { useSession } from '../lib/session.tsx';
 import { Modal, Rail, VegMark } from '../components/ui.tsx';
-import { AfterPayment, ConfirmDialog, CustomerDialog, HeldBillsDialog, SplitPaymentDialog } from './BillingExtras.tsx';
+import { AfterPayment, AvailabilityDialog, ConfirmDialog, CustomerDialog, DrawerDialog, HeldBillsDialog, LineDialog, SplitPaymentDialog, XReportDialog } from './BillingExtras.tsx';
 import { PlugAndPlay } from '../components/plugAndPlay.tsx';
 
 const PAY_MODES: Array<{ mode: PayMode; label: string; icon: typeof Banknote }> = [
@@ -17,7 +19,7 @@ const PAY_MODES: Array<{ mode: PayMode; label: string; icon: typeof Banknote }> 
 const STALE_ORDER = new Set(['ORDER_NOT_OPEN', 'ORDER_ALREADY_INVOICED', 'NOT_FOUND']);
 
 export function Billing() {
-  const { api, fail, notify, withApproval } = useSession();
+  const { api, fail, notify, withApproval, lock } = useSession();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [shift, setShift] = useState<Shift | null | undefined>(undefined);
   const [cart, setCart] = useState<Cart | null>(null);
@@ -32,7 +34,12 @@ export function Billing() {
   const [showHeld, setShowHeld] = useState(false);
   const [heldCount, setHeldCount] = useState(0);
   const [showCustomer, setShowCustomer] = useState(false);
+  const [showKot, setShowKot] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [editLine, setEditLine] = useState<CartLine | null>(null);
+  const [panel, setPanel] = useState<'x' | 'drawer' | 'availability' | null>(null);
+  const [backOn, setBackOn] = useState<Item | null>(null);
+  const [cartOpen, setCartOpen] = useState(false); // small screens: the bill is shown over the menu
   const refreshHeld = useCallback(() => { api.openOrders('HELD').then((l) => setHeldCount(l.length)).catch(() => { /* badge only */ }); }, [api]);
   useEffect(refreshHeld, [refreshHeld]);
 
@@ -64,7 +71,10 @@ export function Billing() {
     const order = await ensureOrder(c);
     return api.addLine(order.order.id, item.id, modifierIds);
   });
-  const tapItem = (item: Item) => (item.modifierGroupIds.length ? setModifierItem(item) : void addItem(item));
+  const tapItem = (item: Item) => (item.availableToday === false ? setBackOn(item) : item.modifierGroupIds.length ? setModifierItem(item) : void addItem(item));
+  const setAvailable = async (item: Item, available: boolean) => {
+    try { await api.setAvailability(item.id, available); setCatalog(await api.catalog()); notify('success', available ? `${item.name} is available again.` : `${item.name} is marked "not available today".`); } catch (e) { fail(e); }
+  };
   const changeQty = (lineId: string, delta: 1 | -1) => mutate(async (c) => {
     const line = c?.lines.find((l) => l.id === lineId);
     if (!line) return c;
@@ -112,39 +122,44 @@ export function Billing() {
     <div className="flex h-screen bg-background text-foreground">
       <Rail route="billing" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 px-4 py-2">
-          <div className="relative w-full max-w-sm">
+        <header className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4">
+          <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input className="h-9 w-full rounded-full border border-border bg-card pl-11 pr-4 text-sm outline-none focus:ring-2 focus:ring-ring"
               placeholder="Search menu or scan barcode…" aria-label="Search menu or scan barcode" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKey} />
           </div>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            {/* lock the screen by hand (the POS never locks or signs out by itself); the PIN resumes */}
+            <button className="btn-ghost h-10 rounded-full" onClick={() => void lock().catch(fail)} aria-label="Lock the screen" title="Lock the screen">
+              <Lock className="h-4 w-4" /><span className="hidden sm:inline">Lock</span>
+            </button>
             {shift && (
               <button className="btn-ghost h-10 rounded-full" onClick={() => setShowHeld(true)} aria-label={`Held bills: ${heldCount}`}>
-                <PauseCircle className="h-4 w-4" />Held{heldCount > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{heldCount}</span>}
+                <PauseCircle className="h-4 w-4" /><span className="hidden sm:inline">Held</span>{heldCount > 0 && <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{heldCount}</span>}
               </button>
             )}
             <PrintAlerts />
-            <UserMenu shiftOpen={!!shift} onCloseShift={() => setShowClose(true)} />
+            <UserMenu shiftOpen={!!shift} onCloseShift={() => setShowClose(true)} onPanel={setPanel} />
           </div>
         </header>
         <PlugAndPlay compact />
 
         {!shift ? <OpenShift onOpened={(s) => { setShift(s); notify('success', 'Shift opened. Ready to bill.'); }} /> : (
           <>
-            <div className="px-4">
-              <h2 className="font-display text-sm font-semibold">Categories</h2>
+            <div className="px-3 sm:px-4">
+              <h2 className="hidden font-display text-sm font-semibold sm:block">Categories</h2>
               <div className="mt-1 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Menu categories">
                 {[{ id: 'all', name: 'All' }, ...catalog.categories].map((c) => (
                   <button key={c.id} role="tab" aria-selected={category === c.id} className={`cat-chip ${category === c.id ? 'cat-chip-active' : ''}`} onClick={() => setCategory(c.id)}>{c.name}</button>
                 ))}
               </div>
             </div>
-            <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto px-4 pb-4 pt-2 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-4 pt-2 sm:gap-3 sm:px-4 lg:grid-cols-3 xl:grid-cols-4">
               {items.length === 0 && <p className="col-span-full py-10 text-center text-sm text-muted-foreground">{catalog.items.length === 0 ? 'No menu items yet. Add them under Menu creation.' : 'No items match.'}</p>}
               {items.map((i) => (
-                <button key={i.id} className="item-card text-left" onClick={() => tapItem(i)}>
+                <button key={i.id} className={`item-card relative text-left ${i.availableToday === false ? 'opacity-50 grayscale' : ''}`} onClick={() => tapItem(i)} aria-label={i.availableToday === false ? `${i.name}: not available today` : undefined}>
                   <TilePhoto item={i} />
+                  {i.availableToday === false && <span className="absolute left-3 top-3 rounded-full bg-destructive px-2 py-0.5 text-[11px] font-semibold text-destructive-foreground">Not available today</span>}
                   <div className="mt-3 flex items-center gap-2"><VegMark veg={i.isVeg} /><span className="truncate text-sm font-semibold">{i.name}</span></div>
                   <div className="mt-1.5 flex items-center justify-between">
                     <span className="font-semibold text-primary">{formatPrice(i.price)}</span>
@@ -153,12 +168,20 @@ export function Billing() {
                 </button>
               ))}
             </div>
+            {(cart?.lines.length || lastBill) ? (
+              <div className="border-t border-border bg-card p-2 md:hidden">
+                <button className="btn-primary h-12 w-full justify-between px-4 text-base" onClick={() => setCartOpen(true)}>
+                  <span>{lastBill && !cart ? 'Last bill' : `View bill · ${cart?.totals.itemCount ?? 0} item${cart?.totals.itemCount === 1 ? '' : 's'}`}</span>
+                  <span>{cart ? formatPaise(cart.totals.grandTotal) : ''}</span>
+                </button>
+              </div>
+            ) : null}
           </>
         )}
       </div>
 
-      {shift && <CartPanel cart={cart} busy={pending > 0} onQty={changeQty} onClear={() => setConfirmClear(true)} onHold={() => void holdBill()} onCustomer={() => setShowCustomer(true)}
-        lastBill={lastBill} onNewBill={() => setLastBill(null)}
+      {shift && <CartPanel mobileOpen={cartOpen} onCloseMobile={() => setCartOpen(false)} cart={cart} busy={pending > 0} onQty={changeQty} onLine={setEditLine} onClear={() => setConfirmClear(true)} onHold={() => void holdBill()} onCustomer={() => setShowCustomer(true)} onKot={() => setShowKot(true)}
+        lastBill={lastBill} onNewBill={() => { setLastBill(null); setCartOpen(false); }}
         onDiscount={async (d) => {
           const c = cartRef.current; if (!c) return;
           const key = newKey();
@@ -182,14 +205,26 @@ export function Billing() {
       {modifierItem && catalog && <ModifierDialog item={modifierItem} catalog={catalog} onClose={() => setModifierItem(null)} onAdd={(ids) => { void addItem(modifierItem, ids); setModifierItem(null); }} />}
       {showClose && <CloseShift onClose={() => setShowClose(false)} onClosed={() => { setShift(null); setCart(null); setLastBill(null); }} />}
       {showHeld && <HeldBillsDialog onClose={() => setShowHeld(false)} onResume={(id) => void resumeBill(id)} />}
+      {showKot && cart && <KotDialog cart={cart} onClose={() => setShowKot(false)} onDone={(c) => { setCart(c); setShowKot(false); }} />}
       {showCustomer && cart && <CustomerDialog cart={cart} onClose={() => setShowCustomer(false)} onSaved={(c) => { setCart(c); setShowCustomer(false); }} />}
+      {editLine && <LineDialog line={editLine} onClose={() => setEditLine(null)} onSave={async (input) => {
+        let ok = false;
+        const key = newKey();
+        await mutate(async (c) => { const r = await withApproval('A discount above your limit', (o) => api.updateLine(editLine.id, input, o, key)); ok = r !== null; return r ?? c; });
+        return ok;
+      }} />}
+      {panel === 'x' && <XReportDialog onClose={() => setPanel(null)} />}
+      {panel === 'drawer' && <DrawerDialog onClose={() => setPanel(null)} />}
+      {panel === 'availability' && catalog && <AvailabilityDialog items={catalog.items} onToggle={(it, a) => setAvailable(it, a)} onClose={() => setPanel(null)} />}
+      {backOn && <ConfirmDialog title="Not available today" text={`${backOn.name} is marked "not available today". Make it available again?`} confirm="Make available" onConfirm={() => { void setAvailable(backOn, true); setBackOn(null); }} onClose={() => setBackOn(null)} />}
       {confirmClear && cart && <ConfirmDialog title="Clear this bill?" text={`All ${cart.lines.length} item(s) on token ${cart.order.tokenNo} will be removed. Use Hold instead to keep it for later.`} confirm="Clear bill" onConfirm={() => void clearBill()} onClose={() => setConfirmClear(false)} />}
     </div>
   );
 }
 
-function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount, onCoupon, onPaid, lastBill, onNewBill }: {
-  cart: Cart | null; busy: boolean; onQty: (lineId: string, d: 1 | -1) => void; onClear: () => void; onHold: () => void; onCustomer: () => void;
+function CartPanel({ mobileOpen, onCloseMobile, cart, busy, onQty, onLine, onClear, onHold, onCustomer, onDiscount, onCoupon, onPaid, lastBill, onNewBill, onKot }: { onKot: () => void;
+  mobileOpen: boolean; onCloseMobile: () => void;
+  cart: Cart | null; busy: boolean; onQty: (lineId: string, d: 1 | -1) => void; onLine: (l: CartLine) => void; onClear: () => void; onHold: () => void; onCustomer: () => void;
   onDiscount: (d: Discount | null) => Promise<void>; onCoupon: (code: string | null) => Promise<string | null>; onPaid: (r: FinalizeResult) => void; lastBill: FinalizeResult | null; onNewBill: () => void;
 }) {
   const { api, notify, fail } = useSession();
@@ -208,6 +243,28 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
   // One key per bill until it succeeds: a double click or a retry after a lost response returns the same invoice.
   const payKey = useRef<{ orderId: string; key: string } | null>(null);
 
+  // add-on payment options (for example card machines): "addon:option", or "" = enter the payment by hand
+  const { addons } = useAddons();
+  const plugins = addons.filter((a) => a.checkout).map((a) => ({ id: a.id, p: a.checkout as CheckoutPlugin }));
+  const optionsFor = (m: PayMode) => plugins.flatMap(({ id, p }) => { try { return p.options(m).map((o) => ({ ...o, key: `${id}:${o.id}`, plugin: p })); } catch { return []; } });
+  const [optionFor, setOptionFor] = useState<Partial<Record<PayMode, string>>>({});
+  const chosenOption = (m: PayMode) => {
+    const list = optionsFor(m);
+    const pick = optionFor[m];
+    if (pick === '') return null;
+    return list.find((x) => x.key === pick) ?? list.find((x) => x.isDefault) ?? list[0] ?? null;
+  };
+  const [external, setExternal] = useState<{ key: string; mode: PayMode; resume?: unknown } | null>(null);
+  // after a reload: a payment an add-on was still taking for this bill
+  const resumed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cart || resumed.current === cart.order.id || plugins.length === 0) return;
+    resumed.current = cart.order.id;
+    for (const { id, p } of plugins) {
+      p.pending?.(cart.order.id).then((r) => { if (r) setExternal({ key: `${id}:${r.optionId}`, mode: r.mode, resume: r.resume }); }).catch(() => { /* by hand */ });
+    }
+  }, [cart, plugins.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const externalPlugin = external ? plugins.find(({ id }) => external.key.startsWith(`${id}:`))?.p ?? null : null;
   const t = cart?.totals;
   const lines = cart?.lines ?? [];
   const empty = lines.length === 0;
@@ -233,6 +290,8 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
 
   const pay = async () => {
     if (!cart || !t || empty || busy || paying) return;
+    const option = t.grandTotal > 0 ? chosenOption(mode) : null;
+    if (option) { setExternal({ key: option.key, mode }); return; }
     let tenderedPaise: number | null = null;
     if (mode === 'CASH' && tendered.trim()) {
       tenderedPaise = parseRupees(tendered);
@@ -255,15 +314,16 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
 
   if (lastBill && !cart) {
     return (
-      <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col overflow-hidden border-l border-border bg-card" aria-label="Last bill">
+      <aside className={`${mobileOpen ? 'fixed inset-0 z-40 flex w-full md:static md:z-auto' : 'hidden md:flex'} md:w-[320px] lg:w-[360px] h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-border bg-card`} aria-label="Last bill">
         <AfterPayment result={lastBill} onDone={onNewBill} />
       </aside>
     );
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col overflow-hidden border-l border-border bg-card" aria-label="Current bill">
+    <aside className={`${mobileOpen ? 'fixed inset-0 z-40 flex w-full md:static md:z-auto' : 'hidden md:flex'} md:w-[320px] lg:w-[360px] h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-border bg-card`} aria-label="Current bill">
       <div className="flex items-center gap-1 px-4 pb-1 pt-3">
+        {mobileOpen && <button className="-ml-2 flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground md:hidden" aria-label="Back to the menu" onClick={onCloseMobile}><X className="h-5 w-5" /></button>}
         <h2 className="min-w-0 flex-1 truncate font-display text-base font-semibold leading-none">
           {cart ? `Bill · Token ${cart.order.tokenNo}` : 'New bill'}
           {(cart?.order.customerName || cart?.order.customerPhone || cart?.order.note) && <span className="mt-0.5 block truncate font-sans text-[11px] font-normal text-muted-foreground">{[cart.order.customerName, cart.order.customerPhone, cart.order.note].filter(Boolean).join(' · ')}</span>}
@@ -271,6 +331,12 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
         <button className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label="Customer and note" title="Customer and note" disabled={!cart || busy} onClick={onCustomer}>
           <UserRound className="h-5 w-5" />
         </button>
+        {cart?.kot && cart.kot.mode !== 'off' && (
+          <button className="relative flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label={`Kitchen ticket (KOT)${cart.kot.pending ? `: ${cart.kot.pending} not sent` : ''}`} title="Kitchen ticket (KOT)" disabled={busy || (cart.kot.pending === 0 && cart.kot.sentTickets === 0)} onClick={onKot}>
+            <ChefHat className="h-5 w-5" />
+            {cart.kot.pending > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">{cart.kot.pending}</span>}
+          </button>
+        )}
         <button className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40" aria-label="Hold bill" title="Hold bill (park it and start another)" disabled={empty || busy} onClick={onHold}>
           <PauseCircle className="h-5 w-5" />
         </button>
@@ -316,10 +382,12 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
         {empty && <p className="py-8 text-center text-sm text-muted-foreground">Tap an item to start a bill</p>}
         {lines.map((l) => (
           <div key={l.id} className="flex items-center gap-1.5 rounded-xl border border-border bg-background px-1.5 py-0.5">
-            <div className="min-w-0 flex-1 pl-1">
+            <button className="min-w-0 flex-1 py-1 pl-1 text-left" onClick={() => onLine(l)} aria-label={`Change ${l.name}: quantity, note or discount`} title="Quantity, note or discount">
               <span className="block truncate text-sm">{l.name}</span>
               {l.modifiers.length > 0 && <span className="block truncate text-[11px] text-muted-foreground">+ {l.modifiers.map((m) => m.name).join(', ')}</span>}
-            </div>
+              {l.note && <span className="block truncate text-[11px] italic text-muted-foreground">“{l.note}”</span>}
+              {l.discount && <span className="block truncate text-[11px] text-primary">{l.discount.type === 'percent' ? formatRateBp(l.discount.value) : formatPaise(l.discount.value)} off this item</span>}
+            </button>
             <div className="flex shrink-0 items-center gap-1">
               <button className="qty-btn" aria-label={`Remove one ${l.name}`} onClick={() => onQty(l.id, -1)}>−</button>
               <span className="w-8 text-center text-sm font-semibold tabular-nums">{formatQty(l.qtyMilli)}</span>
@@ -370,21 +438,30 @@ function CartPanel({ cart, busy, onQty, onClear, onHold, onCustomer, onDiscount,
           </button>
         ))}
       </div>
-      <div className="px-4 pt-2">
+      {optionsFor(mode).length > 0 && (
+        <div className="px-4 pt-2">
+          <select className="field h-10 w-full" aria-label="Payment machine" value={chosenOption(mode)?.key ?? ''} onChange={(e) => setOptionFor((f) => ({ ...f, [mode]: e.target.value }))}>
+            {optionsFor(mode).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            <option value="">Enter by hand (paid on another machine)</option>
+          </select>
+        </div>
+      )}
+      {!chosenOption(mode) && <div className="px-4 pt-2">
         {mode === 'CASH'
           ? <input className="field h-10 w-full" inputMode="decimal" placeholder="Cash received (optional)" aria-label="Cash received" value={tendered} onChange={(e) => setTendered(e.target.value)} />
           : <input className="field h-10 w-full" placeholder={mode === 'UPI' ? 'UPI reference (optional)' : 'Card slip / last 4 digits (optional)'} aria-label="Payment reference" maxLength={60} value={reference} onChange={(e) => setReference(e.target.value)} />}
-      </div>
+      </div>}
       <div className="px-4 pb-3 pt-2">
         <div className="flex gap-2">
           <button className="btn-ghost h-12 shrink-0 px-3" aria-label="Split payment" title="Split payment (part UPI, part cash…)" disabled={empty || busy || paying || !t || t.grandTotal === 0} onClick={() => setSplitting(true)}>
             <Split className="h-4 w-4" />Split
           </button>
           <button className="btn-primary h-12 min-w-0 flex-1 text-base" disabled={empty || busy || paying} onClick={() => void pay()}>
-            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}` : 'Charge'}
+            {paying ? 'Saving bill…' : busy ? 'Updating…' : t && !empty ? `Charge ${formatPaise(t.grandTotal)}${chosenOption(mode) && t.grandTotal > 0 ? ' on machine' : ''}` : 'Charge'}
           </button>
         </div>
       </div>
+      {external && externalPlugin && cart && <externalPlugin.Dialog cart={cart} mode={external.mode} optionId={external.key.slice(external.key.indexOf(':') + 1)} resume={external.resume} onClose={() => setExternal(null)} onPaid={(r) => { setExternal(null); setMode('CASH'); onPaid(r); }} />}
       {splitting && cart && <SplitPaymentDialog cart={cart} payKey={payKey} onClose={() => setSplitting(false)} onPaid={(r) => { setSplitting(false); onPaid(r); }} />}
     </aside>
   );
@@ -558,7 +635,7 @@ function PrintAlerts() {
   );
 }
 
-function UserMenu({ shiftOpen, onCloseShift }: { shiftOpen: boolean; onCloseShift: () => void }) {
+function UserMenu({ shiftOpen, onCloseShift, onPanel }: { shiftOpen: boolean; onCloseShift: () => void; onPanel: (p: 'x' | 'drawer' | 'availability') => void }) {
   const { user, signOut } = useSession();
   const [open, setOpen] = useState(false);
   if (!user) return null;
@@ -566,13 +643,18 @@ function UserMenu({ shiftOpen, onCloseShift }: { shiftOpen: boolean; onCloseShif
   return (
     <div className="relative">
       <button className="flex items-center gap-3" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open}>
-        <span className="shrink-0 text-right"><span className="block text-sm font-semibold">{user.name}</span><span className="block text-xs capitalize text-muted-foreground">{user.role}</span></span>
+        <span className="hidden shrink-0 text-right sm:block"><span className="block text-sm font-semibold">{user.name}</span><span className="block text-xs capitalize text-muted-foreground">{user.role}</span></span>
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent font-semibold text-accent-foreground">{initials}</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-12 z-40 w-52 rounded-xl border border-border bg-card p-1.5 text-sm shadow-xl" role="menu">
-          {shiftOpen && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-secondary" onClick={() => { setOpen(false); onCloseShift(); }}><Wallet className="h-4 w-4" />Close shift</button>}
-          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-secondary" onClick={() => void signOut()}><LogOut className="h-4 w-4" />Sign out</button>
+        <div className="absolute right-0 top-12 z-40 w-60 rounded-xl border border-border bg-card p-1.5 text-sm shadow-xl" role="menu">
+          {shiftOpen && <>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-secondary" onClick={() => { setOpen(false); onPanel('availability'); }}><PackageX className="h-4 w-4" />Sold out today</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-secondary" onClick={() => { setOpen(false); onPanel('x'); }}><ClipboardList className="h-4 w-4" />Shift report (X)</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-secondary" onClick={() => { setOpen(false); onPanel('drawer'); }}><Inbox className="h-4 w-4" />Open cash drawer</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-secondary" onClick={() => { setOpen(false); onCloseShift(); }}><Wallet className="h-4 w-4" />Close shift</button>
+          </>}
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-secondary" onClick={() => void signOut()}><LogOut className="h-4 w-4" />Sign out</button>
         </div>
       )}
     </div>
@@ -590,5 +672,30 @@ function TilePhoto({ item }: { item: Item }) {
         ? <img src={api.imageUrl(item.imageFile)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-cover" />
         : item.name.charAt(0)}
     </div>
+  );
+}
+
+/** The cart's kitchen ticket: send what the kitchen has not had yet, or print all tickets again (a manager approves). */
+function KotDialog({ cart, onClose, onDone }: { cart: Cart; onClose: () => void; onDone: (c: Cart) => void }) {
+  const { api, notify, fail, withApproval } = useSession();
+  const [busy, setBusy] = useState(false);
+  const kot = cart.kot!;
+  const warn = (w: string[]) => (w.includes('NO_KITCHEN_PRINTER') ? ' No printer is set up for one of the prep stations (Settings, Printer setup).' : w.includes('NO_RECEIPT_PRINTER') ? ' No receipt printer is set up.' : '');
+  const run = async (fn: () => Promise<string | null>) => {
+    setBusy(true);
+    try { const msg = await fn(); if (msg) notify('success', msg); onDone(await api.getOrder(cart.order.id)); } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  const send = () => run(async () => { const r = await api.sendKot(cart.order.id, newKey()); return `KOT ${r.kotNo} sent to the kitchen (${r.queued} ticket${r.queued === 1 ? '' : 's'}).${warn(r.warnings)}`; });
+  const reprint = () => run(async () => { const key = newKey(); const r = await withApproval('Reprinting kitchen tickets', (o) => api.reprintOrderKot(cart.order.id, o, key)); return r ? `Kitchen tickets printed again (${r.queued}).${warn(r.warnings)}` : null; });
+  return (
+    <Modal title={`Kitchen ticket · Token ${cart.order.tokenNo}`} onClose={onClose}>
+      <p className="text-sm text-muted-foreground">{kot.sentTickets ? `${kot.sentTickets} ticket${kot.sentTickets === 1 ? '' : 's'} sent so far.` : 'Nothing sent to the kitchen yet.'} {kot.pending ? `${kot.pending} item${kot.pending === 1 ? ' is' : 's are'} new or changed.` : 'Everything is with the kitchen.'}</p>
+      <p className="mt-1 text-xs text-muted-foreground">Billing sends whatever is still new by itself. Items removed after sending print as CANCEL.</p>
+      <div className="mt-5 flex flex-col gap-2">
+        <button className="btn-primary" disabled={busy || kot.pending === 0} onClick={() => void send()}><ChefHat className="h-4 w-4" />{kot.sentTickets ? 'Send the new items (ADD-ON KOT)' : 'Send to the kitchen now'}</button>
+        <button className="btn-ghost" disabled={busy || kot.sentTickets === 0} onClick={() => void reprint()}>Print all tickets again (REPRINT)</button>
+        <button className="btn-ghost" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   );
 }

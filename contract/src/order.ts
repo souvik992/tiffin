@@ -10,13 +10,16 @@ export type OrderState = typeof ORDER_STATES[number];
 
 export type Fulfilment = 'PICKUP' | 'DELIVERY';
 export type PaymentMethod = 'ONLINE' | 'COD';
-/** Who may cause a transition. 'gateway' = payment gateway webhook; 'hub' = hub timers and rules. */
-export type Actor = 'customer' | 'pos' | 'hub' | 'gateway';
+/** Who may cause a transition. 'gateway' = payment gateway webhook; 'hub' = hub timers and rules;
+ * 'aggregator' = Swiggy or Zomato (through UrbanPiper) for the orders they take: they cancel, and their riders deliver. */
+export type Actor = 'customer' | 'pos' | 'hub' | 'gateway' | 'aggregator';
 
 export const TERMINAL: readonly OrderState[] = ['REJECTED', 'AUTO_REJECTED', 'CANCELLED', 'DELIVERED', 'PICKED_UP'];
 
 interface Rule { from: readonly OrderState[]; to: OrderState; by: readonly Actor[]; when?: (o: OrderFacts) => boolean; note: string }
-export interface OrderFacts { fulfilment: Fulfilment; payment: PaymentMethod }
+/** deliveredBy 'platform': a Swiggy or Zomato rider delivers (only the platform marks it picked up and delivered). Missing: the store. */
+export interface OrderFacts { fulfilment: Fulfilment; payment: PaymentMethod; deliveredBy?: 'store' | 'platform' }
+const ownRider = (o: OrderFacts) => o.fulfilment === 'DELIVERY' && o.deliveredBy !== 'platform';
 
 /** Every allowed change of state. Anything not listed is refused. */
 export const TRANSITIONS: readonly Rule[] = [
@@ -32,10 +35,15 @@ export const TRANSITIONS: readonly Rule[] = [
   { from: ['PLACED', 'PAYMENT_PENDING', 'PAYMENT_FAILED', 'SENT_TO_STORE', 'RECEIVED'], to: 'CANCELLED', by: ['customer'], note: 'customer cancels before the store accepts; refund if paid' },
   { from: ['ACCEPTED'], to: 'PREPARING', by: ['pos'], note: 'kitchen starts' },
   { from: ['ACCEPTED', 'PREPARING'], to: 'READY', by: ['pos'], note: 'food is ready' },
-  { from: ['READY'], to: 'OUT_FOR_DELIVERY', by: ['pos'], when: (o) => o.fulfilment === 'DELIVERY', note: 'handed to an in-house rider' },
-  { from: ['OUT_FOR_DELIVERY'], to: 'DELIVERED', by: ['pos'], note: 'rider delivered (COD: cash collected)' },
+  { from: ['READY'], to: 'OUT_FOR_DELIVERY', by: ['pos'], when: ownRider, note: 'handed to an in-house rider' },
+  { from: ['OUT_FOR_DELIVERY'], to: 'DELIVERED', by: ['pos'], when: ownRider, note: 'rider delivered (COD: cash collected)' },
   { from: ['READY'], to: 'PICKED_UP', by: ['pos'], when: (o) => o.fulfilment === 'PICKUP', note: 'customer collected' },
   { from: ['ACCEPTED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'], to: 'CANCELLED', by: ['pos'], note: 'store cancels after accepting (credit note in the POS; refund if paid)' },
+  // Swiggy / Zomato orders (through UrbanPiper)
+  { from: ['SENT_TO_STORE', 'RECEIVED', 'ACCEPTED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'], to: 'CANCELLED', by: ['aggregator'], note: 'the platform cancelled (customer, rider or platform); credit note in the POS if billed' },
+  { from: ['ACCEPTED', 'PREPARING', 'READY'], to: 'OUT_FOR_DELIVERY', by: ['aggregator'], when: (o) => o.fulfilment === 'DELIVERY', note: "the platform's rider picked the food up" },
+  { from: ['ACCEPTED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'], to: 'DELIVERED', by: ['aggregator'], when: (o) => o.fulfilment === 'DELIVERY', note: 'the platform says it was delivered' },
+  { from: ['ACCEPTED', 'PREPARING', 'READY'], to: 'PICKED_UP', by: ['aggregator'], when: (o) => o.fulfilment === 'PICKUP', note: 'the platform says the customer collected it' },
 ];
 
 export type TransitionCheck = { ok: true } | { ok: false; reason: string };
@@ -43,9 +51,9 @@ export type TransitionCheck = { ok: true } | { ok: false; reason: string };
 /** Whether `actor` may move an order from `from` to `to`. Pure: used by the hub before every change, and by the apps to show buttons. */
 export function canTransition(o: OrderFacts, from: OrderState, to: OrderState, actor: Actor): TransitionCheck {
   if (TERMINAL.includes(from)) return { ok: false, reason: `The order is already ${label(from).toLowerCase()}.` };
-  const rule = TRANSITIONS.find((r) => r.to === to && r.from.includes(from) && (!r.when || r.when(o)));
-  if (!rule) return { ok: false, reason: `An order cannot go from ${label(from).toLowerCase()} to ${label(to).toLowerCase()}.` };
-  if (!rule.by.includes(actor)) return { ok: false, reason: `Only ${rule.by.join(' or ')} can do this.` };
+  const rules = TRANSITIONS.filter((r) => r.to === to && r.from.includes(from) && (!r.when || r.when(o)));
+  if (!rules.length) return { ok: false, reason: `An order cannot go from ${label(from).toLowerCase()} to ${label(to).toLowerCase()}.` };
+  if (!rules.some((r) => r.by.includes(actor))) return { ok: false, reason: `Only ${[...new Set(rules.flatMap((r) => r.by))].join(' or ')} can do this.` };
   return { ok: true };
 }
 

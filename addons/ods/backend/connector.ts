@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Actor } from '../../../src/services/ctx.ts';
 import type { HostApi } from '../../../src/addons/host.ts';
-import type { Order, PosEvent, RejectReason, Rider } from '../../../contract/src/types.ts';
+import type { Order, PlatformAction, PosEvent, RejectReason, Rider } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
 import { priceOrder , channelPrice } from '../../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../../contract/src/menu.ts';
@@ -11,6 +11,7 @@ import { readOnlineConfig } from './onlineConfig.ts';
 import { readServiceability } from './serviceability.ts';
 import { listsItem, readMenuSync, savePublishedAt, SYNC_CHANNELS } from './store.ts';
 import type { MenuSync, SyncChannel } from './store.ts';
+import { readPrintOnAccept } from './store.ts';
 import { enqueue, getOrder, listOrders, outboxDone, outboxFailed, pendingOutbox, readFeeTaxGroup, saveOrder, setState } from './store.ts';
 import type { LocalOrder } from './store.ts';
 
@@ -99,6 +100,7 @@ export class Connector {
     this.host.setSetting(STORE, JSON.stringify({ slug: j.slug, name: j.name }));
     this.host.setSetting(SEQ, '0');
     this.host.setSetting(MENU_HASH, '');
+    this.host.setSetting(IMAGES_SIG, ''); // a new hub has none of the photos yet
     this.host.audit(this.host.ctx, actor.userId, 'ods.hub.pair', 'settings', URL_KEY, { hubUrl, store: j.slug });
     this.refresh();
     return this.link();
@@ -212,7 +214,16 @@ export class Connector {
         }
       } else if (ev.type === 'order.cancelled') {
         const o = getOrder(this.host, ev.orderId);
-        if (o) setState(this.host, ev.orderId, 'CANCELLED', { alert: o.billInvoiceId ? `The customer cancelled. Cancel bill ${o.billNo} (manager approval).` : 'Cancelled by the customer.', patch: { reasonText: ev.reasonText } });
+        const who = ev.by === 'aggregator' ? `${o?.order.channel === 'zomato' ? 'Zomato' : 'Swiggy'} cancelled it${ev.reasonText ? ` (${ev.reasonText})` : ''}` : 'The customer cancelled';
+        if (o) setState(this.host, ev.orderId, 'CANCELLED', { alert: o.billInvoiceId ? `${who}. Cancel bill ${o.billNo} (manager approval).` : `${who}.`, patch: { reasonText: ev.reasonText } });
+      } else if (ev.type === 'order.rider') {
+        // Swiggy / Zomato rider: who, and how far (assigned, at the store, out for delivery)
+        const o = getOrder(this.host, ev.orderId);
+        if (o) setState(this.host, ev.orderId, o.state, { patch: { rider: ev.rider, ...(o.order.external ? { external: { ...o.order.external, riderStatus: ev.riderStatus } } : {}) } });
+      } else if (ev.type === 'order.notice') {
+        // Swiggy / Zomato: the customer's number, a PIN to call, a request the platform did not take
+        const o = getOrder(this.host, ev.orderId);
+        if (o) setState(this.host, ev.orderId, o.state, { alert: ev.text });
       } else if (ev.type === 'order.auto_rejected') {
         if (getOrder(this.host, ev.orderId)) setState(this.host, ev.orderId, 'AUTO_REJECTED', { alert: 'Not accepted in time: the hub rejected it.' });
       } else if (ev.type === 'order.updated') {
@@ -232,8 +243,15 @@ export class Connector {
 
   // ---------------------------------------------------------------- what the POS publishes
 
-  async publish(force = false) {
-    if (!this.running || !this.host.getSetting(KEY)) return;
+  /**
+   * Sends the menu when it changed (force: always) and the photos the hub lacks. everything (Menu sync > Sync now): the
+   * menu and every photo again, whatever was sent before; any failure is thrown so the owner sees it.
+   */
+  async publish(force = false, everything = false): Promise<{ items: number; photos: number } | null> {
+    if (!this.running || !this.host.getSetting(KEY)) {
+      if (everything) throw new Error('the POS is not connected to the hub right now (online orders off, or the connection dropped)');
+      return null;
+    }
     const cfg = readOnlineConfig(this.host);
     const svc = readServiceability(this.host);
     const m = this.host.billing.menu(this.host.ctx);
@@ -256,29 +274,43 @@ export class Connector {
       this.host.setSetting(MENU_HASH, hash);
       savePublishedAt(this.host, Date.now());
     }
-    await this.syncImages(m.items);
+    const photos = await this.syncImages(m.items, everything);
     const actor = this.host.billing.shiftActor(this.host.ctx);
     await this.f(this.url('/v1/pos/status'), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify(actor ? { accepting: true } : { accepting: false, reason: 'The store is not taking orders right now.' }), signal: AbortSignal.timeout(10_000) });
+    return { items: body.items.length, photos };
   }
 
-  /** Menu photos: only the ones the hub does not have yet (each is checked there against its content-named file). */
-  private async syncImages(items: Array<{ image?: string | null }>) {
+  /**
+   * Menu photos: only the ones the hub does not have yet (each is checked there against its content-named file), or with
+   * `all` every photo again. Returns how many were sent.
+   */
+  private async syncImages(items: Array<{ image?: string | null }>, all = false): Promise<number> {
     const readImage = (this.host.billing as { image?: (ctx: unknown, f: string) => { bytes: Buffer; type: string } | null }).image;
-    if (!readImage) return; // a POS older than 0.3.3 cannot give the photos
+    if (!readImage) return 0; // a POS older than 0.3.3 cannot give the photos
     const want = [...new Set(items.map((i) => i.image).filter((x): x is string => typeof x === 'string'))];
-    const sig = createHash('sha256').update(want.join(',')).digest('hex');
-    if (sig === this.host.getSetting(IMAGES_SIG)) return;
-    const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) return;
-    const have = new Set(((await r.json()) as { names?: string[] }).names ?? []);
+    // "sent" means sent to this hub and store: another hub (a test one, then the live one) gets them all again
+    const sig = createHash('sha256').update([this.host.getSetting(URL_KEY) ?? '', this.host.getSetting(STORE) ?? '', ...want].join(',')).digest('hex');
+    if (!all && sig === this.host.getSetting(IMAGES_SIG)) return 0;
+    let have = new Set<string>();
+    if (!all) {
+      const r = await this.f(this.url('/v1/pos/images'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      if (!r.ok) return 0;
+      have = new Set(((await r.json()) as { names?: string[] }).names ?? []);
+    }
+    let sent = 0;
     for (const name of want) {
       if (have.has(name) || !this.running) continue;
       const img = readImage(this.host.ctx, name);
       if (!img) continue;
       const up = await this.f(this.url(`/v1/pos/images/${encodeURIComponent(name)}`), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ dataBase64: img.bytes.toString('base64') }), signal: AbortSignal.timeout(30_000) });
-      if (!up.ok) return; // tried again on the next publish
+      if (!up.ok) {
+        if (all) throw new Error(`the hub refused a photo (${up.status}${up.status === 413 ? ': too large' : ''})`);
+        return sent; // tried again on the next publish
+      }
+      sent++;
     }
     this.host.setSetting(IMAGES_SIG, sig);
+    return sent;
   }
 
   /** Sends waiting changes to the hub, in order. Network trouble: try again later. A refusal (409): resolved locally. */
@@ -306,6 +338,7 @@ export class Connector {
             setState(this.host, row.order_id, j?.error?.details?.state ?? 'CANCELLED', { alert: `The hub refused the accept (${j?.error?.message ?? 'order closed'}). Cancel bill ${o.billNo} (manager approval).` });
             this.bus.emit('change');
           }
+          if (o && row.action === 'platform-action') { setState(this.host, row.order_id, o.state, { alert: `Not sent to ${o.order.channel === 'zomato' ? 'Zomato' : 'Swiggy'}: ${j?.error?.message ?? r.status}` }); this.bus.emit('change'); }
           continue;
         }
         outboxFailed(this.host, row.id, `hub answered ${r.status}`);
@@ -338,7 +371,8 @@ export class Connector {
     const items = priceOrder(menu, cart);
     if (!items.ok) return { total: o.total, deliveryFee: o.deliveryFee, packagingFee: o.packagingFee, differs: true, problem: items.message };
     let deliveryFee = 0, packagingFee = 0;
-    if (o.fulfilment === 'DELIVERY' && o.location) {
+    if (o.external) { deliveryFee = o.deliveryFee; packagingFee = o.packagingFee; } // Swiggy / Zomato set their own charges
+    else if (o.fulfilment === 'DELIVERY' && o.location) {
       const q = quote(svc, { fulfilment: 'DELIVERY', to: o.location, itemsTotal: items.itemsTotal, measuredRoadKm: o.distanceKm });
       deliveryFee = q.ok ? q.deliveryFee : o.deliveryFee; packagingFee = q.ok ? q.packagingFee : o.packagingFee;
     } else if (o.fulfilment === 'PICKUP') packagingFee = svc.packagingFee;
@@ -359,6 +393,7 @@ export class Connector {
     const svc = readServiceability(this.host);
     const prep = prepMinutes ?? (o.fulfilment === 'PICKUP' ? svc.pickup.etaMinutes : this.prepDefault);
     if (!Number.isInteger(prep) || prep < 1 || prep > 180) throw new this.host.AppError('VALIDATION', 'Preparation time must be 1 to 180 minutes.');
+    const printOnAccept = readPrintOnAccept(this.host);
     const who = o.customer.name ? `${o.customer.name} ` : '';
     const addr = o.address ? ` | ${o.address.line1}${o.address.landmark ? `, ${o.address.landmark}` : ''}, ${o.address.pincode}` : '';
     const bill = this.host.billing.bill(this.host.ctx, actor, `ods-${requestId}`.slice(0, 120), {
@@ -366,7 +401,10 @@ export class Connector {
       note: `${o.number} ${o.fulfilment === 'DELIVERY' ? 'DELIVERY' : 'PICKUP'} ${who}${o.customer.mobile}${addr}${o.note ? ` | ${o.note}` : ''}`.slice(0, 300),
       lines: o.lines.map((l) => ({ itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifiers.map((m) => m.id), note: l.note, ...this.billPrice(o.channel, l.itemId) })),
       fees: { delivery: price.deliveryFee, packaging: price.packagingFee, taxGroupId: readFeeTaxGroup(this.host) },
-      paymentMode: o.payment === 'COD' ? 'CASH' : 'UPI',
+      // Swiggy / Zomato pay the store later (OTHER), unless the store's own rider collects cash
+      paymentMode: o.external ? (o.payment === 'COD' && o.external.deliveredBy === 'store' ? 'CASH' : 'OTHER') : o.payment === 'COD' ? 'CASH' : 'UPI',
+      fulfilment: o.fulfilment,
+      print: { receipt: printOnAccept.bill, kot: printOnAccept.kot }, // POS 0.3.11; older POS print both
     });
     this.host.db.tx(() => {
       setState(this.host, orderId, 'ACCEPTED', { billInvoiceId: bill.invoiceId, billNo: bill.invoiceNo, billTotal: bill.grandTotal, alert: price.differs ? `Billed at the POS price Rs ${(bill.grandTotal / 100).toFixed(2)} (customer was shown Rs ${(o.total / 100).toFixed(2)}).` : null, patch: { prepMinutes: prep, posBillNo: bill.invoiceNo } });
@@ -413,6 +451,47 @@ export class Connector {
       });
     }
     this.bus.emit('change');
+    void this.flush();
+    return getOrder(this.host, orderId)!;
+  }
+
+  /** The ODS's Bill and KOT buttons: the first print needs no approval (printing on accepting may be off); a reprint needs a manager. */
+  print(actor: Actor, orderId: string, what: 'bill' | 'kot', requestId: string, override?: { userId: string; pin: string }) {
+    const lo = getOrder(this.host, orderId);
+    if (!lo) throw new this.host.AppError('NOT_FOUND', 'Order not found.', 404);
+    if (!lo.billInvoiceId) throw new this.host.AppError('NOT_BILLED', 'Accept the order first: it has no bill yet.', 409);
+    if (!this.host.printing) throw new this.host.AppError('UPDATE_POS', 'Update the POS to print from the ODS (POS 0.3.11 or newer).', 409);
+    const r = what === 'bill' ? this.host.printing.bill(actor, `ods-print-${requestId}`.slice(0, 120), lo.billInvoiceId, override) : this.host.printing.kot(actor, `ods-kot-${requestId}`.slice(0, 120), lo.billInvoiceId, override);
+    this.host.audit(this.host.ctx, actor.userId, `ods.print_${what}`, 'ods_order', orderId);
+    return r;
+  }
+
+  /** Swiggy / Zomato requests about one order (items out of stock, customer's number, extra rider, rider check). Checked
+   * here for what the POS knows; the hub checks the rest and the platform's answer comes back as a notice on the order. */
+  platformAction(actor: Actor, orderId: string, input: PlatformAction, requestId: string) {
+    this.host.assertPerm(actor, 'order.write');
+    const lo = getOrder(this.host, orderId);
+    if (!lo) throw new this.host.AppError('NOT_FOUND', 'Order not found.', 404);
+    const x = lo.order.external;
+    if (!x) throw new this.host.AppError('NOT_PLATFORM_ORDER', 'This is not a Swiggy or Zomato order.', 409);
+    if (['REJECTED', 'AUTO_REJECTED', 'CANCELLED', 'DELIVERED', 'PICKED_UP'].includes(lo.state)) throw new this.host.AppError('ORDER_CLOSED', 'This order is already finished.', 409);
+    let body: PlatformAction;
+    if (input.action === 'items_out_of_stock') {
+      if (x.platform !== 'swiggy') throw new this.host.AppError('NOT_SUPPORTED', 'Only Swiggy takes out-of-stock items on an order. For Zomato, reject or cancel the order.', 409);
+      const ids = [...new Set((Array.isArray(input.itemIds) ? input.itemIds : []).map(String))].filter((id) => lo.order.lines.some((l) => l.itemId === id));
+      if (!ids.length) throw new this.host.AppError('VALIDATION', 'Choose the items that ran out.');
+      body = { action: 'items_out_of_stock', itemIds: ids, allowEdit: input.allowEdit === true };
+    } else if (input.action === 'extra_rider' || input.action === 'customer_phone') {
+      if (x.platform !== 'zomato') throw new this.host.AppError('NOT_SUPPORTED', 'This is a Zomato request.', 409);
+      body = { action: input.action };
+    } else if (input.action === 'rider_check') {
+      if (x.platform !== 'zomato') throw new this.host.AppError('NOT_SUPPORTED', 'This is a Zomato request.', 409);
+      const temp = Number(input.temperatureF);
+      if (!(temp >= 90 && temp <= 110)) throw new this.host.AppError('VALIDATION', "Enter the rider's temperature in °F (90 to 110).");
+      body = { action: 'rider_check', temperatureF: temp, wearingMask: input.wearingMask === true, riderPhone: input.riderPhone ? String(input.riderPhone).replace(/\D/g, '').slice(-10) : null };
+    } else throw new this.host.AppError('VALIDATION', 'Unknown request.');
+    enqueue(this.host, orderId, 'platform-action', body, `pa-${requestId}`.slice(0, 120));
+    this.host.audit(this.host.ctx, actor.userId, 'ods.platform_action', 'ods_order', orderId, { action: body.action });
     void this.flush();
     return getOrder(this.host, orderId)!;
   }

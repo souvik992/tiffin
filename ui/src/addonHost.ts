@@ -9,7 +9,7 @@ import { currentToken, messageOf, useSession } from './lib/session.tsx';
 import { Modal, PageShell } from './components/ui.tsx';
 import { formatPaise, paiseToInput, parseRupees } from './lib/money.ts';
 import { registerAddon, refreshAddons } from './lib/addons.ts';
-import type { Role } from './lib/api.ts';
+import type { Cart, FinalizeResult, PayMode, Role } from './lib/api.ts';
 
 type Icon = ComponentType<{ className?: string }>;
 
@@ -23,6 +23,22 @@ export interface AddonUi {
   settings?: AddonSettingsSection[];
   /** Small status shown at the bottom of the side menu. */
   railFooter?: ComponentType;
+  /** POS 0.3.8: other ways to take a payment at the counter (for example a card machine). */
+  checkout?: CheckoutPlugin;
+  /** POS 0.3.8: extra panels in a bill's detail (Orders). */
+  invoicePanels?: Array<ComponentType<{ invoiceId: string }>>;
+}
+
+/** A way to take a payment for a mode, shown under the payment buttons ("On machine: Counter Paytm"). */
+export interface CheckoutOption { id: string; label: string; isDefault?: boolean }
+export interface CheckoutDialogProps { cart: Cart; mode: PayMode; optionId: string; resume?: unknown; onClose: () => void; onPaid: (r: FinalizeResult) => void }
+export interface CheckoutPlugin {
+  /** The options for a payment mode right now (read on every render; call refresh() when they change). */
+  options(mode: PayMode): CheckoutOption[];
+  /** Takes the payment and saves the bill; calls onPaid with the saved bill. */
+  Dialog: ComponentType<CheckoutDialogProps>;
+  /** After a reload: a payment for this open bill that still needs attention. */
+  pending?(orderId: string): Promise<{ mode: PayMode; optionId: string; resume: unknown } | null>;
 }
 
 /**

@@ -11,7 +11,8 @@ import { readOnlineConfig, saveOnlineConfig } from '../backend/onlineConfig.ts';
 import type { OnlineInput } from '../backend/onlineConfig.ts';
 import { readServiceability, saveServiceability } from '../backend/serviceability.ts';
 import { makeMaps } from '../backend/maps.ts';
-import { apiKeysView, saveGoogleKey } from '../backend/store.ts';
+import { apiKeysView, mapView, saveGoogleKey, saveMapStyle } from '../backend/store.ts';
+import { mapAttribution } from '../backend/maps.ts';
 import { makePlaces } from '../backend/places.ts';
 import type { Fetcher } from '../backend/maps.ts';
 import { register } from '../backend/index.ts';
@@ -79,13 +80,13 @@ test('map tiles: only in online mode, cached on disk, per provider', async () =>
   } finally { env.cleanup(); }
 });
 
-test('Google map tiles with the owner key: one session reused, tiles not kept on disk, a switched-off API is explained', async () => {
+test('map choice: the free map by default and with a key; Google road, satellite or both when chosen; one session per map, tiles not kept on disk', async () => {
   const env = makeEnv(); try {
     const { host } = hostFor(env);
-    const calls: Array<{ url: string; method?: string }> = [];
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
     let sessionAnswer: { status: number; json: unknown } = { status: 200, json: { session: 'SESS1', expiry: String(Math.floor(Date.now() / 1000) + 3600) } };
     const f: Fetcher = async (url, init) => {
-      calls.push({ url, method: init.method });
+      calls.push({ url, method: init.method, body: init.body });
       if (url.includes('createSession')) return { ok: sessionAnswer.status < 400, status: sessionAnswer.status, arrayBuffer: async () => new ArrayBuffer(0), json: async () => sessionAnswer.json };
       return { ok: true, status: 200, arrayBuffer: async () => PNG.buffer.slice(PNG.byteOffset, PNG.byteOffset + PNG.length), json: async () => null };
     };
@@ -96,6 +97,16 @@ test('Google map tiles with the owner key: one session reused, tiles not kept on
     saveGoogleKey(host, env.owner, 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345');
     assert.deepEqual(apiKeysView(host), { google: { set: true, hint: '…2345' } });
     assert.ok(get(env.ctx.db, "SELECT 1 FROM audit_log WHERE action = 'ods.api_key.set'"), 'the change is audited');
+    // a saved key does not take away the free map: Google is used only when the owner chooses a Google map
+    assert.equal(mapAttribution(host).style, 'osm');
+    assert.deepEqual(await maps.tile(12, 2925, 1879), PNG);
+    assert.match(calls.at(-1)!.url, /tile.openstreetmap.org/);
+    assert.throws(() => saveMapStyle(host, env.manager, 'google-road'), /permission|not allowed|owner/i);
+    assert.throws(() => saveMapStyle(host, env.owner, 'bing'), /Choose a map/);
+    assert.deepEqual(mapView(host).styles.map((s) => [s.id, s.available]), [['osm', true], ['google-road', true], ['google-satellite', true], ['google-hybrid', true]]);
+    saveMapStyle(host, env.owner, 'google-road');
+    assert.equal(mapView(host).style, 'google-road');
+    calls.length = 0;
     assert.deepEqual(await maps.tile(12, 2925, 1880), PNG);
     await maps.tile(12, 2925, 1881);
     await maps.tile(12, 2925, 1880); // from memory
@@ -104,12 +115,29 @@ test('Google map tiles with the owner key: one session reused, tiles not kept on
     assert.equal(calls.filter((c) => c.url.includes('/2dtiles/')).length, 2);
     assert.match(calls.find((c) => c.url.includes('/2dtiles/'))!.url, /^https:\/\/tile\.googleapis\.com\/v1\/2dtiles\/12\/2925\/1880\?session=SESS1&key=AIza/);
     assert.ok(!existsSync(join(host.dataDir, 'tiles', 'osm', '12', '2925', '1881.png')), 'Google tiles are not saved on disk');
+    assert.deepEqual(JSON.parse(calls.find((c) => c.url.includes('createSession'))!.body!), { mapType: 'roadmap', language: 'en-IN', region: 'IN' });
+    // satellite with road names: its own session and its own pictures
+    saveMapStyle(host, env.owner, 'google-hybrid');
+    await maps.tile(12, 2925, 1880);
+    const sessions = calls.filter((c) => c.url.includes('createSession'));
+    assert.equal(sessions.length, 2);
+    assert.deepEqual(JSON.parse(sessions[1]!.body!), { mapType: 'satellite', layerTypes: ['layerRoadmap'], language: 'en-IN', region: 'IN' });
+    assert.equal(calls.filter((c) => c.url.includes('/2dtiles/')).length, 3, 'not the road map picture from memory');
+    saveMapStyle(host, env.owner, 'google-satellite');
+    await maps.tile(12, 2925, 1880);
+    assert.deepEqual(JSON.parse(calls.filter((c) => c.url.includes('createSession'))[2]!.body!), { mapType: 'satellite', language: 'en-IN', region: 'IN' });
+    saveMapStyle(host, env.owner, 'osm');
+    assert.equal(mapView(host).style, 'osm');
+    saveMapStyle(host, env.owner, 'google-road');
     // the Map Tiles API is not switched on: the owner is told what to do
     sessionAnswer = { status: 403, json: { error: { status: 'PERMISSION_DENIED', message: 'Map Tiles API has not been used in project 1 before or it is disabled.' } } };
     assert.match((await maps.testTiles()).message, /Map Tiles API is not switched on.*Enable/);
     // key removed: back to the free map
     saveGoogleKey(host, env.owner, null);
     assert.deepEqual(apiKeysView(host), { google: { set: false, hint: null } });
+    assert.equal(mapView(host).style, 'osm');
+    assert.deepEqual(mapView(host).styles.map((s) => s.available), [true, false, false, false]);
+    assert.throws(() => saveMapStyle(host, env.owner, 'google-road'), /Google Maps key/);
     assert.deepEqual(await maps.tile(12, 2925, 1882), PNG);
     assert.match(calls.at(-1)!.url, /tile\.openstreetmap\.org/);
     assert.ok(!get(env.ctx.db, "SELECT 1 FROM audit_log WHERE action LIKE 'ods.api_key%' AND detail LIKE '%AIza%'"), 'the key is never written to the audit log');
@@ -122,16 +150,16 @@ test('the add-on registers its routes under /api/addons/ods', async () => {
     register(host);
     stops.push(...sink.stops);
     assert.deepEqual(sink.routes.map((r) => `${r.method} ${r.path}`).sort(), [
-      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/api-keys', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/geocode/place', 'GET /api/addons/ods/hub', 'GET /api/addons/ods/menu-sync',
-      'GET /api/addons/ods/orders', 'GET /api/addons/ods/serviceability', 'GET /api/addons/ods/tax-groups', 'GET /api/addons/ods/tiles/:z/:x/:y',
-      'POST /api/addons/ods/api-keys/test', 'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/menu-sync/now', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
-      'PUT /api/addons/ods/api-keys', 'PUT /api/addons/ods/config', 'PUT /api/addons/ods/menu-sync', 'PUT /api/addons/ods/serviceability',
+      'DELETE /api/addons/ods/hub', 'GET /api/addons/ods/api-keys', 'GET /api/addons/ods/config', 'GET /api/addons/ods/events', 'GET /api/addons/ods/geocode', 'GET /api/addons/ods/geocode/place', 'GET /api/addons/ods/hub', 'GET /api/addons/ods/map', 'GET /api/addons/ods/menu-sync',
+      'GET /api/addons/ods/orders', 'GET /api/addons/ods/print-options', 'GET /api/addons/ods/serviceability', 'GET /api/addons/ods/tax-groups', 'GET /api/addons/ods/tiles/:z/:x/:y',
+      'POST /api/addons/ods/api-keys/test', 'POST /api/addons/ods/hub/pair', 'POST /api/addons/ods/menu-sync/now', 'POST /api/addons/ods/orders/:id/accept', 'POST /api/addons/ods/orders/:id/platform-action', 'POST /api/addons/ods/orders/:id/print-bill', 'POST /api/addons/ods/orders/:id/print-kot', 'POST /api/addons/ods/orders/:id/reject', 'POST /api/addons/ods/orders/:id/step',
+      'PUT /api/addons/ods/api-keys', 'PUT /api/addons/ods/config', 'PUT /api/addons/ods/map', 'PUT /api/addons/ods/menu-sync', 'PUT /api/addons/ods/print-options', 'PUT /api/addons/ods/serviceability',
     ]);
     assert.equal(sink.routes.find((r) => r.path.endsWith('/tiles/:z/:x/:y'))!.opts.auth, false);
   } finally { for (const s of stops) await s(); env.cleanup(); }
 });
 
-test('place search: suggestions while typing (free Photon, India only, near the shop), Nominatim on Enter; Google Places when the owner saved a Google key', async () => {
+test('place search: suggestions while typing (free Photon, India only, near the shop), Nominatim on Enter; Google Places when a Google map is chosen', async () => {
   const env = makeEnv(); try {
     const { host } = hostFor(env);
     const calls: Array<{ url: string; method?: string; headers: Record<string, string>; body?: string }> = [];
@@ -174,8 +202,11 @@ test('place search: suggestions while typing (free Photon, India only, near the 
     assert.equal((await places.suggest('nothing here', { full: true }))[0]!.label, '12');
     assert.equal(calls.filter((c) => c.url.includes('nominatim')).length, 1);
 
-    // Google Places with the owner's key (Settings > API keys)
+    // a saved key alone keeps the free search; Google Places once a Google map is chosen
     saveGoogleKey(host, env.owner, 'AIzaSyTESTKEYtestkeyTESTKEYtestkey12345');
+    await places.suggest('kalyan nagar');
+    assert.ok(!calls.some((c) => c.url.includes('googleapis')), 'free map chosen: free search');
+    saveMapStyle(host, env.owner, 'google-road');
     const g = await places.suggest('empire brookfield', { near: { lat: 12.97, lng: 77.72 }, session: 's1' });
     assert.deepEqual(g, [{ label: 'Empire Restaurant', detail: 'Brookfield, Bengaluru', lat: null, lng: null, placeId: 'g:ChIJempire' }]);
     const gc = calls.find((c) => c.url.includes('places:autocomplete'))!;

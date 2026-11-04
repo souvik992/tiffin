@@ -99,6 +99,42 @@ How shops receive it:
 
 A build without `POS_UPDATE_URL` never checks for updates.
 
+## Tiffin Data Manager (a separate app)
+
+The owner's tool for the shop's data: a dashboard with charts, every table, changes to the menu, stock and staff, and
+backup and restore. It has its **own installer** (`release-manager/TiffinDataManager-Setup-<version>.exe`), its own desktop
+shortcut ("Tiffin Data Manager", a brown "D") and its own folder, so it works on a computer where the POS was never
+installed or was uninstalled: it reads the POS data folder, a copied data folder or a backup file.
+
+| Command (in `desktop/`) | What it does |
+|---|---|
+| `npm run start:manager` | builds and opens it (development). Set `POS_DATA_DIR` to a test data folder first |
+| `npm run dist:manager` | builds the installer into `release-manager/` (raise `version` in `electron-builder.manager.cjs` for each release) |
+| `npm run test:e2e:manager` | builds, then drives the real app over a temporary shop |
+| `npm run icon:manager` | redraws `build/manager-icon.png` |
+
+How it behaves:
+
+* **Owner only.** Sign-in is the owner's mobile number and PIN from the data that is open. Staff are refused.
+* **Changes** go through the POS's own screens and rules (menu, categories, prep stations, stock, purchases, recipes, store
+  details, staff, coupons), so they are checked and logged exactly as at the POS. **Bills, payments, shifts and printing are
+  never changed here**: bills are immutable (RULES.md 5); cancellations and refunds are done at the POS.
+* **View only** (a copy taken with SQLite's backup API, in this app's folder, removed on close) when:
+  * Tiffin POS is open on this computer (checked every 3 seconds; the app switches back when the POS closes);
+  * the data comes from an older POS (the shop's database is never upgraded behind an older POS);
+  * a backup file is open.
+* **All data:** every table as stored (amounts in paise), search, CSV download. PIN hashes, sign-in tokens, keys and
+  passwords show as "(hidden)".
+* **Backups:** back up now (works while the POS is open), with an optional copy to a USB drive or folder; restore from the
+  list or any file, with the owner's PIN, only while the POS is closed. Restoring uses the POS's own restore: the database
+  before is kept in a `pre-restore-<time>` folder and bills made after the backup come back from the bill journal.
+
+| What | Where |
+|---|---|
+| App | `%LOCALAPPDATA%\Programs\TiffinDataManager` (per user, no administrator) |
+| Its own folder (window profile, log, temporary copies) | `%LOCALAPPDATA%\TiffinDataManager` (`MANAGER_HOME` overrides) |
+| The POS data it opens first | `%LOCALAPPDATA%\TiffinPOS\data` (`POS_DATA_DIR` or `POS_HOME` override) |
+
 ## Not done yet
 
 * **Code-signing certificate:** none yet. This is a purchase plus company identity checks (see above).

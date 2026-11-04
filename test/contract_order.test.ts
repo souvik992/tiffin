@@ -5,7 +5,7 @@ import type { OrderFacts, OrderState } from '../contract/src/order.ts';
 
 const DELIVERY_COD: OrderFacts = { fulfilment: 'DELIVERY', payment: 'COD' };
 const PICKUP_ONLINE: OrderFacts = { fulfilment: 'PICKUP', payment: 'ONLINE' };
-const ok = (o: OrderFacts, path: OrderState[], actors: Array<'customer' | 'pos' | 'hub' | 'gateway'>) => {
+const ok = (o: OrderFacts, path: OrderState[], actors: Array<'customer' | 'pos' | 'hub' | 'gateway' | 'aggregator'>) => {
   for (let i = 1; i < path.length; i++) assert.deepEqual(canTransition(o, path[i - 1]!, path[i]!, actors[i - 1]!), { ok: true }, `${path[i - 1]} -> ${path[i]}`);
 };
 
@@ -38,4 +38,29 @@ test('order life cycle: buttons per actor, refunds, and every state reachable an
   assert.equal(needsRefund({ ...PICKUP_ONLINE, paid: true }, 'READY'), false);
   const reachable = new Set<OrderState>(['PLACED', ...TRANSITIONS.map((t) => t.to)]);
   for (const s of ORDER_STATES) { assert.ok(reachable.has(s), `${s} is reachable`); assert.ok(label(s)); }
+});
+
+test('order life cycle: Swiggy and Zomato (through UrbanPiper) cancel, pick up and complete their orders; the store does not deliver for them', () => {
+  const PLATFORM: OrderFacts = { fulfilment: 'DELIVERY', payment: 'ONLINE', deliveredBy: 'platform' };
+  const OWN_RIDER: OrderFacts = { fulfilment: 'DELIVERY', payment: 'ONLINE', deliveredBy: 'store' };
+  // the platform cancels at any point until the order is finished, also before the store accepts
+  for (const from of ['SENT_TO_STORE', 'RECEIVED', 'ACCEPTED', 'PREPARING', 'READY', 'OUT_FOR_DELIVERY'] as const) assert.deepEqual(canTransition(PLATFORM, from, 'CANCELLED', 'aggregator'), { ok: true }, from);
+  assert.equal(canTransition(PLATFORM, 'DELIVERED', 'CANCELLED', 'aggregator').ok, false);
+  // its rider picks the food up and delivers it; the store cannot mark those steps itself
+  ok(PLATFORM, ['SENT_TO_STORE', 'ACCEPTED', 'READY'], ['pos', 'pos']);
+  assert.deepEqual(canTransition(PLATFORM, 'READY', 'OUT_FOR_DELIVERY', 'aggregator'), { ok: true });
+  assert.deepEqual(canTransition(PLATFORM, 'PREPARING', 'OUT_FOR_DELIVERY', 'aggregator'), { ok: true }, 'the rider may take it before "ready" was pressed');
+  assert.deepEqual(canTransition(PLATFORM, 'OUT_FOR_DELIVERY', 'DELIVERED', 'aggregator'), { ok: true });
+  assert.equal(canTransition(PLATFORM, 'READY', 'OUT_FOR_DELIVERY', 'pos').ok, false);
+  assert.equal(canTransition(PLATFORM, 'OUT_FOR_DELIVERY', 'DELIVERED', 'pos').ok, false);
+  assert.deepEqual(nextStates(PLATFORM, 'READY', 'pos'), ['CANCELLED']);
+  // the store's own rider (self-delivery on the platform): the store delivers as usual
+  ok(OWN_RIDER, ['ACCEPTED', 'READY', 'OUT_FOR_DELIVERY', 'DELIVERED'], ['pos', 'pos', 'pos']);
+  // a pickup order collected: the platform completes it
+  assert.deepEqual(canTransition({ fulfilment: 'PICKUP', payment: 'ONLINE', deliveredBy: 'platform' }, 'READY', 'PICKED_UP', 'aggregator'), { ok: true });
+  // the platform never accepts or rejects for the store
+  assert.equal(canTransition(PLATFORM, 'RECEIVED', 'ACCEPTED', 'aggregator').ok, false);
+  // a customer cancelling before acceptance still works for the store's own app and website
+  assert.deepEqual(canTransition(DELIVERY_COD, 'RECEIVED', 'CANCELLED', 'customer'), { ok: true });
+  assert.match((canTransition(DELIVERY_COD, 'RECEIVED', 'CANCELLED', 'pos') as { reason: string }).reason, /Only customer or aggregator/);
 });

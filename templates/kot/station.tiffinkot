@@ -1,0 +1,79 @@
+{
+  "format": "tiffin-kot",
+  "version": 1,
+  "name": "Standard prep station KOT",
+  "description": "The prep station on top, then the token and the items.",
+  "blocks": [
+    {
+      "type": "text",
+      "text": "{{outlet.name}}",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "KITCHEN ORDER TICKET",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "kot-title",
+      "align": "center",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "{{kot.station}}",
+      "align": "center",
+      "size": "big",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "TOKEN {{kot.token}}",
+      "align": "center",
+      "size": "tall",
+      "bold": true
+    },
+    {
+      "type": "text",
+      "text": "{{order.type}}",
+      "align": "center"
+    },
+    {
+      "type": "field",
+      "label": "Order: {{order.no}}",
+      "value": "{{kot.date}}"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "items"
+    },
+    {
+      "type": "text",
+      "text": "Order note: {{order.note}}"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "field",
+      "label": "Items: {{kot.items}}",
+      "value": "Qty: {{kot.qty}}"
+    },
+    {
+      "type": "blank"
+    },
+    {
+      "type": "text",
+      "text": "** END **",
+      "align": "center",
+      "bold": true
+    }
+  ]
+}

@@ -50,7 +50,7 @@ export function zReport(ctx: Ctx, shiftId: string) {
       count(CASE WHEN doc_type='CREDIT_NOTE' AND status='ISSUED' THEN 1 END) AS credit_notes,
       ifnull(sum(CASE WHEN doc_type='CREDIT_NOTE' AND status='ISSUED' THEN grand_total END),0) AS refunds
     FROM invoice WHERE shift_id = ?`, shiftId)!;
-  const modes = all<{ mode: string; amount: number }>(ctx.db, `SELECT p.mode, sum(${SIGNED('p.amount')}) AS amount FROM payment p JOIN invoice i ON i.id = p.invoice_id
+  const modes = all<{ mode: string; amount: number }>(ctx.db, `SELECT p.mode, sum(${SIGNED('p.amount')}) AS amount FROM payment_effective p JOIN invoice i ON i.id = p.invoice_id
       WHERE p.shift_id = ? AND i.status = 'ISSUED' GROUP BY p.mode ORDER BY p.mode`, shiftId);
   const tax = camelAll(all(ctx.db, `SELECT l.rate_bp, sum(${SIGNED('l.taxable')}) AS taxable, sum(${SIGNED('l.cgst')}) AS cgst, sum(${SIGNED('l.sgst')}) AS sgst,
       sum(${SIGNED('l.igst')}) AS igst, sum(${SIGNED('l.cess')}) AS cess FROM invoice_line l JOIN invoice i ON i.id = l.invoice_id

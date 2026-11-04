@@ -56,6 +56,11 @@ function copyPhoto(src: string, dst: string, name: string): boolean {
 }
 
 function backupImages(ctx: Ctx, backupFile: string, destDir: string) {
+  return copyBackupPhotos(imagesDir(ctx), backupFile, destDir, ctx.logger);
+}
+
+/** Copies the photos a backup file refers to from imagesFrom into destDir/images (the shared store of a backup folder). */
+export function copyBackupPhotos(imagesFrom: string, backupFile: string, destDir: string, logger: Pick<Ctx['logger'], 'warn'>) {
   const names = referencedImages(backupFile);
   const store = join(destDir, 'images');
   mkdirSync(store, { recursive: true });
@@ -64,9 +69,9 @@ function backupImages(ctx: Ctx, backupFile: string, destDir: string) {
   for (const n of names) {
     const dst = join(store, n);
     if (fingerprintOk(dst, n)) continue;
-    if (copyPhoto(join(imagesDir(ctx), n), dst, n)) copied++; else missing.push(n);
+    if (copyPhoto(join(imagesFrom, n), dst, n)) copied++; else missing.push(n);
   }
-  if (missing.length) ctx.logger.warn('backup: some menu photos are missing from the data folder', { missing: missing.length });
+  if (missing.length) logger.warn('backup: some menu photos are missing from the data folder', { missing: missing.length });
   return { referenced: names.length, copied, missing };
 }
 

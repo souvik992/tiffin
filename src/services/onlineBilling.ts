@@ -30,6 +30,10 @@ export interface OnlineBillInput {
   fees: { delivery: number; packaging: number; taxGroupId: string | null };
   /** COD is collected as CASH by the store's rider or at pickup; online-paid orders arrive as UPI (phase 3: gateway). */
   paymentMode: 'CASH' | 'UPI' | 'CARD' | 'WALLET' | 'OTHER';
+  /** POS 0.3.11: printed on the kitchen ticket. */
+  fulfilment?: 'DELIVERY' | 'PICKUP';
+  /** POS 0.3.11: what prints on accepting (default: the bill and the kitchen tickets). */
+  print?: { receipt?: boolean; kot?: boolean };
 }
 export interface OnlineBill { invoiceId: string; invoiceNo: string; grandTotal: number; tokenNo: number | null; orderId: string }
 
@@ -55,14 +59,15 @@ export function billOnlineOrder(ctx: Ctx, actor: Actor, requestId: string, input
   const draft = get<{ id: string }>(ctx.db, "SELECT id FROM sale_order WHERE channel = ? AND external_id = ? AND status IN ('DRAFT','HELD')", input.channel, input.externalId);
   const orderId = draft?.id ?? createOrder(ctx, actor, `${requestId}:order`, { channel: input.channel, customerPhone: input.customerPhone ?? null, customerName: input.customerName ?? null, note: input.note ?? null }).order.id;
   if (!draft) ctx.db.prepare('UPDATE sale_order SET external_id = ? WHERE id = ?').run(input.externalId, orderId);
+  if (input.fulfilment === 'DELIVERY' || input.fulfilment === 'PICKUP') ctx.db.prepare('UPDATE sale_order SET fulfilment = ? WHERE id = ?').run(input.fulfilment, orderId);
   try {
     if (!draft || getCart(ctx, orderId).lines.length === 0) {
-      input.lines.forEach((l, i) => addLine(ctx, actor, `${requestId}:line:${i}`, { orderId, itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifierIds ?? [], note: l.note ?? null, ...(l.channelPrice !== undefined ? { channelPrice: l.channelPrice } : {}) }));
+      input.lines.forEach((l, i) => addLine(ctx, actor, `${requestId}:line:${i}`, { orderId, itemId: l.itemId, qtyMilli: l.qtyMilli, modifierIds: l.modifierIds ?? [], note: l.note ?? null, allowUnavailable: true, ...(l.channelPrice !== undefined ? { channelPrice: l.channelPrice } : {}) }));
       if (fees.delivery > 0) addFeeLine(ctx, actor, `${requestId}:fee:delivery`, { orderId, kind: 'delivery', amount: fees.delivery, taxGroupId: fees.taxGroupId! });
       if (fees.packaging > 0) addFeeLine(ctx, actor, `${requestId}:fee:packaging`, { orderId, kind: 'packaging', amount: fees.packaging, taxGroupId: fees.taxGroupId! });
     }
     const total = getCart(ctx, orderId).totals.grandTotal;
-    const inv = finalizeInvoice(ctx, actor, `${requestId}:bill`, { orderId, payments: [{ mode: input.paymentMode, amount: total }] });
+    const inv = finalizeInvoice(ctx, actor, `${requestId}:bill`, { orderId, payments: [{ mode: input.paymentMode, amount: total }], ...(input.print ? { print: { receipt: input.print.receipt !== false, kot: input.print.kot !== false } } : {}) });
     return { invoiceId: inv.invoice.id, invoiceNo: inv.invoice.invoiceNo, grandTotal: inv.invoice.grandTotal, tokenNo: inv.invoice.tokenNo, orderId };
   } catch (e) {
     if (getOrderRow(ctx, orderId).status === 'DRAFT') {
@@ -94,7 +99,7 @@ export function onlineMenu(ctx: Ctx) {
     return {
       id: String(i.id), categoryId: (i.categoryId as string | null) ?? null, name: String(i.name), price: Number(i.price), unit: String(i.unit),
       isVeg: i.isVeg === null || i.isVeg === undefined ? null : Boolean(i.isVeg), rateBp: t?.rateBp ?? 0, cessBp: t?.cessBp ?? 0, priceIncludesTax: (t?.priceIncludesTax ?? 1) === 1,
-      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: true, image: (i.imageFile as string | null) ?? null, description: (i.description as string | null) ?? null,
+      modifierGroupIds: (i.modifierGroupIds as string[]) ?? [], available: i.availableToday !== false, image: (i.imageFile as string | null) ?? null, description: (i.description as string | null) ?? null,
     };
   });
   const categories = (c.categories as Array<{ id: string; name: string; sortOrder: number }>).map((x) => ({ id: x.id, name: x.name, sort: x.sortOrder }));

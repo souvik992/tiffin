@@ -30,12 +30,13 @@ Install: `TiffinPOS-ODS-Setup-<version>.exe`, after the POS. It is per user and 
 
 ## The map
 
-* **Google Maps** when the owner saved a Google key in **Settings > API keys** (owner only):
+* **Map choice** at the top of **Settings > Serviceability** (the owner chooses, managers see it): **Free map (OpenStreetMap)**, the default; **Google Maps**, **Google satellite** and **Google satellite with roads**, once a Google key is saved. The place search follows the choice (free search with the free map, Google search with a Google map). Saving a key switches to Google Maps; removing it goes back to the free map. Since ODS 1.0.8 there is no separate API keys section: the key box is in the same Map card.
+* **Google** (a Google map chosen; the key is entered in Serviceability > Map > Google Maps key, owner only):
   * map pictures from the **Map Tiles API** (one tile session reused; tiles are not saved on disk, as Google's terms ask);
   * place search from **Places API (New)**: Autocomplete + Place Details with Essentials fields only (location, address), one session per search.
   * **Test key** checks both and says in plain words what to switch on in the Google Cloud console.
   * The key stays in the POS backend: screens, settings lists, the audit log and the order hub never see it (settings named `..._key` are secret).
-* **Without a key:** OpenStreetMap tiles (saved in `<POS data>\addons\ods\tiles`, they keep working offline) and Photon search (India only, near the shop pin, fewer-words retry, Nominatim on Enter).
+* **Free map** (with or without a key): OpenStreetMap tiles (saved in `<POS data>\addons\ods\tiles`, they keep working offline) and Photon search (India only, near the shop pin, fewer-words retry, Nominatim on Enter).
 * **Suggestions while typing** (no Search button needed); **paste coordinates** or a Google Maps link and choose "Use this point".
 * **How they load:** the POS fetches them (never the page) only while online orders are on.
 * **Distances** are road distances. The hub measures them on a road map when `HUB_ROUTING_URL` (OSRM) is set; otherwise it uses the straight line × the store's **road factor** (default 1.30).

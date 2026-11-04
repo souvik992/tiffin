@@ -145,11 +145,12 @@ export function OnlineSettings() {
                   <input type="radio" name="accept" className="mt-1" checked={draft.acceptMode === 'auto'} disabled={!isOwner} onChange={() => set({ acceptMode: 'auto' })} aria-label="Automatic" />
                   <span>
                     <span className="block text-sm font-semibold">Automatic</span>
-                    <span className="text-xs text-muted-foreground">Every order is accepted, billed and sent to the kitchen as soon as it arrives.</span>
+                    <span className="text-xs text-muted-foreground">Every order is accepted and billed as soon as it arrives.</span>
                   </span>
                 </label>
               </div>
             </section>
+            <PrintCard isOwner={isOwner} />
           </>
         )}
 
@@ -216,6 +217,26 @@ function HubCard({ isOwner }: { isOwner: boolean }) {
           <p className="text-xs text-muted-foreground sm:col-span-2">Paste the connection link you got from whoever runs your order hub. It works once, for a short time; ask for a new one if it has expired.</p>
         </div>
       ) : <p className="text-sm text-muted-foreground">Not connected. The owner connects the hub.</p>}
+    </section>
+  );
+}
+
+/** What prints when an order is accepted, by staff or automatically. Saved at once (POS setting). */
+function PrintCard({ isOwner }: { isOwner: boolean }) {
+  const { api, notify } = useSession();
+  const [v, setV] = useState<{ bill: boolean; kot: boolean; buttons: boolean } | null>(null);
+  useEffect(() => { api.request<{ bill: boolean; kot: boolean; buttons: boolean }>('GET', `${BASE}/print-options`).then(setV).catch(() => setV(null)); }, [api]);
+  if (!v) return null;
+  const save = async (next: { bill: boolean; kot: boolean }) => {
+    try { setV(await api.request('PUT', `${BASE}/print-options`, next, newKey())); notify('success', 'Saved. Orders accepted from now on print this way.'); } catch (e) { notify('error', messageOf(e)); }
+  };
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Printing on accepting">
+      <h3 className="mb-1 font-semibold">When an order is accepted, print</h3>
+      <p className="mb-2 text-xs text-muted-foreground">By staff on the ODS or automatically. Anything not printed here can be printed from the order on the ODS (Bill, KOT).</p>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={v.bill} disabled={!isOwner} onChange={(e) => void save({ bill: e.target.checked, kot: v.kot })} />The bill</label>
+      <label className="mt-1 flex items-center gap-2 text-sm"><input type="checkbox" checked={v.kot} disabled={!isOwner} onChange={(e) => void save({ bill: v.bill, kot: e.target.checked })} />Kitchen tickets (KOT), as set in Settings, Store settings</label>
+      {!v.buttons && <p className="mt-2 text-xs text-destructive">Update the POS (0.3.11 or newer) for these choices and the ODS print buttons.</p>}
     </section>
   );
 }

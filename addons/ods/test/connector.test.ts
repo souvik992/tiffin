@@ -10,11 +10,14 @@ import type { AddonRoute } from '../../../src/addons/host.ts';
 import { makeEnv, rid, startShift } from '../../../test/helpers.ts';
 import { Hub } from '../../../hub/src/hub.ts';
 import { createHubServer } from '../../../hub/src/http.ts';
+import { UrbanPiper } from '../../../hub/src/urbanpiper.ts';
 import { register } from '../backend/index.ts';
 import { saveOnlineConfig } from '../backend/onlineConfig.ts';
 import { saveServiceability } from '../backend/serviceability.ts';
-import { MIGRATIONS, getOrder, pendingOutbox, saveFeeTaxGroup, saveMenuSync } from '../backend/store.ts';
+import { MIGRATIONS, getOrder, pendingOutbox, readPrintOnAccept, saveFeeTaxGroup, saveMenuSync, savePrintOnAccept } from '../backend/store.ts';
 import { removeItemImage, setItemImage } from '../../../src/services/images.ts';
+import { parseEscPos } from '../../../src/services/printing/virtual.ts';
+import { all } from '../../../src/store/db.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 import type { Hours } from '../../../contract/src/serviceability.ts';
 
@@ -27,7 +30,10 @@ const until = async (fn: () => boolean | Promise<boolean>, what: string, ms = 50
 async function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'ods-conn-'));
   const hub = new Hub({ dbPath: join(dir, 'hub.db'), devOtp: true });
-  const server: Server = createHubServer(hub, { adminKey: 'k', heartbeatMs: 100 });
+  // a stand-in UrbanPiper: the hub's calls to it are recorded, never sent
+  const upCalls: Array<{ path: string; body: any }> = [];
+  const up = new UrbanPiper(hub, { kick: false, fetch: async (url, init) => { upCalls.push({ path: url, body: init.body ? JSON.parse(init.body) : null }); return { status: 200, text: async () => '{"status":"success"}' }; } });
+  const server: Server = createHubServer(hub, { adminKey: 'k', heartbeatMs: 100, urbanpiper: up });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const env = makeEnv();
@@ -62,7 +68,7 @@ async function setup() {
   };
   const hubState = (id: string) => (hub.db.prepare('SELECT state FROM orders WHERE id = ?').get(id) as { state: string }).state;
   const close = async () => { await conn.stop(); for (const s of sink.stops) await s(); await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); }); hub.close(); env.cleanup(); rmSync(dir, { recursive: true, force: true }); };
-  return { env, host, conn, hub, call, order, hubState, close, burger, sink, base };
+  return { env, host, conn, hub, call, order, hubState, close, burger, sink, base, up, upCalls };
 }
 
 test('ODS connector: pairs, publishes, receives orders live, bills on accept (GST bill + KOT), and moves them through to collected', async () => {
@@ -210,6 +216,57 @@ test('ODS connector: menu photos go to the hub once (checked against their conte
   } finally { await s.close(); }
 });
 
+test('ODS connector: after connecting to another hub (e.g. from a test hub to the live one), the photos go to the new hub too', async () => {
+  const s = await setup();
+  const dir2 = mkdtempSync(join(tmpdir(), 'ods-conn2-'));
+  const hub2 = new Hub({ dbPath: join(dir2, 'hub.db'), devOtp: true });
+  const server2: Server = createHubServer(hub2, { adminKey: 'k', heartbeatMs: 100, urbanpiper: new UrbanPiper(hub2, { kick: false, fetch: async () => ({ status: 200, text: async () => '{}' }) }) });
+  await new Promise<void>((r) => server2.listen(0, '127.0.0.1', () => r()));
+  const base2 = `http://127.0.0.1:${(server2.address() as { port: number }).port}`;
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
+    await s.conn.publish();
+    assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 200, 'on the first hub');
+    // the same POS, same photos, now connected to another hub
+    const store2 = hub2.createStore('live', 'Live');
+    await s.conn.pair(s.env.owner, base2, store2.pairingCode);
+    await until(() => s.conn.link().state === 'connected', 'connected to the second hub');
+    await s.conn.publish();
+    const r = await fetch(`${base2}/v1/stores/live/images/${imageFile}`);
+    assert.equal(r.status, 200, 'the photo reached the second hub');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), Buffer.from(PNG1, 'base64'));
+  } finally {
+    await s.close();
+    await new Promise<void>((r) => { server2.close(() => r()); server2.closeAllConnections(); });
+    hub2.close();
+    rmSync(dir2, { recursive: true, force: true });
+  }
+});
+
+test('ODS Menu sync > Sync now sends the menu and every photo again, even ones the POS thinks the hub has; it says how many', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
+    await s.conn.publish();
+    const photo = () => fetch(`${s.base}/v1/stores/demo/images/${imageFile}`).then((r) => r.status);
+    assert.equal(await photo(), 200);
+    s.hub.db.prepare('DELETE FROM image').run(); // the hub lost its photos (restored, rebuilt)
+    await s.conn.publish();
+    assert.equal(await photo(), 404, 'an ordinary publish trusts what it sent before');
+    const syncNow = s.sink.routes.find((r) => r.method === 'POST' && r.path.endsWith('/menu-sync/now'))!;
+    const res = await syncNow.handler({ actor: s.env.owner, requestId: rid(), body: {} } as never) as { items: number; photos: number; publishedAt: number };
+    assert.equal(await photo(), 200, 'Sync now put it back');
+    assert.equal(res.photos, 1);
+    assert.ok(res.items > 0 && res.publishedAt > 0);
+    // again: every photo is sent again, not only missing ones
+    assert.equal((await syncNow.handler({ actor: s.env.owner, requestId: rid(), body: {} } as never) as { photos: number }).photos, 1);
+  } finally { await s.close(); }
+});
+
 test('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
   const s = await setup();
   try {
@@ -245,5 +302,103 @@ test('ODS menu sync: each channel lists its own items at its own prices; descrip
     await until(() => getOrder(s.host, placed.json.order.id) !== null, 'arrives');
     const acc = s.conn.accept(s.env.cashier, placed.json.order.id, 10, rid());
     assert.equal(acc.billTotal, aq.total, 'the GST bill equals what the app customer pays');
+  } finally { await s.close(); }
+});
+
+test('ODS connector: what prints on accepting (bill and/or KOT) is the owner\'s choice; Bill and KOT buttons print once freely, then reprints need a manager', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    assert.throws(() => savePrintOnAccept(s.host, s.env.manager, { bill: false, kot: true }), /permission|allowed|owner/i);
+    savePrintOnAccept(s.host, s.env.owner, { bill: false, kot: true });
+    const placed = await s.order('9000000901', { fulfilment: 'DELIVERY' });
+    await until(() => getOrder(s.host, placed.order.id) !== null, 'arrives');
+    const acc = s.conn.accept(s.env.cashier, placed.order.id, 15, rid());
+    const jobs = (kind: string) => all<{ payload: Uint8Array }>(s.env.ctx.db, 'SELECT payload FROM print_job WHERE kind = ? AND ref_id = ?', kind, acc.billInvoiceId!);
+    assert.equal(jobs('RECEIPT').length, 0, 'no bill printed on accepting');
+    const kot = jobs('KOT').map((j) => parseEscPos(j.payload).text);
+    assert.ok(kot.length >= 1 && kot.every((t) => t.includes('ONLINE ORDER - KOT') && t.includes(placed.order.number) && t.includes('DELIVERY')), kot.join('\n---\n'));
+    // the Bill button: first print free, then a reprint (manager)
+    s.conn.print(s.env.cashier, placed.order.id, 'bill', rid());
+    assert.equal(jobs('RECEIPT').length, 1);
+    assert.throws(() => s.conn.print(s.env.cashier, placed.order.id, 'bill', rid()), /manager|approve/i);
+    const manager = s.env.manager;
+    s.conn.print(s.env.cashier, placed.order.id, 'bill', rid(), { userId: manager.userId, pin: '2345' });
+    assert.equal(jobs('RECEIPT').length, 2);
+    // the KOT button: the tickets already went out, so it is a reprint
+    assert.throws(() => s.conn.print(s.env.cashier, placed.order.id, 'kot', rid()), /manager|approve/i);
+    assert.deepEqual(readPrintOnAccept(s.host), { bill: false, kot: true });
+  } finally { await s.close(); }
+});
+
+test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy price with its packaging charge, paid by Swiggy; its rider and its cancellation reach the ODS', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    saveOnlineConfig(s.host, s.env.owner, rid(), { enabled: true, channels: { app: false, website: true, swiggy: true, zomato: false }, acceptMode: 'manual', acceptTimeoutMin: 5, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } });
+    saveMenuSync(s.host, s.env.owner, 'swiggy', { mode: 'all', items: [], pricing: 'custom', markupBp: 1000, prices: {} });
+    await s.conn.publish(true);
+    s.up.saveAccount({ username: 'u', apiKey: 'secret-key-1', bizId: '42' }, s.base);
+    s.up.saveLink('demo', { locationRef: 'DEMO-1', city: 'Bengaluru', platforms: ['swiggy'] });
+    const token = (s.hub.db.prepare('SELECT webhook_token FROM up_account').get() as { webhook_token: string }).webhook_token;
+    const hook = (event: string, body: unknown) => s.call('POST', '/v1/urbanpiper/42', body, { 'x-tiffin-token': token, 'x-upr-event-type': event });
+    const relay = {
+      customer: { name: 'Ravi', phone: '9876500000', address: { line_1: 'Flat 2', city: 'Bengaluru', pin: '560043', latitude: 13.03, longitude: 77.646 } },
+      order: {
+        details: { id: 777, channel: 'swiggy', order_type: 'delivery', order_total: 304, charges: [{ title: 'Packaging Charge', value: 20 }], ext_platforms: [{ id: 'SW-1', name: 'swiggy', delivery_type: 'partner', extras: { order_otp: '1234' }, discounts: [] }] },
+        items: [{ title: 'Cheese Burger', merchant_id: s.burger, price: 135.24, quantity: 2, options_to_add: [] }],
+        payment: [{ option: 'payment_gateway', amount: 304 }], store: { merchant_ref_id: 'DEMO-1' },
+      },
+    };
+    const r = await hook('18', relay);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const hubOrder = s.hub.db.prepare('SELECT id FROM orders WHERE number = ?').get(r.json.order_ref_id) as { id: string };
+    await until(() => getOrder(s.host, hubOrder.id) !== null, 'the Swiggy order reaches the POS');
+    const lo = getOrder(s.host, hubOrder.id)!;
+    assert.equal(lo.order.channel, 'swiggy');
+    assert.equal(lo.order.external!.otp, '1234');
+    assert.equal(s.conn.posPrice(lo.order).differs, false, 'the POS prices it the same (Swiggy price 129 + 10% = 142, packaging 20)');
+    const acc = s.conn.accept(s.env.cashier, hubOrder.id, 15, rid());
+    assert.equal(acc.billTotal, lo.order.total);
+    assert.equal(lo.order.lines[0]!.unitPrice, 14200);
+    assert.equal(lo.order.packagingFee, 2000);
+    const inv = get<{ channel: string; mode: string }>(s.env.ctx.db, 'SELECT o.channel, p.mode FROM invoice i JOIN sale_order o ON o.id = i.order_id JOIN payment p ON p.invoice_id = i.id WHERE i.id = ?', acc.billInvoiceId!)!;
+    assert.deepEqual({ ...inv }, { channel: 'SWIGGY', mode: 'OTHER' }, 'paid by Swiggy, not cash or UPI at the counter');
+    await until(() => s.hubState(hubOrder.id) === 'ACCEPTED', 'the hub knows');
+    await s.up.pump();
+    assert.ok(s.upCalls.some((c) => c.path.endsWith('/external/api/v1/orders/777/status/') && c.body.new_status === 'Acknowledged'), 'Swiggy is told through UrbanPiper');
+    // the cola... the burger ran out: Swiggy asks the customer to change the order; Swiggy's answer shows on the order
+    assert.throws(() => s.conn.platformAction(s.env.cashier, hubOrder.id, { action: 'customer_phone' }, rid()), /Zomato request/);
+    s.conn.platformAction(s.env.cashier, hubOrder.id, { action: 'items_out_of_stock', itemIds: [s.burger], allowEdit: true }, rid());
+    await until(async () => { await s.up.pump(); return s.upCalls.some((c) => c.path.endsWith('/hub/api/v1/orders/items-oos/')); }, 'out-of-stock request reaches UrbanPiper');
+    assert.deepEqual(s.upCalls.find((c) => c.path.endsWith('/hub/api/v1/orders/items-oos/'))!.body, { order_upipr_id: 777, order_ref_id: 'SW-1', allow_edit: true, items_oos: [{ ref_id: s.burger }] });
+    await hook('60018', { success: true, platform: 'swiggy', upipr_order_id: 777, item_ids: [1], data: { message: 'Please call the customer.', customer_masked_number: '08040001111', pin: '4455' } });
+    await until(() => getOrder(s.host, hubOrder.id)!.alert === 'Please call the customer. Customer: 08040001111 PIN: 4455', 'Swiggy answer on the order');
+    // the Swiggy rider, then Swiggy cancels
+    await hook('60012', { order_id: 777, delivery_info: { current_state: 'At store', delivery_person_details: { name: 'Kiran', phone: '9000000009' } } });
+    await until(() => getOrder(s.host, hubOrder.id)!.order.external?.riderStatus === 'At store', 'rider shown');
+    assert.deepEqual(getOrder(s.host, hubOrder.id)!.order.rider, { name: 'Kiran', phone: '9000000009' });
+    await hook('60008', { order_id: 777, new_state: 'Cancelled', message: 'Rider could not find the customer' });
+    await until(() => getOrder(s.host, hubOrder.id)!.state === 'CANCELLED', 'cancelled');
+    assert.equal(getOrder(s.host, hubOrder.id)!.alert, `Swiggy cancelled it (Rider could not find the customer). Cancel bill ${acc.billNo} (manager approval).`);
+  } finally { await s.close(); }
+});
+
+test('ODS connector: a delivery order on the ODS: on the way (rider) and delivered reach the hub', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    const placed = await s.order('9000000777', { fulfilment: 'DELIVERY' });
+    await until(() => getOrder(s.host, placed.order.id) !== null, 'order arrives');
+    s.conn.accept(s.env.cashier, placed.order.id, 20, rid());
+    await until(() => s.hubState(placed.order.id) === 'ACCEPTED', 'accepted on the hub');
+    s.conn.step(s.env.cashier, placed.order.id, 'PREPARING');
+    s.conn.step(s.env.cashier, placed.order.id, 'READY');
+    s.conn.step(s.env.cashier, placed.order.id, 'OUT_FOR_DELIVERY', { rider: { name: 'Ravi', phone: '9000000001' } });
+    await until(() => s.hubState(placed.order.id) === 'OUT_FOR_DELIVERY', 'on the way on the hub');
+    s.conn.step(s.env.cashier, placed.order.id, 'DELIVERED');
+    await until(() => s.hubState(placed.order.id) === 'DELIVERED', 'delivered on the hub');
+    // the hub saves the step before the POS hears back and clears its outbox row
+    await until(() => pendingOutbox(s.host).length === 0, 'nothing left to send');
   } finally { await s.close(); }
 });

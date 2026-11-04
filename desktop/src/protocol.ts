@@ -19,10 +19,10 @@ const TYPES: Record<string, string> = {
 };
 
 /** Maps a request URL to a backend API path or a file inside uiDir. Anything outside uiDir, or another host, is "missing". */
-export function resolveRequest(rawUrl: string, uiDir: string): Resolved {
+export function resolveRequest(rawUrl: string, uiDir: string, host: string = HOST): Resolved {
   let url: URL;
   try { url = new URL(rawUrl); } catch { return { kind: 'missing' }; }
-  if (url.protocol !== `${SCHEME}:` || url.host !== HOST) return { kind: 'missing' };
+  if (url.protocol !== `${SCHEME}:` || url.host !== host) return { kind: 'missing' };
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return { kind: 'api', path: url.pathname + url.search };
   let p: string;
   try { p = decodeURIComponent(url.pathname); } catch { return { kind: 'missing' }; }
@@ -53,4 +53,4 @@ export function forwardHeaders(incoming: Iterable<[string, string]>, secret: str
 }
 
 /** Whether the window may navigate to a URL: only inside the app. */
-export const isAppUrl = (u: string): boolean => { try { const x = new URL(u); return x.protocol === `${SCHEME}:` && x.host === HOST; } catch { return false; } };
+export const isAppUrl = (u: string, host: string = HOST): boolean => { try { const x = new URL(u); return x.protocol === `${SCHEME}:` && x.host === host; } catch { return false; } };

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { Hub, HubError } from './hub.ts';
+import { UrbanPiper } from './urbanpiper.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 
 /**
@@ -11,12 +12,15 @@ import type { PublishedMenu } from '../../contract/src/menu.ts';
  *   admin    X-Admin-Key header          stores, pairing codes, devices, pause, hub settings (the /admin page)
  *   POS      Authorization: Bearer <device key>   publish menu/status, event stream (SSE), order actions
  *   customer open (CORS), rate limited   store page, quote, OTP, place/track/cancel orders, demo page
+ *   UrbanPiper  x-tiffin-token header   Swiggy / Zomato orders and callbacks (src/urbanpiper.ts)
  */
 
 export interface HttpOptions {
   adminKey?: string; heartbeatMs?: number; publicDir?: string;
   /** The hub's address as shops reach it (HUB_PUBLIC_URL), for connection links. Not set: taken from the admin's request. */
   publicUrl?: string;
+  /** Swiggy / Zomato through UrbanPiper. Not given: one is made here (it listens to the hub; make only one per hub). */
+  urbanpiper?: UrbanPiper;
 }
 
 interface Ctx { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; query: URLSearchParams; body: unknown; ip: string }
@@ -67,6 +71,7 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   const otpLimit = limiter(() => hub.settings().otpPerMinute), orderLimit = limiter(() => hub.settings().ordersPerMinute), pairLimit = limiter(() => hub.settings().pairPerMinute);
   const heartbeat = o.heartbeatMs ?? 15_000;
 
+  const up = o.urbanpiper ?? new UrbanPiper(hub);
   add('GET', '/health', () => ({ ok: true }));
 
   // ---- admin
@@ -80,17 +85,38 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('GET', '/v1/admin/overview', (c) => { admin(c); return hub.adminOverview(); });
   add('PUT', '/v1/admin/settings', (c) => { admin(c); return { settings: hub.saveSettings(c.body) }; });
   add('PUT', '/v1/admin/stores/:slug/pause', (c) => { admin(c); const b = (c.body ?? {}) as { paused?: unknown; reason?: unknown }; return hub.pauseStore(c.params.slug!, b.paused === true, b.reason); });
+  add('GET', '/v1/admin/stores/:slug/sales', (c) => { admin(c); return hub.sync.sales(hub.store({ slug: c.params.slug! }).id, Number(c.query.get('days') ?? 14)); });
+  add('GET', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.licenceInfo(hub.store({ slug: c.params.slug! }).id); });
+  add('PUT', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.setLicence(hub.store({ slug: c.params.slug! }).id, (c.body as { key?: unknown } | null)?.key); });
   add('PUT', '/v1/admin/stores/:slug/website', (c) => { admin(c); return { website: hub.saveWebsite(c.params.slug!, c.body) }; });
   add('GET', '/v1/admin/stores/:slug/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.params.slug!, limit: Number(c.query.get('limit') ?? 50) }); });
   add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
+
+  // ---- Swiggy / Zomato through UrbanPiper: the store's details (admin), and UrbanPiper's webhooks
+  // the one UrbanPiper account (Hub settings)
+  add('GET', '/v1/admin/urbanpiper', (c) => { admin(c); return up.accountView(base(c)); });
+  add('PUT', '/v1/admin/urbanpiper', (c) => { admin(c); return up.saveAccount(c.body, base(c)); });
+  add('DELETE', '/v1/admin/urbanpiper', (c) => { admin(c); return up.removeAccount(); });
+  add('POST', '/v1/admin/urbanpiper/test', (c) => { admin(c); return up.test(); });
+  add('POST', '/v1/admin/urbanpiper/webhooks', (c) => { admin(c); return up.setupWebhooks(base(c)); });
+  // each store at UrbanPiper (store page)
+  add('GET', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.view(c.params.slug!); });
+  add('PUT', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.saveLink(c.params.slug!, c.body); });
+  add('DELETE', '/v1/admin/stores/:slug/urbanpiper', (c) => { admin(c); return up.removeLink(c.params.slug!); });
+  add('POST', '/v1/admin/stores/:slug/urbanpiper/store', (c) => { admin(c); return up.pushStore(c.params.slug!); });
+  add('POST', '/v1/admin/stores/:slug/urbanpiper/menu', (c) => { admin(c); return up.pushMenu(c.params.slug!, base(c)); });
+  add('POST', '/v1/urbanpiper/:bizId', (c) => up.webhook(c.params.bizId!, c.req.headers, c.body), { maxBody: 2 * 1024 * 1024 });
 
   // ---- POS
   add('POST', '/v1/pos/pair', (c) => { pairLimit(c.ip); const b = c.body as { code?: string; deviceName?: string }; return hub.pair(String(b?.code ?? ''), String(b?.deviceName ?? 'POS')); });
   add('PUT', '/v1/pos/menu', (c) => hub.publishMenu(device(c), c.body as PublishedMenu), { maxBody: 4 * 1024 * 1024 });
   add('PUT', '/v1/pos/status', (c) => hub.setStatus(device(c), c.body as { accepting: boolean; reason?: string }));
   add('GET', '/v1/pos/orders', (c) => hub.openOrders(device(c)));
+  add('POST', '/v1/pos/sync/batches', (c) => hub.sync.receive(device(c), c.body), { maxBody: 4 * 1024 * 1024 }); // DinePOS sales sync
+  add('GET', '/v1/pos/licence', (c) => hub.sync.licence(device(c)));
   add('GET', '/v1/pos/images', (c) => ({ names: hub.imageNames(device(c)) }));
   add('PUT', '/v1/pos/images/:name', (c) => hub.putImage(device(c), c.params.name!, (c.body as { dataBase64?: unknown } | null)?.dataBase64), { maxBody: 2_100_000 });
+  add('POST', '/v1/pos/orders/:id/platform-action', (c) => up.platformAction(device(c), c.params.id!, c.body, idem(c))); // Swiggy / Zomato requests
   for (const action of ['received', 'accept', 'reject', 'state'] as const) {
     add('POST', `/v1/pos/orders/:id/${action}`, (c) => hub.posAction(device(c), c.params.id!, action, (c.body ?? {}) as Record<string, unknown>, idem(c)));
   }

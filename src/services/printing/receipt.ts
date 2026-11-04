@@ -15,6 +15,9 @@ export interface ReceiptData {
   lines: Array<{ name: string; hsnCode?: string | null; qtyMilli: number; unitPrice: number; lineTotal: number; rateBp: number; taxable: number; cgst: number; sgst: number; igst: number; modifiers: Array<{ name: string; price: number }>; note: string | null }>;
   payments: Array<{ mode: string; amount: number; tendered: number | null }>;
   cashierName: string;
+  /** Typed on the bill (Customer and note), and where the order came from (COUNTER, APP, WEBSITE, SWIGGY, ZOMATO). */
+  customer?: { name: string | null; phone: string | null } | null;
+  channel?: string;
 }
 /** sample: printer-setup preview with made-up lines; titled "SAMPLE - NOT A BILL" so it can never pass as an invoice. */
 export interface ReceiptOptions {
@@ -94,12 +97,13 @@ export function buildStandardReceipt(d: ReceiptData, o: ReceiptOptions): Uint8Ar
 }
 
 export interface KotData {
-  tokenNo: number | null; channel: string; createdAt: number; station: string; orderNote: string | null;
+  tokenNo: number | null; channel: string; createdAt: number; station: string; orderNote: string | null; reprint?: boolean;
   lines: Array<{ name: string; qtyMilli: number; modifiers: Array<{ name: string }>; note: string | null }>;
 }
 export function buildKot(d: KotData, cols: number): Uint8Array {
   const p = new EscPos(cols).init();
   p.bold(true).center(`KOT${d.station ? ' - ' + d.station : ''}`).bold(false);
+  if (d.reprint) p.bold(true).center('*** REPRINT ***').bold(false);
   if (d.tokenNo !== null) p.size(2, 2).bold(true).center(`TOKEN ${d.tokenNo}`).bold(false).size(1, 1);
   p.twoCol(d.channel, istDateTime(d.createdAt));
   p.rule();

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BarChart3, Boxes, ClipboardList, House, Settings as SettingsIcon, ShoppingCart, UtensilsCrossed, X } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { useAddons } from '../lib/addons.ts';
+import { useAppMode } from '../lib/appMode.tsx';
 import { useSession } from '../lib/session.tsx';
 import { PIN_LENGTH } from '../lib/pin.ts';
 import type { LoginUser } from '../lib/api.ts';
@@ -22,29 +23,30 @@ const NAV: Array<{ to: Route; label: string; icon: ComponentType<{ className?: s
 
 export function Rail({ route }: { route: Route }) {
   const { addons } = useAddons();
+  const mode = useAppMode();
   const extra = addons.flatMap((a) => (a.nav ?? []).filter((n) => !n.visible || n.visible()).map((n) => ({ to: n.route, label: n.label, icon: n.icon })));
-  const items = [...NAV.slice(0, -2), ...extra, ...NAV.slice(-2)]; // add-on screens before Reports and Settings
+  const items = mode.nav ?? [...NAV.slice(0, -2), ...extra, ...NAV.slice(-2)]; // add-on screens before Reports and Settings
   return (
     <nav className="relative z-30 flex w-16 shrink-0 flex-col items-center gap-2 border-r border-border bg-card py-4" aria-label="Main">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-display text-lg text-primary-foreground">T</div>
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-display text-lg text-primary-foreground">{mode.mark ?? 'T'}</div>
       {items.map(({ to, label, icon: Icon }) => (
-        <a key={to} href={`#/${to === 'billing' ? '' : to}`} aria-label={label}
+        <a key={to} href={`#/${to === 'billing' && !mode.nav ? '' : to}`} aria-label={label}
           aria-current={route === to ? 'page' : undefined} className={`rail-btn group relative ${route === to ? 'rail-btn-active' : ''}`}>
           <Icon className="h-5 w-5" />
           {/* Tooltip to the right, on hover and on keyboard focus (the link's aria-label already names it for screen readers). */}
           <span aria-hidden className="rail-tip">{label}</span>
         </a>
       ))}
-      <div className="mt-auto flex flex-col items-center gap-2">{addons.map((a) => (a.railFooter ? <a.railFooter key={a.id} /> : null))}</div>
+      <div className="mt-auto flex flex-col items-center gap-2">{mode.nav ? null : addons.map((a) => (a.railFooter ? <a.railFooter key={a.id} /> : null))}</div>
     </nav>
   );
 }
 
 export function PageShell({ route, title, subtitle, children }: { route: Route; title: string; subtitle: string; children: ReactNode }) {
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex h-full bg-background text-foreground">
       <Rail route={route} />
-      <main className="flex-1 overflow-y-auto px-8 py-6">
+      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
         <h1 className="font-display text-3xl">{title}</h1>
         <p className="mb-6 text-sm text-muted-foreground">{subtitle}</p>
         {children}
@@ -70,13 +72,14 @@ export function Modal({ title, onClose, children, width = 'max-w-md' }: { title:
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className={`w-full ${width} rounded-2xl border border-border bg-card p-5 shadow-xl`}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-xl font-semibold">{title}</h2>
-          <button className="rail-btn h-9 w-9" onClick={onClose} aria-label="Close"><X className="h-5 w-5" /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+      {/* never taller than the screen: the title and the close button stay in view, the content scrolls */}
+      <div className={`flex max-h-[calc(100dvh-1rem)] w-full ${width} flex-col rounded-2xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-2rem)]`}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <h2 className="min-w-0 truncate font-display text-xl font-semibold">{title}</h2>
+          <button className="rail-btn h-10 w-10 shrink-0" onClick={onClose} aria-label="Close" title="Close"><X className="h-5 w-5" /></button>
         </div>
-        {children}
+        <div className="min-h-0 overflow-y-auto px-5 pb-5 pt-4">{children}</div>
       </div>
     </div>
   );

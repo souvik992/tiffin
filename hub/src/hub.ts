@@ -3,11 +3,12 @@ import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { exec, hash, many, one, openHubDb, tx } from './db.ts';
 import { BackupStore } from './backups.ts';
+import { SalesSync } from './sync.ts';
 import type { Db } from './db.ts';
 import { canTransition, label, needsRefund } from '../../contract/src/order.ts';
 import type { OrderFacts, OrderState } from '../../contract/src/order.ts';
 import { REJECT_REASONS } from '../../contract/src/types.ts';
-import type { CustomerEvent, Order, PosEvent, RejectReason, Rider } from '../../contract/src/types.ts';
+import type { CustomerEvent, ExternalOrder, Order, PosEvent, RejectReason, Rider } from '../../contract/src/types.ts';
 import { checkPlaceOrder, MOBILE_RE, normaliseMobile } from '../../contract/src/validate.ts';
 import { checkServiceability, isOpen, quote } from '../../contract/src/serviceability.ts';
 import { priceOrder } from '../../contract/src/menu.ts';
@@ -22,6 +23,7 @@ import { osrmRoadKm } from './routing.ts';
  * The online order hub: stores and their paired POS devices, published menus, customer orders, and the numbered event
  * log each POS reads over its event stream. Every order change follows contract/src/order.ts; anything else is refused.
  * Prices are always recomputed here from the published menu (contract/src/menu.ts); the POS bill stays the legal record.
+ * Swiggy and Zomato orders come in through src/urbanpiper.ts, which listens to the bus ('moved', 'menu', 'status').
  */
 
 export class HubError extends Error {
@@ -50,7 +52,7 @@ export interface HubOptions {
 }
 export interface DeviceRef { deviceId: string; storeId: string; slug: string }
 
-interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null; website_json: string | null }
+export interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null; website_json: string | null }
 interface OrderRow { id: string; store_id: string; number: string; state: OrderState; data_json: string; access_hash: string; accept_by: number | null }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{2,40}$/;
@@ -94,6 +96,8 @@ export class Hub {
   now: () => number;
   bus = new EventEmitter();
   backups: BackupStore;
+  /** DinePOS outlets: sales sync up, licence renewals down */
+  sync: SalesSync;
   private opts: HubOptions;
   /** open POS event streams per store, and when the last one closed */
   private streams = new Map<string, number>();
@@ -107,6 +111,7 @@ export class Hub {
     this.now = opts.now ?? Date.now;
     this.bus.setMaxListeners(0);
     this.backups = new BackupStore({ dir: opts.backupDir ?? join(dirname(opts.dbPath), 'backups'), keep: opts.backupKeep, maxBytes: opts.backupMaxBytes, now: this.now });
+    this.sync = new SalesSync(this.db, this.now);
   }
   close() { this.db.close(); }
 
@@ -187,6 +192,7 @@ export class Hub {
     const text = typeof reason === 'string' && reason.trim() ? reason.trim() : 'This store is not taking online orders right now.';
     if (text.length > 200) throw new HubError('VALIDATION', 'Keep the message for customers under 200 characters.');
     exec(this.db, 'UPDATE store SET paused_reason = ? WHERE id = ?', paused ? text : null, s.id);
+    this.bus.emit('status', s.id);
     return { slug, pausedReason: paused ? text : null };
   }
 
@@ -302,14 +308,14 @@ export class Hub {
     return this.routing.fn;
   }
 
-  private store(by: { id?: string; slug?: string }): StoreRow {
+  store(by: { id?: string; slug?: string }): StoreRow {
     const s = by.id ? one<StoreRow>(this.db, 'SELECT * FROM store WHERE id = ?', by.id) : one<StoreRow>(this.db, 'SELECT * FROM store WHERE slug = ?', by.slug ?? '');
     if (!s) throw new HubError('NOT_FOUND', 'No such store.', 404);
     return s;
   }
-  private menu(s: StoreRow): PublishedMenu | null { return s.menu_json ? JSON.parse(s.menu_json) as PublishedMenu : null; }
+  menu(s: StoreRow): PublishedMenu | null { return s.menu_json ? JSON.parse(s.menu_json) as PublishedMenu : null; }
   /** The menu as one channel sells it (menu sync): items listed for that channel only. */
-  private forChannel(m: PublishedMenu, channel: 'app' | 'website'): PublishedMenu {
+  forChannel(m: PublishedMenu, channel: 'app' | 'website' | 'swiggy' | 'zomato'): PublishedMenu {
     return { ...m, items: m.items.filter((i) => !i.channels || i.channels.includes(channel)).map((i) => ({ ...i, price: i.prices?.[channel] ?? i.price })) };
   }
 
@@ -326,6 +332,7 @@ export class Hub {
     exec(this.db, 'UPDATE store SET menu_json = ?, menu_version = ?, name = ? WHERE id = ?', JSON.stringify({ ...m, serviceability: svc.value }), m.version, String(m.storeName || cur.name).slice(0, 80), dev.storeId);
     const keep = new Set(m.items.map((i) => i.image).filter((x): x is string => typeof x === 'string'));
     for (const r of many<{ name: string }>(this.db, 'SELECT name FROM image WHERE store_id = ?', dev.storeId)) if (!keep.has(r.name)) exec(this.db, 'DELETE FROM image WHERE store_id = ? AND name = ?', dev.storeId, r.name);
+    this.bus.emit('menu', dev.storeId);
     return { version: m.version, stale: false };
   }
 
@@ -360,6 +367,7 @@ export class Hub {
 
   setStatus(dev: DeviceRef, s: { accepting: boolean; reason?: string | null }) {
     exec(this.db, 'UPDATE store SET accepting = ?, accepting_reason = ?, last_seen_at = ? WHERE id = ?', s.accepting ? 1 : 0, s.accepting ? null : String(s.reason ?? 'Not taking orders right now.').slice(0, 200), this.now(), dev.storeId);
+    this.bus.emit('status', dev.storeId);
     return { ok: true };
   }
 
@@ -540,6 +548,65 @@ export class Hub {
     return this.move(o.storeId, id, 'CANCELLED', 'customer', { reasonText: reasonText ? String(reasonText).slice(0, 200) : 'Cancelled by the customer' });
   }
 
+  // ---------------------------------------------------------------- Swiggy / Zomato orders (src/urbanpiper.ts)
+
+  /**
+   * A platform order, already priced: straight to the store (the platform has taken the customer's payment or cash
+   * arrangement). onSaved runs in the same transaction: the caller records the platform's order id there, so a repeated
+   * webhook can never make a second order.
+   */
+  createExternalOrder(storeId: string, f: Pick<Order, 'fulfilment' | 'payment' | 'paid' | 'customer' | 'address' | 'lines' | 'note' | 'itemsTotal' | 'deliveryFee' | 'packagingFee' | 'total' | 'location'> & { external: ExternalOrder }, onSaved: (orderId: string) => void): Order {
+    const s = this.store({ id: storeId });
+    const m = this.menu(s);
+    const now = this.now();
+    const res = tx(this.db, () => {
+      const n = one<{ order_counter: number }>(this.db, 'UPDATE store SET order_counter = order_counter + 1 WHERE id = ? RETURNING order_counter', s.id)!.order_counter;
+      const id = randomUUID();
+      const manual = m?.options.acceptMode !== 'auto';
+      const order: Order = {
+        id, number: `${f.external.platform === 'swiggy' ? 'S' : 'Z'}-${n}`, storeId: s.id, channel: f.external.platform, state: 'SENT_TO_STORE',
+        fulfilment: f.fulfilment, payment: f.payment, paid: f.paid, customer: f.customer, address: f.address, lines: f.lines, note: f.note,
+        itemsTotal: f.itemsTotal, deliveryFee: f.deliveryFee, packagingFee: f.packagingFee, total: f.total, distanceKm: null, location: f.location,
+        prepMinutes: null, etaAt: null, menuVersion: m?.version ?? 0, placedAt: now, acceptBy: manual ? now + (m?.options.acceptTimeoutMin ?? 5) * 60_000 : null,
+        rider: null, posBillNo: null, rejectReason: null, reasonText: null, external: f.external,
+      };
+      exec(this.db, 'INSERT INTO orders (id, store_id, number, state, data_json, access_hash, accept_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        id, s.id, order.number, order.state, JSON.stringify(order), hash(randomBytes(24).toString('base64url')), order.acceptBy, now, now);
+      onSaved(id);
+      return { order, ev: this.addEvent(s.id, id, 'order.created', { order }) };
+    });
+    this.bus.emit('pos', s.id, res.ev);
+    return res.order;
+  }
+
+  /** The platform moved its order on (cancelled, picked up by its rider, delivered). False when that step does not apply now. */
+  aggregatorMove(storeId: string, orderId: string, to: OrderState, patch: Partial<Order> = {}): boolean {
+    try { this.move(storeId, orderId, to, 'aggregator', patch); return true; } catch (e) { if (e instanceof HubError && e.code === 'BAD_TRANSITION') return false; throw e; }
+  }
+
+  /** The platform's rider (name, phone) and how far it got, for the ODS. */
+  setRider(storeId: string, orderId: string, rider: Rider | null, riderStatus: string | null) {
+    const ev = tx(this.db, () => {
+      const r = one<OrderRow>(this.db, 'SELECT * FROM orders WHERE id = ? AND store_id = ?', orderId, storeId);
+      if (!r) throw new HubError('NOT_FOUND', 'Order not found.', 404);
+      const o = JSON.parse(r.data_json) as Order;
+      exec(this.db, 'UPDATE orders SET data_json = ?, updated_at = ? WHERE id = ?', JSON.stringify({ ...o, rider }), this.now(), orderId);
+      return this.addEvent(storeId, orderId, 'order.rider', { orderId, rider, riderStatus });
+    });
+    this.bus.emit('pos', storeId, ev);
+  }
+
+  /** A message for the store about one order (shown on the ODS). */
+  addNotice(storeId: string, orderId: string, text: string) {
+    const ev = this.addEvent(storeId, orderId, 'order.notice', { orderId, text: text.slice(0, 300) });
+    this.bus.emit('pos', storeId, ev);
+  }
+
+  order(orderId: string): Order | null {
+    const r = one<{ data_json: string }>(this.db, 'SELECT data_json FROM orders WHERE id = ?', orderId);
+    return r ? JSON.parse(r.data_json) as Order : null;
+  }
+
   // ---------------------------------------------------------------- POS actions
 
   eventsSince(storeId: string, afterSeq: number): PosEvent[] {
@@ -589,12 +656,12 @@ export class Hub {
   }
 
   /** One state change, checked against the contract, saved with its events in one transaction, then pushed live. */
-  private move(storeId: string, orderId: string, to: OrderState, by: 'pos' | 'customer' | 'hub', patch: Partial<Order>) {
+  private move(storeId: string, orderId: string, to: OrderState, by: 'pos' | 'customer' | 'hub' | 'aggregator', patch: Partial<Order>) {
     const res = tx(this.db, () => {
       const r = one<OrderRow>(this.db, 'SELECT * FROM orders WHERE id = ? AND store_id = ?', orderId, storeId);
       if (!r) throw new HubError('NOT_FOUND', 'Order not found.', 404);
       const o = JSON.parse(r.data_json) as Order;
-      const facts: OrderFacts = { fulfilment: o.fulfilment, payment: o.payment };
+      const facts: OrderFacts = { fulfilment: o.fulfilment, payment: o.payment, deliveredBy: o.external?.deliveredBy };
       const ok = canTransition(facts, r.state, to, by);
       if (!ok.ok) throw new HubError('BAD_TRANSITION', ok.reason, 409, { state: r.state });
       const now = this.now();
@@ -602,14 +669,15 @@ export class Hub {
       if (to === 'ACCEPTED' && typeof patch.prepMinutes === 'number') next.etaAt = now + patch.prepMinutes * 60_000;
       const keepTimer = to === 'RECEIVED';
       next.acceptBy = keepTimer ? o.acceptBy : null;
-      if (needsRefund({ ...facts, paid: o.paid }, to)) this.opts.log?.warn('refund needed (online payments: phase 3)', { order: o.number });
+      if (!o.external && needsRefund({ ...facts, paid: o.paid }, to)) this.opts.log?.warn('refund needed (online payments: phase 3)', { order: o.number });
       exec(this.db, 'UPDATE orders SET state = ?, data_json = ?, accept_by = ?, updated_at = ? WHERE id = ?', to, JSON.stringify(next), next.acceptBy, now, orderId);
-      const type = to === 'AUTO_REJECTED' ? 'order.auto_rejected' : by === 'customer' && to === 'CANCELLED' ? 'order.cancelled' : 'order.updated';
-      const data = type === 'order.cancelled' ? { orderId, by: 'customer', reasonText: next.reasonText } : type === 'order.auto_rejected' ? { orderId } : { orderId, state: to, by: 'pos' };
+      const type = to === 'AUTO_REJECTED' ? 'order.auto_rejected' : (by === 'customer' || by === 'aggregator') && to === 'CANCELLED' ? 'order.cancelled' : 'order.updated';
+      const data = type === 'order.cancelled' ? { orderId, by, reasonText: next.reasonText } : type === 'order.auto_rejected' ? { orderId } : { orderId, state: to, by: by === 'aggregator' ? 'aggregator' : 'pos' };
       const ev = this.addEvent(storeId, orderId, type, data);
-      return { next, ev };
+      return { next, ev, from: r.state };
     });
     this.bus.emit('pos', storeId, res.ev);
+    this.bus.emit('moved', storeId, res.next, by, res.from);
     this.emitCustomer(res.next);
     return { orderId, state: res.next.state, order: res.next };
   }

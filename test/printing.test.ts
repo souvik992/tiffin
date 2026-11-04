@@ -5,6 +5,8 @@ import { all, get, run, AppError } from '../src/store/db.ts';
 import { EscPos, wrapText, sanitize } from '../src/services/printing/escpos.ts';
 import { parseEscPos } from '../src/services/printing/virtual.ts';
 import { PrintQueue } from '../src/services/printing/queue.ts';
+import { clearPictureCache, expandPictures, findMarkers } from '../src/services/printing/textPicture.ts';
+import type { PictureSpec, TextRenderer } from '../src/services/printing/textPicture.ts';
 import { MemoryTransport, TcpTransport, chunks } from '../src/services/printing/transports.ts';
 import type { PrinterRow } from '../src/services/printing/transports.ts';
 import { createPrinter, testPrint } from '../src/services/printing/jobs.ts';
@@ -59,7 +61,7 @@ test('receipt (58 mm): fits 32 columns; UPI-only bills do not kick the drawer', 
   } finally { env.cleanup(); }
 });
 
-test('non-Latin names print as ? in text mode (raster is the desktop host job), and never crash', () => {
+test('Hindi and the rupee sign: the bill keeps the real text (screen preview), the queue prints it as a picture, or as text when it cannot draw', async () => {
   const env = makeEnv(); try {
     startShift(env);
     const tg = get<{ id: string }>(env.ctx.db, 'SELECT id FROM tax_group WHERE rate_bp = 500')!.id;
@@ -67,9 +69,55 @@ test('non-Latin names print as ? in text mode (raster is the desktop host job), 
     env.items['chai'] = id;
     const r = quickBill(env, [['chai']]);
     const p = jobFor(env, r.invoice.id, 'RECEIPT', 'Counter receipt (virtual)');
-    assert.ok(p.text.includes('??? Special Rs'));
+    assert.ok(p.text.includes('\u091a\u093e\u092f Special \u20b9'), 'the preview shows the real name');
+    assert.ok(p.pictures >= 1);
     assert.equal(sanitize('a\u2013b \u201cq\u201d'), 'a-b "q"');
+
+    // no renderer (a printer reached from Linux, or drawing failed): the old text, and no marker reaches the printer
+    clearPictureCache();
+    const mem = new MemoryTransport();
+    await new PrintQueue(env.ctx, { memory: mem }).processDue();
+    const sentText = mem.sent.map((s) => parseEscPos(s.bytes));
+    assert.ok(sentText.some((s) => s.text.includes('??? Special Rs')));
+    assert.ok(sentText.every((s) => s.pictures === 0 && findMarkers(s.lines.length ? mem.sent[0]!.bytes : new Uint8Array()).length === 0));
+
+    // with a renderer: those lines become raster pictures, the rest stays text
+    const r2 = quickBill(env, [['chai']]);
+    const seen: PictureSpec[] = [];
+    const fake: TextRenderer = async (specs) => { seen.push(...specs); return specs.map((s) => ({ widthBytes: s.c * 12 * s.w / 8, height: 24 * s.h, data: new Uint8Array(s.c * 12 * s.w / 8 * 24 * s.h).fill(0xff) })); };
+    const mem2 = new MemoryTransport();
+    await new PrintQueue(env.ctx, { memory: mem2 }, [0, 0, 0], fake).processDue();
+    const receipt = mem2.sent.map((s) => parseEscPos(s.bytes)).find((s) => s.text.includes(r2.invoice.invoiceNo))!;
+    assert.ok(receipt.rasters.length >= 1, 'the Hindi line is a raster image');
+    assert.ok(!receipt.text.includes('???'));
+    assert.ok(seen.some((s) => s.s.some((g) => g.t.includes('\u091a\u093e\u092f'))));
+    // a renderer that fails never stops printing
+    const r3 = quickBill(env, [['chai']]);
+    clearPictureCache();
+    const mem3 = new MemoryTransport();
+    await new PrintQueue(env.ctx, { memory: mem3 }, [0, 0, 0], async () => { throw new Error('no fonts'); }).processDue();
+    assert.ok(mem3.sent.map((s) => parseEscPos(s.bytes).text).some((x) => x.includes(r3.invoice.invoiceNo) && x.includes('??? Special Rs')));
   } finally { env.cleanup(); }
+});
+
+test('picture lines keep table columns: each piece is placed in its own columns, also in the text fallback', async () => {
+  const p = new EscPos(48).init();
+  p.twoCol('\u0915\u0941\u0932', '\u20b9 258.00');
+  p.segments([{ t: '\u092a\u0928\u0940\u0930 \u091f\u093f\u0915\u094d\u0915\u093e', col: 0, width: 26, align: 'l' }, { t: '2', col: 27, width: 3, align: 'r' }, { t: '258.00', col: 40, width: 8, align: 'r' }]);
+  p.line('Plain line');
+  const bytes = p.bytes();
+  const marks = findMarkers(bytes);
+  assert.equal(marks.length, 2);
+  assert.deepEqual(marks[0]!.spec.s.map((g) => [g.col, g.width, g.align]), [[0, 39, 'l'], [40, 8, 'r']]);
+  const fallback = parseEscPos(await expandPictures(bytes, null)).lines.filter(Boolean);
+  assert.equal(fallback[0], '???' + ' '.repeat(36) + 'Rs 258.00', 'the amount keeps every digit: "Rs" grows into the free space');
+  assert.equal(fallback[1]!.length, 48);
+  assert.ok(fallback[1]!.endsWith('258.00'));
+  assert.equal(fallback[2], 'Plain line');
+  // the renderer output is checked for size; a wrong-size picture falls back to text
+  const bad: TextRenderer = async (specs) => specs.map(() => ({ widthBytes: 2, height: 2, data: new Uint8Array(3) }));
+  clearPictureCache();
+  assert.equal(parseEscPos(await expandPictures(bytes, bad)).rasters.length, 0);
 });
 
 test('KOT: routed by category station, with token, modifiers and no prices', () => {
@@ -78,7 +126,7 @@ test('KOT: routed by category station, with token, modifiers and no prices', () 
     const r = mixedBill(env);
     const kitchen = all<{ payload: Uint8Array }>(env.ctx.db, "SELECT payload FROM print_job WHERE kind='KOT' ORDER BY created_at").map((j) => parseEscPos(j.payload).text);
     assert.equal(kitchen.length, 2);
-    const k = kitchen.find((t) => t.includes('KOT - kitchen'))!, b = kitchen.find((t) => t.includes('KOT - bar'))!;
+    const k = kitchen.find((t) => t.includes('Kitchen'))!, b = kitchen.find((t) => t.includes('Bar'))!; // the prep station, big, on its ticket
     assert.ok(k.includes('TOKEN 1') && k.includes('1 x Cheese Burger') && k.includes('+ Extra cheese'));
     assert.ok(b.includes('2 x Cola 300ml') && !b.includes('Cheese Burger'));
     assert.ok(!/\d+\.\d\d/.test(k), 'kitchen tickets carry no prices');
@@ -248,4 +296,15 @@ test('end to end over TCP: the queue prints a real receipt to a LAN printer', as
     assert.deepEqual(new Uint8Array(Buffer.concat(cap.received)), new Uint8Array(bytes));
     assert.ok(parseEscPos(new Uint8Array(Buffer.concat(cap.received))).text.includes('Cheese Burger'));
   } finally { cap.close(); env.cleanup(); }
+});
+
+test('real Windows: a Hindi line and the rupee sign are drawn by Windows fonts (GDI+) into a printer picture', { skip: process.platform !== 'win32' && 'Windows only' }, async () => {
+  const { windowsTextRenderer } = await import('../src/services/printing/textRender.ts');
+  const p = new EscPos(48).init().bold(true).line('मसाला चाय').bold(false).twoCol('Total', '₹ 129.00').line('Plain line');
+  clearPictureCache();
+  const out = parseEscPos(await expandPictures(p.bytes(), windowsTextRenderer()));
+  assert.equal(out.rasters.length, 2);
+  assert.deepEqual(out.rasters[0], { widthBytes: 72, height: 24 });
+  assert.equal(out.pictures, 0, 'no marker reaches the printer');
+  assert.ok(out.text.includes('Plain line'));
 });

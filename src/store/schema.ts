@@ -371,6 +371,88 @@ const V11 = `
 ALTER TABLE item ADD COLUMN description TEXT;
 `;
 
+// V12: counter extras.
+//  - item.unavailable_on: "not available today" (an IST day, YYYY-MM-DD); the item is back the next day by itself.
+//  - payment_correction: a wrong payment mode fixed after billing (cash entered, customer paid UPI). Payments stay
+//    immutable; a correction is its own immutable record and payment_effective shows each payment's mode as corrected.
+//  - app_session: sign-ins that survive a restart (only a SHA-256 of the token is stored).
+const V12 = `
+ALTER TABLE item ADD COLUMN unavailable_on TEXT;
+
+CREATE TABLE payment_correction (
+  id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoice(id), payment_id TEXT NOT NULL REFERENCES payment(id),
+  from_mode TEXT NOT NULL, to_mode TEXT NOT NULL CHECK (to_mode IN ('CASH','UPI','CARD','WALLET','CREDIT','OTHER')),
+  amount INTEGER NOT NULL CHECK (amount > 0), reference TEXT, reason TEXT NOT NULL, shift_id TEXT REFERENCES shift(id),
+  created_by TEXT NOT NULL, approved_by TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX payment_correction_payment ON payment_correction(payment_id, created_at);
+CREATE TRIGGER payment_correction_no_update BEFORE UPDATE ON payment_correction
+  BEGIN SELECT RAISE(ABORT, 'payment corrections are immutable'); END;
+CREATE TRIGGER payment_correction_no_delete BEFORE DELETE ON payment_correction
+  BEGIN SELECT RAISE(ABORT, 'payment corrections cannot be deleted'); END;
+CREATE VIEW payment_effective AS
+  SELECT p.id, p.invoice_id,
+    coalesce((SELECT c.to_mode FROM payment_correction c WHERE c.payment_id = p.id ORDER BY c.created_at DESC, c.rowid DESC LIMIT 1), p.mode) AS mode,
+    p.mode AS original_mode, p.reference AS original_reference, p.amount, p.tendered,
+    coalesce((SELECT c.reference FROM payment_correction c WHERE c.payment_id = p.id ORDER BY c.created_at DESC, c.rowid DESC LIMIT 1), p.reference) AS reference,
+    p.shift_id, p.created_at
+  FROM payment p;
+
+CREATE TABLE app_session (
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_user(id), created_at INTEGER NOT NULL, last_seen INTEGER NOT NULL
+);
+CREATE INDEX app_session_user ON app_session(user_id);
+`;
+
+// V13: the lock button on the billing screen locks the sign-in until the same person's PIN is entered. Kept in
+// app_session so closing or crashing the POS does not unlock it.
+const V13 = `
+ALTER TABLE app_session ADD COLUMN locked_at INTEGER;
+`;
+
+// V14: kitchen order tickets.
+//  - prep_station: the kitchen's stations (Tandoor, Chinese, Bar...). A category or an item is mapped to one (the item's
+//    own station wins); printers list the station ids they print ('*' = every station). The old free-text
+//    category.kitchen_station and printer station names become stations here (kitchen_station is kept, no longer read).
+//  - kot_line: what was sent to the kitchen, per order (signed quantities: a later ticket can cancel). An order's next KOT
+//    prints only the difference between its lines and what was sent, so sending from the cart and then billing never
+//    prints an item twice. sale_order.kot_count numbers the tickets of an order (2 and up print as ADD-ON).
+const V14 = `
+CREATE TABLE prep_station (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER
+);
+CREATE UNIQUE INDEX prep_station_name ON prep_station(lower(name)) WHERE deleted_at IS NULL;
+ALTER TABLE category ADD COLUMN prep_station_id TEXT REFERENCES prep_station(id);
+ALTER TABLE item ADD COLUMN prep_station_id TEXT REFERENCES prep_station(id);
+ALTER TABLE sale_order ADD COLUMN kot_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sale_order ADD COLUMN fulfilment TEXT CHECK (fulfilment IN ('DELIVERY','PICKUP'));
+
+CREATE TABLE kot_line (
+  id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES sale_order(id), kot_no INTEGER NOT NULL,
+  item_id TEXT NOT NULL REFERENCES item(id), name TEXT NOT NULL, modifiers_json TEXT NOT NULL DEFAULT '[]', note TEXT,
+  qty_milli INTEGER NOT NULL CHECK (qty_milli <> 0), prep_station_id TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX kot_line_order ON kot_line(order_id, kot_no);
+
+INSERT INTO prep_station (id, name, sort_order, created_at, updated_at)
+  SELECT lower(hex(randomblob(16))), name, 0, CAST(strftime('%s','now') AS INTEGER) * 1000, CAST(strftime('%s','now') AS INTEGER) * 1000
+  FROM (
+    SELECT trim(kitchen_station) AS name FROM category WHERE deleted_at IS NULL AND trim(ifnull(kitchen_station, '')) <> ''
+    UNION
+    SELECT trim(j.value) FROM printer, json_each(printer.stations) j WHERE trim(j.value) NOT IN ('', '*')
+  )
+  GROUP BY lower(name);
+UPDATE category SET prep_station_id = (SELECT p.id FROM prep_station p WHERE lower(p.name) = lower(trim(category.kitchen_station)))
+  WHERE trim(ifnull(kitchen_station, '')) <> '';
+UPDATE printer SET stations = (
+  SELECT ifnull(json_group_array(x), '[]') FROM (
+    SELECT CASE WHEN trim(j.value) = '*' THEN '*' ELSE (SELECT p.id FROM prep_station p WHERE lower(p.name) = lower(trim(j.value))) END AS x
+    FROM json_each(printer.stations) j WHERE trim(j.value) <> ''
+  )
+) WHERE stations <> '[]';
+`;
+
 // V10: printers on Android (USB through Android's USB host API, Bluetooth including the built-in printer of Sunmi-type
 // POS machines), reached through the Android app: printers gain an 'android' transport (address usb:vid:pid[:serial]
 // or bt:MAC). Same 12-step rebuild as V3/V4; printer still has no indexes, triggers or views.
@@ -420,5 +502,8 @@ export const MIGRATIONS: Migration[] = [
   { version: 9, name: 'coupons', sql: V9 },
   { version: 10, name: 'printer_android', sql: V10, foreignKeysOff: true },
   { version: 11, name: 'item_description', sql: V11 },
+  { version: 12, name: 'counter_extras', sql: V12 },
+  { version: 13, name: 'session_lock', sql: V13 },
+  { version: 14, name: 'kitchen_tickets', sql: V14 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -15,6 +15,7 @@ import { istDay } from '../core/numbering.ts';
 import { mulDivRound } from '../core/money.ts';
 import { couponById, couponProblem, findCouponByCode } from './coupons.ts';
 import { camel } from './camel.ts';
+import { kotStatus, queuePendingKot } from './printing/kot.ts';
 
 export interface OrderRow {
   id: string; device_id: string; shift_id: string | null; channel: string; external_id: string | null; token_no: number | null;
@@ -119,6 +120,8 @@ export function getCart(ctx: Ctx, orderId: string) {
       grossTotal: calc.grossTotal, discountTotal: calc.discountTotal, taxableTotal: calc.taxableTotal, cgst: calc.cgst, sgst: calc.sgst,
       igst: calc.igst, cess: calc.cess, roundOff: calc.roundOff, grandTotal: calc.grandTotal, itemCount: lines.length,
     },
+    /** Kitchen tickets: how they print, tickets sent so far, lines not sent yet. */
+    kot: kotStatus(ctx, orderId),
   };
 }
 
@@ -193,7 +196,7 @@ export function createOrder(ctx: Ctx, actor: Actor, requestId: string, input: { 
   });
 }
 
-export interface AddLineInput { orderId: string; itemId: string; qtyMilli?: number; modifierIds?: string[]; note?: string | null; /** Online orders only (onlineBilling): the sales channel's item price instead of the menu price. HTTP refuses this field. */ channelPrice?: number }
+export interface AddLineInput { orderId: string; itemId: string; qtyMilli?: number; modifierIds?: string[]; note?: string | null; /** Online orders only (onlineBilling): the sales channel's item price instead of the menu price. HTTP refuses this field. */ channelPrice?: number; /** Online orders only: the customer ordered before the item was marked "not available today". HTTP refuses this field. */ allowUnavailable?: boolean }
 
 export function addLine(ctx: Ctx, actor: Actor, requestId: string, input: AddLineInput) {
   return cartCmd(ctx, requestId, 'order.add_line', actor, () => {
@@ -202,8 +205,9 @@ export function addLine(ctx: Ctx, actor: Actor, requestId: string, input: AddLin
     assertOpen(order);
     const qty = input.qtyMilli ?? 1000;
     if (!Number.isSafeInteger(qty) || qty < 1 || qty > MAX_QTY_MILLI) throw new AppError('VALIDATION', 'Quantity is out of range.');
-    const item = get<{ id: string; name: string; price: number }>(ctx.db, 'SELECT id, name, price FROM item WHERE id = ? AND deleted_at IS NULL AND active = 1', input.itemId);
+    const item = get<{ id: string; name: string; price: number; unavailable_on: string | null }>(ctx.db, 'SELECT id, name, price, unavailable_on FROM item WHERE id = ? AND deleted_at IS NULL AND active = 1', input.itemId);
     if (!item) throw new AppError('NOT_FOUND', 'Item not found or not available.', 404);
+    if (!input.allowUnavailable && item.unavailable_on === istDay(ctx.clock.now())) throw new AppError('ITEM_UNAVAILABLE', `${item.name} is marked "not available today". Mark it available again to sell it.`, 409);
     const note = input.note?.trim() ? input.note.trim().slice(0, 120) : null;
 
     // Modifiers: resolved from the database (never trust client prices) and checked against group rules.
@@ -394,6 +398,7 @@ export function cancelOrder(ctx: Ctx, actor: Actor, requestId: string, orderId: 
     const o = getOrderRow(ctx, orderId);
     assertOpen(o);
     run(ctx.db, "UPDATE sale_order SET status = 'CANCELLED', updated_at = ? WHERE id = ?", ctx.clock.now(), orderId);
+    queuePendingKot(ctx, orderId, actor.name); // items already with the kitchen print as CANCEL
     audit(ctx, actor.userId, 'order.cancel', 'order', orderId);
     return { id: orderId, status: 'CANCELLED' as const };
   });

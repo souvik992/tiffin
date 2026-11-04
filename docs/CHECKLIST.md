@@ -44,7 +44,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 
 ### Users and security
 - [x] First-run setup (outlet, counter, owner)
-- [x] PIN login, scrypt hashing, lockout with backoff, idle lock
+- [x] PIN login, scrypt hashing, lockout with backoff; no idle lock (owner's choice): a lock button instead
 - [x] Roles (owner, manager, cashier) checked in the service layer
 - [x] Manager approval (override); failed approval PINs count toward lockout
 - [x] Local API on `127.0.0.1` only, Host allow-list, JSON-only writes, strict field validation, 2 MB body limit
@@ -78,7 +78,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Health check, disk-space warning, live events stream
 
 ### Billing UI (`ui/`, rebuilt from the Lovable "Tiffin POS" design)
-- [x] Sign-in with mobile number and PIN (on-screen keypad); after an inactivity lock the PIN alone unlocks; after sign-out both are asked; first-run shop setup asks for the owner's mobile number
+- [x] Sign-in with mobile number and PIN (on-screen keypad); after sign-out both are asked; first-run shop setup asks for the owner's mobile number
 - [ ] Existing staff without a mobile number still pick their name on the sign-in screen until the owner adds one in Settings > Users
 - [x] Billing: categories, search, barcode scan, modifiers, quantities, bill discount, Cash/UPI/Card, change from the backend
 - [x] Manager approval dialog (discount over limit, reprint)
@@ -136,27 +136,33 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Data in %LOCALAPPDATA%\TiffinPOS\data (local, not roaming), log in ...\logs with rotation; start-up failure dialog with "Open data folder"
 - [x] End-to-end test of the real app (dev build, packaged build and installed build): bill with live print status, reports, lockdown, crash restart, single copy, closing backup
 - [ ] Encryption at rest: SQLCipher-compatible build plus a recovery key
-- [ ] Raster printing for Hindi and other scripts, and the rupee sign
+- [x] Rupee sign, Hindi and other Indian scripts on bills and kitchen tickets: such lines print as pictures drawn with the system's fonts (Windows: GDI+ / Nirmala UI in a constant PowerShell script; Android: the app's Canvas), drawn by the print queue outside the bill transaction; plain text ("Rs", "?") when drawing is not possible. The screen preview shows the real text. Tested with real Windows fonts on the dev PC; not yet on a real printer or Android device
 - [x] Backup and restore screen for the owner (Settings > Backups): back up now, list, restore with the PIN (the POS restarts itself), copies to a USB drive or folder (Windows folder picker), online backups to the Tiffin backup server; restore from this device, a folder or online. Tested end to end in the browser and in the desktop app (dev build)
-- [ ] Sessions that survive an app restart (today a restart signs everyone out; bills are safe)
+- [x] Menu photo compression for single and bulk uploads: 1024 px, high-quality resize, WebP 90% (measured: no visible difference, ~95% smaller); the screens show the size before and after
+- [x] Never signed out by the POS (POS 0.3.10): the sign-in survives closing the app, a crash and a restart (the screen keeps the token in localStorage; app_session keeps only a SHA-256 of it); no inactivity lock and no expiry; only sign-out and deactivating the user end it. Lock button at the top of billing (before Held): the lock screen shows only the PIN pad for the same person (wrong PINs count toward the PIN lockout), keeps the open bill, offers sign-out; the lock is kept in app_session (migration 13), so closing or crashing while locked stays locked. Tested in the browser and the desktop end-to-end test; closing and reopening the installed Windows and Android apps not yet tried
 
 ### Then: distribution
 - [x] USB printers on the WinUSB driver (e.g. after the Zadig tool): listed in Printer setup and printed to through winusb.dll (bulk OUT endpoint), no admin needed. Found and opened a Posiflex PP8800 on the dev PC; a real print from this path is not tested yet
-- [x] Windows installer (NSIS) that runs as a standard user: installed, run and uninstalled on the dev PC without admin; shortcuts; uninstall keeps the data folder
+- [x] Windows installer (NSIS) that runs as a standard user: installed, run and uninstalled on the dev PC without admin; shortcuts; uninstall keeps the data folder; the installer waits up to 30 s for a POS that is still closing (closing backup) before saying it is open (desktop/build/installer.nsh; tested on the dev PC with a separately named copy)
 - [x] Faster installs on low-end PCs: zip package, English-only Chromium strings, no WebGPU shader compilers (silent install on one CPU core ~22 s instead of ~47 s; tested with a separately named copy, and the trimmed app passes the desktop e2e test with and without a graphics card)
 - [x] Auto-update (electron-updater): background download, installs when the POS is closed, checks the publisher signature; on when built with POS_UPDATE_URL
+- [x] Tiffin Data Manager, a separate Windows app and installer (`desktop/src/manager`, `src/manager`, `ui/src/manager`): works with or without the POS installed (POS data folder, another folder, or a backup file); owner-only sign-in; dashboard (KPIs, net sales by day, busy hours, payment modes, best sellers, categories, channels, from the backend's reports); the POS's own Bills (view only), Reports, Menu, Stock, Purchases, Store/staff/coupons screens; All data (every table, search, CSV; secrets hidden); backup now (+ copy to a USB drive) and restore with the PIN. View only while the POS is open, for data from an older POS (never upgraded in place) and for backup files. Tested: 6 backend tests and an end-to-end test of the dev build on the dev PC with temporary data
+- [ ] Tiffin Data Manager: install the built installer on a clean PC (with and without the POS), open real data of an older POS (view only), restore on a shop PC; a "POS open" check that is not by program name (today: TiffinPOS.exe in the task list)
 - [ ] Code-signing certificate (the installer is unsigned: SmartScreen warns) and an update server (any static HTTPS host)
 - [ ] Licensing
 
 ### Then: integrations and scale
-- [ ] Swiggy / Zomato relay client
+- [x] Swiggy / Zomato through UrbanPiper (hub `src/urbanpiper.ts`, ODS 1.0.9): one UrbanPiper account in Hub settings (test or live, API username, API key never shown again, Biz ID; Test connection, Set up order links: 9 webhooks for all stores, secret header, spaced for 5 calls a minute) and per store on its page (store ID, city, address, phone, platforms, packaging, on/off; Send store details, Send menu with the platforms' menu rules checked; activity list). Orders in (S-/Z- numbers, priced at the channel price, platform order number, OTP, totals, charges, discounts, notes; repeats ignored; unknown store or platform refused), status back (Acknowledged + Zomato prep time, Food Ready, Dispatched + rider, Completed, Cancelled + reason code, Swiggy direct cancellation), platform cancellations, rider and delivery in; menu changes, sold-out items and store off/on follow by themselves after the first menu send; outbox with retries. ODS: platform details, rider, "paid through Swiggy" (bill payment mode OTHER), no rider buttons when the platform delivers; Swiggy items out of stock on an order (customer asked to change it, masked number and PIN back, or cancel), Zomato customer's number, extra rider (bulk orders), rider check; platform answers and refusals as notices on the order. Packaging charge for the platforms (per item or % of item price, item-level), cess inside the item price, tax codes CGST_P/SGST_P. Tested with a stand-in UrbanPiper only
+- [ ] UrbanPiper: run against the real test account (pos-int) with Atlas Developer Tools test orders, then certification (check the tax codes for menus with two GST rates, CGST_2.5_P style); category timing groups; CA review of GST on Swiggy/Zomato bills (the platforms pay the 5% GST on food under section 9(5)) and of store-funded platform discounts (not on the POS bill)
 - [ ] LAN multi-device (several counters on one shop network)
 - [ ] Opt-in cloud sync that reads the outbox table
 
 ### Smaller gaps found in the backend
 - [x] `npm run seed` works on Windows (it silently did nothing before)
 - [ ] Cart change returns only what changed (today the whole cart, about 300 KB at 1,000 lines)
-- [ ] UPI payment confirmation (today the cashier confirms by hand); card machine integration
+- [x] Payment machines as a separately installed add-on (addons/edc, POS 0.3.8 toolbox: billing.order/finalize/paymentGuard, requireApproval, powershell; screen slots checkout and invoicePanels) (docs/PAYMENT_MACHINES.md): Paytm and Pine Labs, wireless (internet) and wired (Paytm USB library on Windows, Pine Labs PAD Controller); Settings > Payment machines (owner) with Test; counter sends Card/UPI to the machine and saves the bill only on approval; cancel, check again, reverse (void); Settings > Payment machines > Daily match. Tested with simulated servers and controller only
+- [ ] Payment machines on real hardware and the companies' test accounts; PhonePe and Razorpay POS connectors; Pine Labs UPI by cable
+- [ ] UPI payment confirmation without a machine (bank or UPI app merchant notifications)
 - [ ] Inventory follow-ups: unit conversion (buy in kg, use in g), recipes for modifiers (extra cheese), supplier list, purchase GST input credit, stock reports (consumption, wastage, variance), FIFO or average cost valuation, purchase CSV import
 - [ ] Owner to confirm: credit notes do not restock (returned food is discarded)
 - [ ] Yearly archive files (not needed until a shop's database grows large)
@@ -164,7 +170,7 @@ Order follows the project plan in `CLAUDE.md`.
 ### UI screens still missing
 - [x] Coupon codes: Settings > Coupons (owner only: create, edit, switch off; managers and cashiers do not see it): % or Rs off, % cap, minimum bill, valid dates, number of uses, on/off; Billing % button > Coupon code; checked when applied and again at payment; a coupon needs no manager PIN; a manual discount replaces it; cancelling a bill frees its use
 - [ ] Coupon follow-ups: coupon code printed on the bill (receipt content: needs review), coupons in the Discounts report, one use per customer mobile, coupons for online orders
-- [ ] Line-level discounts and notes (backend done)
+- [x] Line-level discounts and notes (tap a bill line: exact quantity, kitchen note, % or ₹ off this item; above the limit a manager approves)
 - [x] Reports screen (sidebar): 16 reports in 5 groups. Sales: summary, payment modes, by hour, channels, by cashier, discounts. Items: item sales, category sales. Tax: GST by rate, HSN summary, bill register. Controls: cancellations and refunds, shifts and cash. Inventory: stock on hand, stock movement, purchases
 - [x] Reports show on screen (summary cards, table, totals row), date presets (today, yesterday, last 7 days, this month, last month, custom), Download CSV for Excel, Print / PDF (A4 landscape)
 - [ ] Reports follow-ups: GSTR-1 B2B/B2CS JSON export, XLSX download, profit report (needs recipe costing), scheduled email of the daily report, reports for a single shift (X-report)
@@ -178,44 +184,47 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Order hub (hub/): stores, POS pairing (one-use code, device key kept as a hash, revoke), menu and status from the POS, customer quote / OTP / place / track / cancel, live POS event stream (SSE, resumes after a drop), auto-reject when not accepted in time, idempotent orders, demo ordering page; see hub/README.md
 - [x] Hub admin page (`/admin`, admin key): orders of all stores or one (Open/Delivered/Cancelled/Failed/All; channel badge, date, time, status Placed/Accepted/Preparing/In transit/Delivered/Cancelled by store/Cancelled by customer/Failed with the reason, payment mode; details: items, charges, customer with masked mobile, address, bill, rider); failed order attempts that never became orders (offline store, changed price, technical errors with code) kept 30 days; stores (POS online / shift open / what customers see, open and 24 h orders) and each store's published settings (read-only: accepting, channels, pickup/delivery, payments, charges, fee GST, location, delivery bands, hours, menu by category); adding a store gives a connection link (`/connect/<code>`, one use) that the POS pastes instead of an address and a code (ODS 1.0.7); pause/resume a store's online orders from the hub, revoke POS devices, hub settings saved in the hub database (routing server, offline after, pairing code validity, request limits); dev OTP and online payments stay environment-only. Tested on macOS with Node 24 (API tests, a manual run with a stand-in POS); the page itself not yet clicked through in a browser, and the ODS 1.0.7 Order hub card not yet tried in the real POS
 - [x] Website settings per store on the hub admin page (store page > Website: home title, subtitle and photo, announcement, about, phone, address, main colour), checked and saved on the hub (`hub/src/website.ts`) and sent with `GET /v1/stores/<slug>` as `website`; the ordering website (separate repo) applies them on load. API tested; the form not yet clicked through in a browser
-- [ ] Hub admin gaps: errors inside the POS (e.g. a bill that failed to print after accepting) are not visible on the hub; requests refused by the per-minute limits are not listed as failed attempts (to keep floods out of the table); Swiggy/Zomato orders shown only as badges until that relay exists; the POS is not told when the hub pauses its store; one shared admin key (no per-person logins, no audit log)
+- [ ] Hub admin gaps: errors inside the POS (e.g. a bill that failed to print after accepting) are not visible on the hub; requests refused by the per-minute limits are not listed as failed attempts (to keep floods out of the table); the POS is not told when the hub pauses its store; one shared admin key (no per-person logins, no audit log)
 - [x] POS connection (ODS add-on): pairs with the hub, publishes menu, serviceability and "accepting" (= a shift is open), receives orders live, sends answers through an outbox that survives restarts and internet drops
 - [x] Menu sync per sales channel (Settings > Online orders > Menu sync on each channel): all items, all except (search), only (search); prices same as the POS or different (+/- % to the nearest rupee, or an item's own price); Save and sync now. The hub shows each channel only its items at its prices and refuses others; online bills use the channel price (POS works it out itself; screens cannot send a price). Swiggy/Zomato choices are saved for when those connections exist
 - [x] Item descriptions (database step 11): Menu creation, bulk upload column `description`, sent to the hub with photos and prices
 - [x] Sales channel badges (Swiggy, Zomato, Website, App) on ODS tiles, the finished list and the channel row; globe icon in the side menu: number of new orders waiting, else a green/red dot
 - [ ] Official Swiggy/Zomato logo files (their partner programmes provide them)
 - [x] Online-order buzzer on every screen (ODS 1.0.2): rings loudly and repeats while an order waits to be accepted, with a "New online order" banner (Silence, Open ODS); stops on accept/reject; the ODS Sound switch controls it; the desktop app lets it ring without a tap first
+- [x] Buzzer in the automatic accept mode (ODS 1.0.9): an order accepted automatically never waits, so it used to make no sound; now a new order rings twice and a banner shows it for 20 seconds on every screen ("Accepted automatically: the bill and kitchen ticket are printing"); orders already there when the POS starts do not ring. Tested in a browser with a test POS and hub (tones counted); not yet heard on the shop PC or an Android device
 - [x] Menu photos sent to the hub (only missing ones, checked against their content name; removed with the item's photo); `image` on published menu items
 - [x] Live ODS screen: New / Preparing / Ready / On the way, sound on new orders, accept countdown, accept with preparation time (bill + KOT print at once), reject with reason, rider name and phone, delivered / collected, cancel with manager approval (cancels the bill)
 - [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
 - [x] GST on delivery and packaging fees: billed as fee lines with the GST rate chosen in Serviceability; the hub's price equals the POS bill (same GST code). **Needs CA confirmation of the rate**
 - [x] Road distance: measured by a road-routing server on the hub (HUB_ROUTING_URL, OSRM) or straight line x road factor (default 1.30, set per store)
-- [x] Google Maps (ODS 1.0.1): Settings > API keys (owner only) holds the Google key; the map (Map Tiles API) and place search (Places API (New), Essentials fields) use Google when it is set, OpenStreetMap + Photon when not; Test key explains what to switch on; the key never reaches screens, settings lists, the audit log or the hub
+- [x] Google Maps (ODS 1.0.1; map choice in ODS 1.0.8): Settings > Serviceability > Map: the owner chooses the free map (OpenStreetMap + Photon search, the default, also with a key) or, with a Google key (entered in the same card; no separate API keys section any more), Google Maps, Google satellite or satellite with roads (Map Tiles API, one session per map) with Google place search (Places API (New), Essentials fields); Test key explains what to switch on; the key never reaches screens, settings lists, the audit log or the hub
 - [x] Place search with suggestions while typing: near the shop, fewer-words retry, pasted Google Maps coordinates or links
 - [ ] Google map pictures and place search seen working with the owner's key (2026-10-16: the key was accepted, but Places API (New) and Map Tiles API were not yet switched on in its project)
 - [ ] Google Maps logo on the map (Google's display rules); now only the text credit "Map data ©Google"
 - [x] Add-on loader hardening: folder must equal the id, no going back to an older version, add-on database steps limited to their own tables (no ATTACH/PRAGMA/VACUUM); review notes in docs/ADDONS.md
 - [ ] Human security review of the add-on loader and online billing (docs/ADDONS.md "Security review")
-- [ ] Online orders, still to build: SMS for OTP, payment gateway (online payment, refunds), hosting the hub, store apps (Android/iOS/website; the demo page stands in), Swiggy/Zomato relay, customer notifications (SMS/WhatsApp)
+- [ ] Online orders, still to build: SMS for OTP, payment gateway (online payment, refunds), hosting the hub, store apps (Android/iOS/website; the demo page stands in), customer notifications (SMS/WhatsApp)
+- [ ] Hosting the hub: setup kit for a free Oracle Cloud VM written (`hub/deploy/`: cloud-init with Node 24, Caddy HTTPS on `<ip>.sslip.io`, service, daily database copy), not yet tried on a real Oracle VM; off-VM copies of the hub database still manual
 - [ ] Online orders: not yet tried on a real Windows install with a real printer (docs/HARDWARE_TEST_PLAN.md)
 - [x] PINs are exactly 4 digits in the UI (sign-in and approval keypads, setup, users); the backend still accepts 4 to 6 so an older longer PIN keeps working until the owner resets it
 - [x] Settings > Users (owner only): add a user with name, role and PIN (typed twice); edit name and role; reset a PIN (also unlocks); change own PIN with the current one; deactivate and reactivate. Unique names among active users; no self-deactivation or own role change; the last owner is protected
-- [x] Settings > Store: name, address (multi-line), phone, GSTIN (check digit and state checked), FSSAI; owner edits, manager views. Every change is versioned: a bill and its reprints keep the details valid when it was issued
+- [x] Settings > Store settings (bill logo first, then store details, bill design, footer and a sample, one shared preview): name, address (multi-line), phone, GSTIN (check digit and state checked), FSSAI; owner edits, manager views. Every change is versioned: a bill and its reprints keep the details valid when it was issued
 - [x] Bill logo: picture converted to printer dots in the browser (size, darkness, photo mode, live print preview), printed centred at the top of bills (ESC/POS raster), shown in every on-screen receipt
 - [x] Default bill design "Classic" (logo, store details, Bill No / Cashier / Token / Date / Time row, Item / Price / Qty / Total, Total Quantity, Gross Total, GST per rate, Net Amount)
-- [x] Bill design files (.tiffinreceipt): the owner uploads a design in Settings > Receipt, sees a 58/80 mm preview first, and every bill, reprint, screen receipt and sample uses it; back to standard in one tap. GST bill parts are required; safety marks always print
+- [x] Bill design files (.tiffinreceipt): the owner uploads a design in Settings > Store settings, sees a 58/80 mm preview first, and every bill, reprint, screen receipt and sample uses it; back to standard in one tap. GST bill parts are required; safety marks always print
 - [x] Designer kit: format guide (docs/RECEIPT_TEMPLATES.md), three examples (templates/receipt), `npm run receipt` preview with --width/--credit/--duplicate/--upi
-- [ ] Bill design follow-ups: rupee sign and Hindi (needs text-as-image printing), table number and customer name on the bill (not in the data yet), KOT designs, a CA review of the GST bill check
+- [ ] Bill design follow-ups: table number on the bill (not in the data yet), KOT designs, a CA review of the GST bill check (rupee sign, Hindi and the customer's name and phone are done)
 - [ ] Receipt wording for an outlet without GSTIN ("TAX INVOICE" is always printed) and place of supply on IGST bills: needs CA decision
-- [ ] KOT reprint, manual cash drawer open, X-report; changing the payment mode after billing
-- [ ] Line notes and line discounts in the UI (backend done)
-- [ ] Modifier (add-on) group editing in the UI (backend can create groups and attach them)
-- [ ] Mark an item unavailable for the day without deleting it
+- [x] KOT reprint (marked REPRINT, manager approval), manual cash drawer open (reason, manager approval, audited), X-report (screen and printer, shift stays open), changing the payment mode after billing (an immutable payment_correction; payments are never edited; open shift only; journaled; reports, Z/X cash and daily totals use the corrected mode). Payment corrections need a human and CA review
+- [x] Line notes and line discounts in the UI
+- [x] Add-on (modifier) groups: Menu creation > Add-on groups (create, edit options and prices, how many to choose, remove) and choosing them per item in the item editor; removed options are switched off, never deleted, so bills keep theirs
+- [x] Sold out today: Billing > user menu > Sold out today (cashiers too); greyed out on billing, refused on new bills, hidden from online orders, back by itself the next day
 - [ ] Excel (.xlsx) upload directly (today: save as CSV UTF-8)
 - [ ] Update prices of existing items in bulk (the upload only adds new items)
 - [ ] Live updates through the events stream (the UI polls print failures every 20 s)
-- [ ] Customer name and phone, buyer GSTIN and order channel (Swiggy/Zomato) on the bill
-- [ ] Layout for screens narrower than 1280 px and touch-first testing
+- [x] Customer name and phone, buyer GSTIN (entered in Customer and note) and the order channel (App, Website, Swiggy, Zomato) on the bill (classic design; placeholders customer.name, customer.phone, order.channel). Receipt content: needs a human and CA review
+- [x] Layout below 1280 px: billing shows the bill as a full screen from a "View bill" bar on phones and handheld POS machines (below 768 px), narrower bill panel on tablets, smaller page margins, wide tables scroll sideways, no tap delay or double-tap zoom. Checked at 1024x768, 800x1280 and 390x844 in Edge with touch emulation
+- [ ] Touch and small-screen check on a real handheld POS and a touch-screen PC
 - [x] The Electron host loading the built UI (app://pos)
 
 ## Android (standalone)
@@ -232,3 +241,13 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Android: printers that need a vendor SDK (PAX, some iMin)
 - [ ] Android: printing on a real Bluetooth / USB / Sunmi built-in printer, and the backup copy to a real USB stick (emulator: the print reached the app's printer service, which answered correctly; folder picker needs a person)
 - [ ] Android: tried on a real POS machine (speed, printer, power cut during a bill)
+
+## Kitchen tickets (KOT), POS 0.3.11 / ODS 1.0.9
+- [x] Prep stations (Menu creation > Prep stations): create, rename, remove; a station gets categories and single items (the item's own station wins); printers list station ids or All stations (old free-text kitchen stations became stations in migration 14)
+- [x] KOT split by prep station; only what the kitchen has not had (kot_line per order): ADD-ON KOT n, CANCEL lines, a cleared cart after a KOT prints a cancel ticket; no prices, no delivery/packaging charges
+- [x] Settings > Store settings > Kitchen tickets: on prep station printers (default), with the bill (receipt printer, one per station), or off
+- [x] Three KOT designs (.tiffinkot): customer KOT (standard = the shop's sample ticket), prep station KOT, online order KOT; upload, preview at 58/80 mm, back to standard (docs/KOT_TEMPLATES.md, templates/kot/)
+- [x] Cart KOT button (count of items not sent): send now, or print all again (REPRINT, manager approves); Orders: reprint kitchen ticket
+- [x] Online orders: "When an order is accepted, print" the bill and/or the KOT (manual or automatic accept); ODS Bill and KOT buttons (first print free, then a reprint with approval); online KOT shows channel, online number, delivery/pickup, customer
+- [ ] KOT on a real kitchen printer (and with the bill on a real receipt printer); table numbers / dine-in on the KOT (the POS has no tables)
+

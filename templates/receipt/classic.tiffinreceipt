@@ -21,6 +21,9 @@
     ] },
     { "type": "field", "label": "Against bill", "value": "{{invoice.against}}" },
     { "type": "field", "label": "Buyer GSTIN", "value": "{{invoice.buyer-gstin}}" },
+    { "type": "field", "label": "Customer", "value": "{{customer.name}}" },
+    { "type": "field", "label": "Phone", "value": "{{customer.phone}}" },
+    { "type": "field", "label": "Order from", "value": "{{order.channel}}" },
     { "type": "rule" },
     { "type": "items", "columns": [
       { "field": "name", "label": "Item", "width": "*" },

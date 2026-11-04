@@ -147,9 +147,21 @@ test('HTTP: rejects unauthenticated, malformed, oversized, cross-site and rebind
       req.on('error', reject); req.end();
     });
     assert.equal(status, 403);
-    // expired/locked sessions are told apart from never-logged-in
-    api.env.clock.advance(301_000);
-    assert.equal((await call('GET', '/api/catalog', { token: cashier })).json.error.code, 'SESSION_LOCKED');
+    // never signed out by time; locked by hand, the screen is told who, and only that person's PIN resumes
+    api.env.clock.advance(7 * 86_400_000);
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).status, 200);
+    assert.deepEqual((await call('POST', '/api/auth/lock', { token: cashier, body: {}, key: null })).json, { locked: true });
+    const lockedErr = (await call('GET', '/api/catalog', { token: cashier })).json.error;
+    assert.equal(lockedErr.code, 'SESSION_LOCKED');
+    assert.equal(lockedErr.details.name, 'Cashier');
+    assert.equal((await call('GET', '/api/me', { token: cashier })).json.error.code, 'SESSION_LOCKED');
+    assert.equal((await call('POST', '/api/auth/unlock', { token: cashier, body: { pin: '2345' }, key: null })).json.error.code, 'BAD_PIN');
+    assert.equal((await call('POST', '/api/auth/unlock', { token: cashier, body: { pin: '1111' }, key: null })).json.user.name, 'Cashier');
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).status, 200);
+    // signing out works from the lock screen too (someone else takes over)
+    await call('POST', '/api/auth/lock', { token: cashier, body: {}, key: null });
+    assert.equal((await call('POST', '/api/auth/logout', { token: cashier, body: {}, key: null })).status, 200);
+    assert.equal((await call('GET', '/api/catalog', { token: cashier })).json.error.code, 'UNAUTHENTICATED');
   } finally { await api.close(); }
 });
 
@@ -173,5 +185,40 @@ test('HTTP: live events stream announces invoices and print results', async () =
     }
     ctrl.abort();
     assert.ok(seen.includes('event: invoice') && seen.includes('event: print'), seen);
+  } finally { await api.close(); }
+});
+
+test('HTTP: kitchen tickets and prep stations over the API (cart KOT, reprint with approval, settings, designs, first print of a bill)', async () => {
+  const api = await start(); try {
+    const { call } = api;
+    const cashier = await api.login('Cashier', '1111'), owner = await api.login('Owner', '1234');
+    await call('POST', '/api/shifts/open', { token: cashier, body: { openingCash: 0 } });
+    const stations = (await call('GET', '/api/prep-stations', { token: cashier })).json as Array<{ id: string; name: string }>;
+    assert.deepEqual(stations.map((s) => s.name), ['Kitchen', 'Bar']);
+    assert.equal((await call('POST', '/api/prep-stations', { token: cashier, body: { name: 'Tandoor' } })).status, 403);
+    const tandoor = (await call('POST', '/api/prep-stations', { token: owner, body: { name: 'Tandoor' } })).json.id as string;
+    assert.equal((await call('PATCH', `/api/prep-stations/${tandoor}`, { token: owner, body: { itemIds: ['nope'] } })).status, 400);
+    const order = (await call('POST', '/api/orders', { token: cashier, body: {} })).json.order;
+    const item = ((await call('GET', '/api/catalog', { token: cashier })).json.items as Array<{ id: string; name: string }>).find((i) => i.name === 'Cheese Burger')!;
+    const cart = (await call('POST', `/api/orders/${order.id}/lines`, { token: cashier, body: { itemId: item.id } })).json;
+    assert.deepEqual(cart.kot, { mode: 'stations', sentTickets: 0, pending: 1 });
+    const sent = (await call('POST', `/api/orders/${order.id}/kot`, { token: cashier, body: {} })).json;
+    assert.deepEqual([sent.kotNo, sent.queued, sent.pending], [1, 1, 0]);
+    assert.equal((await call('POST', `/api/orders/${order.id}/kot`, { token: cashier, body: {} })).json.error.code, 'NOTHING_TO_SEND');
+    assert.equal((await call('POST', `/api/orders/${order.id}/kot-reprint`, { token: cashier, body: {} })).json.error.code, 'APPROVAL_REQUIRED');
+    const users = (await call('GET', '/api/login-users')).json as Array<{ id: string; name: string }>;
+    const manager = users.find((u) => u.name === 'Manager')!.id;
+    assert.equal((await call('POST', `/api/orders/${order.id}/kot-reprint`, { token: cashier, body: { override: { userId: manager, pin: '2345' } } })).json.queued, 1);
+    // settings and designs
+    assert.equal((await call('GET', '/api/kot', { token: owner })).json.mode, 'stations');
+    assert.equal((await call('PUT', '/api/kot/mode', { token: owner, body: { mode: 'with_bill' } })).json.mode, 'with_bill');
+    const preview = (await call('POST', '/api/kot/designs/customer/preview', { token: owner, body: { widthMm: 58 }, key: null })).json;
+    assert.ok(preview.lines.some((l: string) => l.includes('KITCHEN ORDER TICKET')));
+    assert.equal((await call('PUT', '/api/kot/designs/customer', { token: owner, body: { fileName: 'x.tiffinkot', content: '{}' } })).json.error.details.errors.length > 0, true);
+    // a bill paid without printing (as the ODS can): the first print needs no approval, the next is a reprint
+    const total = cart.totals.grandTotal;
+    const bill = (await call('POST', `/api/orders/${order.id}/finalize`, { token: cashier, body: { payments: [{ mode: 'CASH', amount: total }] } })).json;
+    assert.equal((await call('POST', `/api/invoices/${bill.invoice.id}/print`, { token: cashier, body: {} })).json.error.code, 'APPROVAL_REQUIRED', 'already printed on billing');
+    assert.equal((await call('POST', `/api/invoices/${bill.invoice.id}/kot`, { token: cashier, body: { override: { userId: manager, pin: '2345' } } })).json.queued, 1);
   } finally { await api.close(); }
 });

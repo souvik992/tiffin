@@ -21,7 +21,7 @@ A design file makes a shop's bills print the way the shop wants, for example lik
    * **Valid file:** it prints the bill as it will look on paper. Double-width text shows as `D o u b l e`, and a QR code shows as `[QR code]`.
    * **Invalid file:** it lists every problem and exits with code 1.
 4. **You send the file to the shop.** Keep the `.tiffinreceipt` ending; the POS only accepts that. The file is plain text, so it travels fine by WhatsApp or email.
-5. **The owner uploads it** in **Settings → Receipt → Bill design → Upload design file**.
+5. **The owner uploads it** in **Settings → Store settings → Bill design → Upload design file**.
    * The POS checks the file and shows a preview at 58 and 80 mm. The owner presses **Use this design**.
    * From then on, every new bill, reprint, on-screen receipt and sample uses it.
    * **Back to standard design** undoes it.
@@ -33,13 +33,13 @@ The design is stored in the shop's database, so it is included in backups and re
 
 **It can:** arrange, label, align, embolden and resize the information the POS already has. It can also hide optional parts: a line whose placeholders are all empty is left out automatically.
 
+**Rupee sign and Hindi:** `"money": { "symbol": "₹" }` and item names in Hindi or other Indian scripts print as small pictures drawn with the system's fonts (Windows and Android). Where that is not possible they print as `Rs` and `?`.
+
 **It cannot:**
 * run code or calculate anything. Every amount is the backend's own figure, formatted for print.
-* print the rupee sign. Text-mode printing is ASCII; use `"Rs"`. The store logo can be printed with the `logo` block.
-* print Hindi or other Indian scripts. These also need raster printing.
 * remove the safety marks. `doc-title` always prints `TAX INVOICE` or `CREDIT NOTE`, `SAMPLE - NOT A BILL` on samples, and `*** CANCELLED ***` and `*** DUPLICATE ***` when they apply.
 * skip the paper feed, cut and cash-drawer kick; the POS adds those itself.
-* change the kitchen ticket (KOT). Designs apply to customer bills only.
+* change the kitchen ticket (KOT). Kitchen tickets have their own designs (.tiffinkot): see docs/KOT_TEMPLATES.md.
 
 **A design must include everything a GST bill needs, or the upload is refused:**
 * a `doc-title` block
@@ -71,7 +71,7 @@ Exactly what a bill must show (HSN for the shop's turnover, FSSAI, place of supp
 | `version` | yes | Always `1`. |
 | `name` | yes | 1 to 60 characters. The owner sees this name. |
 | `description` | no | Up to 300 characters. |
-| `money.symbol` | no | The text before amounts: `""` (default), `"Rs"`, `"Rs."` or `"INR"`. |
+| `money.symbol` | no | The text before amounts: `""` (default), `"Rs"`, `"Rs."`, `"INR"` or `"₹"` (printed as a picture). |
 | `blocks` | yes | 1 to 150 blocks, printed top to bottom. |
 
 Rules for the file as a whole:
@@ -105,8 +105,8 @@ These work on `text`, `field`, `doc-title`, `grand-total` and `footer`.
 | `tax-table` | none | A GST summary per rate: rate, taxable value and CGST/SGST (or IGST). On narrow paper it becomes one small block per rate. |
 | `payments` | `change` (default true: tendered and change for cash) | Each payment mode and its amount. |
 | `qr` | `data`: `"upi"` or text with placeholders; `size` 3 to 8; `align`; `if` | A QR code. `"upi"` makes a UPI payment code for the bill total, using the UPI id in settings. It is left out when there is no UPI id, and on refunds and cancelled bills. |
-| `footer` | styles (default: centred) | The footer text from Settings → Receipt. |
-| `logo` | none | The logo from Settings → Store, centred, in black and white. Left out when there is no logo. |
+| `footer` | styles (default: centred) | The footer text from Settings → Store settings. |
+| `logo` | none | The logo from Settings → Store settings, centred, in black and white. Left out when there is no logo. |
 | `info-table` | `columns`: 2 to 6 of `{ "label": ..., "value": ... }`; `rule` (default true) | Labels on one line and values under them, like "Bill No  Waiter  Date  Time". When it does not fit the paper, it prints one "label  value" line each. |
 
 **`items` columns** (1 to 7). Each column is `{ "field": ..., "label": ..., "width": ..., "align": ... }`.
@@ -144,7 +144,7 @@ Write placeholders as `{{name}}` inside `text`, `field` labels and values, and `
 
 | Placeholder | Value |
 |---|---|
-| `{{outlet.name}}`, `{{outlet.address}}`, `{{outlet.phone}}` | From Settings → Store. A multi-line address prints line by line. |
+| `{{outlet.name}}`, `{{outlet.address}}`, `{{outlet.phone}}` | From Settings → Store settings. A multi-line address prints line by line. |
 | `{{outlet.gstin}}`, `{{outlet.fssai}}` | GSTIN, FSSAI licence number. |
 | `{{invoice.no}}` | Bill number, for example `A1/26-27/000123`. |
 | `{{invoice.date}}` | `15-10-2026 19:43` (Indian time). |
@@ -155,6 +155,8 @@ Write placeholders as `{{name}}` inside `text`, `field` labels and values, and `
 | `{{invoice.total}}` | Bill total, formatted. |
 | `{{invoice.items}}` | Number of item lines. |
 | `{{cashier.name}}` | Who made the bill. |
+| `{{customer.name}}`, `{{customer.phone}}` | Typed on the bill under Customer and note. Empty when not given. |
+| `{{order.channel}}` | Where the order came from: App, Website, Swiggy or Zomato. Empty for counter bills. |
 
 ## Tips for copying a shop's bill
 

@@ -9,6 +9,7 @@ import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell } from '../components/ui.tsx';
 import { ReceiptLines } from '../components/print.tsx';
 import { StoreSettings } from './StoreSettings.tsx';
+import { KotSettings } from './KotSettings.tsx';
 import { UsersSettings } from './UsersSettings.tsx';
 import { CouponsSettings } from './CouponsSettings.tsx';
 import { DeviceSettings } from './DeviceSettings.tsx';
@@ -45,18 +46,16 @@ export function Settings() {
   const { addons } = useAddons();
   const addonSections = addons.flatMap((a) => a.settings ?? []).filter((s) => !s.roles || (user && s.roles.includes(user.role)));
   const items: Array<[Section, string, ComponentType<{ className?: string }>, string]> = [
-    ['store', 'Store', Store, 'Name, address, GSTIN and bill logo'],
-    ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
+    ['store', 'Store settings', Store, 'Bill logo, store details, bill design, footer and kitchen tickets'],
+    ...(user?.role === 'owner' ? [['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(user?.role === 'owner' ? [['coupons', 'Coupons / Offers', Ticket, 'Coupon codes and offers for bills'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ['printers', 'Printer setup', PrinterIcon, 'USB, Wi-Fi and Bluetooth printers, tests'],
-    ['receipt', 'Receipt', ReceiptText, 'Bill design, footer and a sample'],
+    ...addonSections.map((s) => [s.key, s.label, s.icon, s.hint] as [Section, string, ComponentType<{ className?: string }>, string]),
+    ...(user?.role === 'owner' ? [['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(onAndroid() ? [['device', 'This device', Smartphone, 'Add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
-    ...(user?.role === 'owner' ? [
-      ['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string],
-      ['coupons', 'Coupons', Ticket, 'Coupon codes for bills'] as [Section, string, ComponentType<{ className?: string }>, string],
-      ['users', 'Users', Users, 'Staff, roles and PINs'] as [Section, string, ComponentType<{ className?: string }>, string],
-    ] : []),
   ];
-  const shown: Section = items.some(([k]) => k === section) ? section : 'printers';
+  const wanted = section === 'receipt' ? 'store' : section; // Invoice / KOT is part of Store settings now
+  const shown: Section = items.some(([k]) => k === wanted) ? wanted : 'printers';
   const AddonSection = addonSections.find((s) => s.key === shown)?.component;
   return (
     <PageShell route="settings" title="Settings" subtitle="Set up this counter.">
@@ -72,7 +71,7 @@ export function Settings() {
               </button>
             ))}
           </nav>
-          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <StoreSettings /> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : <ReceiptSettings />}</div>
+          <div className="min-w-0 flex-1">{AddonSection ? <AddonSection /> : shown === 'store' ? <><ReceiptSettings title="Store settings" before={(refresh) => <StoreSettings onChanged={refresh} />} /><KotSettings /></> : shown === 'printers' ? <PrinterSetup /> : shown === 'users' ? <UsersSettings /> : shown === 'coupons' ? <CouponsSettings /> : shown === 'device' ? <DeviceSettings /> : shown === 'backups' ? <BackupSettings /> : null}</div>
         </div>
       )}
     </PageShell>
@@ -89,7 +88,7 @@ function PrinterSetup() {
   const [scanning, setScanning] = useState(false);
   const [editing, setEditing] = useState<{ printer: Printer | null; prefill?: Partial<PrinterInput> } | null>(null);
   const [removing, setRemoving] = useState<Printer | null>(null);
-  const [stations, setStations] = useState<string[]>([]);
+  const [stations, setStations] = useState<Array<{ id: string; name: string }>>([]);
   const keys = useRef(new Map<string, string>());
 
   const loadPrinters = useCallback(() => { api.printers().then(setList).catch((e) => { setList([]); fail(e); }); }, [api, fail]);
@@ -99,7 +98,7 @@ function PrinterSetup() {
   }, [api]);
   useEffect(() => {
     loadPrinters(); void scan(false);
-    api.catalog().then((c) => setStations([...new Set(c.categories.map((x) => x.kitchenStation).filter((s): s is string => !!s))])).catch(() => { /* optional */ });
+    api.prepStations().then((s) => setStations(s.map(({ id, name }) => ({ id, name })))).catch(() => { /* optional */ });
     const t = setInterval(() => { loadPrinters(); void scan(false); }, 6000); // printer status and newly plugged USB printers
     return () => clearInterval(t);
   }, [api, loadPrinters, scan]);
@@ -145,7 +144,7 @@ function PrinterSetup() {
       <section className="mb-6 rounded-2xl border border-border bg-card p-4" aria-label="USB printers plugged into this PC">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <Usb className="h-5 w-5 text-primary" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-48 flex-1">
             <h3 className="font-semibold">USB printers plugged into this PC</h3>
             <p className="text-xs text-muted-foreground">Plug in the printer and switch it on. It appears here within a few seconds, with or without a Windows driver.{scannedAt ? ` Last checked ${new Date(scannedAt).toLocaleTimeString('en-IN')}.` : ''}</p>
           </div>
@@ -207,7 +206,7 @@ function PrinterSetup() {
                     <p className="font-semibold">{p.name} {!p.active && <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">Off</span>}</p>
                     <p className="truncate text-sm text-muted-foreground">{connLabel(p)}{p.address ? ` · ${p.address}` : ''} · {p.widthMm} mm{p.profile === 'slow_buffer' ? ' · slow data speed' : ''}</p>
                     <p className="text-sm text-muted-foreground">
-                      {[p.isReceipt && 'Bills (receipts)', p.drawer && 'Cash drawer', p.stations.length && `Kitchen: ${p.stations.map((s) => (s === '*' ? 'all stations' : s)).join(', ')}`].filter(Boolean).join(' · ') || 'Not printing anything yet: edit it to choose'}
+                      {[p.isReceipt && 'Bills (receipts)', p.drawer && 'Cash drawer', p.stations.length && `Kitchen: ${p.stations.map((s) => (s === '*' ? 'all stations' : stations.find((x) => x.id === s)?.name ?? 'a removed station')).join(', ')}`].filter(Boolean).join(' · ') || 'Not printing anything yet: edit it to choose'}
                     </p>
                   </div>
                 </div>
@@ -249,7 +248,7 @@ function PrinterSetup() {
 }
 
 function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSaved }: {
-  printer: Printer | null; prefill?: Partial<PrinterInput>; stations: string[]; hasReceipt: boolean; onClose: () => void; onSaved: (isNew: boolean) => void;
+  printer: Printer | null; prefill?: Partial<PrinterInput>; stations: Array<{ id: string; name: string }>; hasReceipt: boolean; onClose: () => void; onSaved: (isNew: boolean) => void;
 }) {
   const { api } = useSession();
   const key = useRef(newKey());
@@ -268,7 +267,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
   const [busy, setBusy] = useState(false);
   const directUsb = startTransport === 'usb' && kind === 'usb'; // plug-and-play printer: keep its USB id
   const transport: Transport = directUsb ? 'usb' : kindsHere().find((k) => k.kind === kind)!.transport;
-  const allStations = [...new Set([...stations, ...chosen.filter((s) => s !== '*')])];
+  const allStations = stations;
 
   const pick = (addr: string, suggestedName?: string) => { setAddress(addr); if (!name.trim() && suggestedName) setName(suggestedName); };
   const toggleStation = (s: string) => setChosen((c) => (c.includes(s) ? c.filter((x) => x !== s) : s === '*' ? ['*'] : [...c.filter((x) => x !== '*'), s]));
@@ -330,10 +329,10 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
             <div>
               <span className="font-medium">Kitchen tickets (KOT) for</span>
               <div className="mt-1 flex flex-wrap gap-2">
-                {allStations.map((s) => <button key={s} type="button" aria-pressed={chosen.includes(s)} className={`chip ${chosen.includes(s) ? 'chip-active' : ''}`} onClick={() => toggleStation(s)}>{s}</button>)}
+                {allStations.map((s) => <button key={s.id} type="button" aria-pressed={chosen.includes(s.id)} className={`chip ${chosen.includes(s.id) ? 'chip-active' : ''}`} onClick={() => toggleStation(s.id)}>{s.name}</button>)}
                 <button type="button" aria-pressed={chosen.includes('*')} className={`chip ${chosen.includes('*') ? 'chip-active' : ''}`} onClick={() => toggleStation('*')}>All stations</button>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Stations come from your menu categories (Menu creation, Categories).</p>
+              <p className="mt-1 text-xs text-muted-foreground">Prep stations are made in Menu creation, Prep stations. Items without a station print on printers set to All stations.</p>
             </div>
           </div>
         </Step>
@@ -513,7 +512,8 @@ function BluetoothPicker({ value, onPick }: { value: string; onPick: (addr: stri
 
 // ---------------------------------------------------------------- Receipt
 
-function ReceiptSettings() {
+/** Store settings: what the caller puts first (logo, store details), then bill design, footer and a sample; one preview. */
+function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; before?: (refresh: () => void) => ReactNode }) {
   const { api, user, fail, notify } = useSession();
   const isOwner = user?.role === 'owner';
   const key = useRef(newKey());
@@ -527,7 +527,7 @@ function ReceiptSettings() {
   /** A chosen design file that is not applied yet: its preview replaces the current one until "Use" or "Cancel". */
   const [pending, setPending] = useState<{ fileName: string; content: string; preview: ReceiptDesignPreview | null; errors: string[] } | null>(null);
   const [confirmStandard, setConfirmStandard] = useState(false);
-  const [logoV] = useState(() => Date.now()); // a fresh logo each time this section opens
+  const [logoV, setLogoV] = useState(() => Date.now()); // a fresh logo each time this section opens, and after a change
   const fileInput = useRef<HTMLInputElement>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -589,9 +589,10 @@ function ReceiptSettings() {
   const shown = pending?.preview ? pending.preview.lines : lines;
   return (
     <>
-      <h2 className="mb-4 font-display text-2xl">Receipt</h2>
+      <h2 className="mb-4 font-display text-2xl">{title}</h2>
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="space-y-4">
+          {before?.(() => { setLogoV(Date.now()); preview(); const p = pendingRef.current; if (p) void check(p.fileName, p.content, width); })}
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Bill design">
             <h3 className="font-semibold">Bill design</h3>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -668,7 +669,7 @@ function ReceiptSettings() {
             )}
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="rounded-2xl border border-border bg-card p-4 xl:sticky xl:top-0 xl:self-start">
           <div className="mb-2 flex items-center gap-2">
             <h3 className="font-semibold">{pending?.preview ? `Preview: ${pending.preview.name} (not in use yet)` : 'Preview'}</h3>
             <div className="ml-auto flex gap-2">{([80, 58] as const).map((w) => <button key={w} className={`chip ${width === w ? 'chip-active' : ''}`} onClick={() => setWidth(w)}>{w} mm</button>)}</div>

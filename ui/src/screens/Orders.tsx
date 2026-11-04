@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Ban, Monitor, Printer, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, Ban, ChefHat, Monitor, Printer, Undo2 } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
-import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, PayMode } from '../lib/api.ts';
+import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode } from '../lib/api.ts';
+import { useAddons } from '../lib/addons.ts';
+import { useAppMode } from '../lib/appMode.tsx';
 import { formatPaise, formatQty } from '../lib/money.ts';
 import { messageOf, useSession } from '../lib/session.tsx';
 import { Modal, PageShell } from '../components/ui.tsx';
@@ -25,6 +27,10 @@ export function Orders() {
   const [cancelling, setCancelling] = useState<InvoiceDetail | null>(null);
   const [refunding, setRefunding] = useState<InvoiceDetail | null>(null);
   const [statusKey, setStatusKey] = useState(0);
+  const [correcting, setCorrecting] = useState<Payment | null>(null);
+  const { addons } = useAddons();
+  const { manager } = useAppMode(); // Tiffin Data Manager: bills are view only
+  const panels = addons.flatMap((a) => (a.invoicePanels ?? []).map((P, i) => ({ key: `${a.id}:${i}`, P })));
 
   const load = useCallback(() => {
     setRows(null);
@@ -38,6 +44,14 @@ export function Orders() {
     try {
       const r = await withApproval('Reprinting a bill', (o) => api.reprint(id, o, key));
       if (r) { notify(r.queued ? 'success' : 'error', r.queued ? 'Reprint sent to the receipt printer.' : 'No receipt printer is set up. Use Print on screen.'); setStatusKey((k) => k + 1); }
+    } catch (e) { fail(e); }
+  };
+
+  const reprintKot = async (id: string) => {
+    const key = newKey();
+    try {
+      const r = await withApproval('Reprinting a kitchen ticket', (o) => api.reprintKot(id, o, key));
+      if (r) { notify('success', `Kitchen ticket sent again (${r.queued} ticket${r.queued === 1 ? '' : 's'}), marked REPRINT.`); setStatusKey((k) => k + 1); }
     } catch (e) { fail(e); }
   };
 
@@ -85,14 +99,24 @@ export function Orders() {
             {open.invoice.igst > 0 && <Line label="IGST" value={formatPaise(open.invoice.igst)} />}
             {open.invoice.roundOff !== 0 && <Line label="Round off" value={formatPaise(open.invoice.roundOff)} />}
             <div className="flex justify-between pt-1 text-base font-bold"><span>Total</span><span className="text-primary">{formatPaise(open.invoice.grandTotal)}</span></div>
-            {open.payments.map((p) => <Line key={p.id} label={`Paid by ${p.mode.toLowerCase()}${p.reference ? ` (${p.reference})` : ''}`} value={formatPaise(p.amount)} />)}
+            {open.payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2 text-muted-foreground">
+                <span>Paid by {MODE_LABEL[p.mode]}{p.reference ? ` (${p.reference})` : ''}{p.originalMode && p.originalMode !== p.mode ? <span className="ml-1 text-xs text-primary">(changed from {MODE_LABEL[p.originalMode]})</span> : null}</span>
+                <span className="flex items-center gap-1">
+                  {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost h-8 px-2 text-xs" onClick={() => setCorrecting(p)} aria-label="Change payment mode"><ArrowLeftRight className="h-3.5 w-3.5" />Change</button>}
+                  <span className="text-foreground">{formatPaise(p.amount)}</span>
+                </span>
+              </div>
+            ))}
           </div>
+          {panels.map(({ key, P }) => <P key={key} invoiceId={open.invoice.id} />)}
           {open.invoice.status === 'CANCELLED' && <p className="mt-3 text-sm text-destructive">Cancelled{open.invoice.cancelReason ? `: ${open.invoice.cancelReason}` : ''}</p>}
-          <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>
+          {!manager && <div className="mt-4 rounded-lg border border-border p-3"><p className="mb-1 text-xs font-semibold">Printing</p><PrintStatus key={statusKey} invoiceId={open.invoice.id} onRetry={(id) => { void api.retryPrintJob(id).then(() => setStatusKey((k) => k + 1)).catch(fail); }} /></div>}
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button className="btn-ghost" onClick={() => setScreenPrint(open)}><Monitor className="h-4 w-4" />Print on screen</button>
-            <button className="btn-ghost" onClick={() => void reprint(open.invoice.id)}><Printer className="h-4 w-4" />Reprint</button>
-            {open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <>
+            {!manager && <button className="btn-ghost" onClick={() => void reprint(open.invoice.id)}><Printer className="h-4 w-4" />Reprint</button>}
+            {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost" onClick={() => void reprintKot(open.invoice.id)}><ChefHat className="h-4 w-4" />Reprint kitchen ticket</button>}
+            {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <>
               <button className="btn-ghost" onClick={() => setRefunding(open)}><Undo2 className="h-4 w-4" />Refund items</button>
               <button className="btn-ghost text-destructive" onClick={() => setCancelling(open)}><Ban className="h-4 w-4" />Cancel bill</button>
             </>}
@@ -101,6 +125,7 @@ export function Orders() {
       )}
       {screenPrint && <ReceiptDialog invoiceId={screenPrint.invoice.id} title={`Receipt ${screenPrint.invoice.invoiceNo}`} onClose={() => setScreenPrint(null)} />}
       {cancelling && <CancelDialog detail={cancelling} onClose={() => setCancelling(null)} onDone={() => { setCancelling(null); setOpen(null); load(); }} />}
+      {correcting && open && <PaymentModeDialog payment={correcting} onClose={() => setCorrecting(null)} onDone={() => { setCorrecting(null); void show(open.invoice.id); }} />}
       {refunding && <RefundDialog detail={refunding} onClose={() => setRefunding(null)} onDone={() => { setRefunding(null); setOpen(null); load(); }} />}
     </PageShell>
   );
@@ -192,6 +217,40 @@ function RefundDialog({ detail, onClose, onDone }: { detail: InvoiceDetail; onCl
           <button className="btn-primary mt-4 w-full" disabled={busy || !preview} onClick={() => void go()}>{busy ? 'Saving…' : preview ? `Refund ${formatPaise(preview.total)}` : 'Refund'}</button>
         </>
       )}
+    </Modal>
+  );
+}
+
+const CORRECT_MODES: PayMode[] = ['CASH', 'UPI', 'CARD', 'WALLET', 'CREDIT', 'OTHER'];
+
+/** Fixes the payment mode after billing (wrong button pressed). The bill itself never changes; reports count the new mode. */
+function PaymentModeDialog({ payment, onClose, onDone }: { payment: Payment; onClose: () => void; onDone: () => void }) {
+  const { api, notify, withApproval } = useSession();
+  const [mode, setMode] = useState<PayMode | null>(null);
+  const [reference, setReference] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const key = useRef(newKey());
+  const go = async () => {
+    if (!mode) return setError('Choose how the customer actually paid.');
+    if (reason.trim().length < 3) return setError('Say why, for example "customer paid by UPI".');
+    setBusy(true); setError('');
+    try {
+      const r = await withApproval('Changing the payment mode', (o) => api.correctPayment(payment.id, { toMode: mode, reference: reference.trim() || null, reason: reason.trim() }, o, key.current));
+      if (r) { notify('success', `Payment changed to ${MODE_LABEL[mode]}. Reports and the shift cash count use the new mode.`); onDone(); }
+    } catch (e) { key.current = newKey(); setError(messageOf(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Change payment mode" onClose={onClose}>
+      <p className="text-sm text-muted-foreground">{formatPaise(payment.amount)} was entered as <b>{MODE_LABEL[payment.mode]}</b>. The bill stays as it is; a correction is recorded and the reports and shift cash use the new mode. Only bills of the shift that is still open can be changed.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Paid by">
+        {CORRECT_MODES.filter((m) => m !== payment.mode).map((m) => <button key={m} role="radio" aria-checked={mode === m} className={`chip ${mode === m ? 'chip-active' : ''}`} onClick={() => setMode(m)}>{MODE_LABEL[m]}</button>)}
+      </div>
+      {mode && mode !== 'CASH' && <input className="field mt-3 w-full" maxLength={60} placeholder={mode === 'UPI' ? 'UPI reference (optional)' : 'Reference (optional)'} value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Payment reference" />}
+      <input className="field mt-3 w-full" maxLength={200} placeholder="Reason (customer paid by UPI)" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
+      {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
+      <button className="btn-primary mt-4 w-full" disabled={busy} onClick={() => void go()}>{busy ? 'Saving…' : 'Change payment mode'}</button>
     </Modal>
   );
 }

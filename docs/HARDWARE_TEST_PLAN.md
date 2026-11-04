@@ -82,7 +82,12 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 
 | Check | Result |
 |---|---|
+| Signed in, close the POS window and open it again (and end the process in Task Manager, then open): still signed in, same bill; press Lock, close, open: still locked until the PIN | |
 | Low-end shop PC (4 GB RAM, HDD): start-up time, memory, billing speed | |
+| Rupee sign and a Hindi item name on a real receipt printer (Posiflex PP8800 and a 58 mm printer): sharp enough, lines aligned, print speed on a long Hindi bill | |
+| Cash drawer opened from Billing > Open cash drawer on the real printer | |
+| Handheld POS (Sunmi V2 type) and a touch-screen PC: billing with the View bill bar, dialogs, tap targets | |
+| Payment machines (docs/PAYMENT_MACHINES.md): Paytm wireless and USB, Pine Labs wireless and PAD Controller, each on the company's test account and a real machine: card, UPI, decline, cancel, no internet, unplugged cable, reverse; then one small live payment | |
 | Settings > Backups in the installed app: Windows folder picker, copies to a real USB drive (pull it out: error shown, billing unaffected), restore from it on a second PC | |
 | Online backups against a hosted backup server over https: upload on shop internet, a large database (100 MB+), restore on a new PC | |
 | Low-end shop PC: install and update time (zip installer; ~22 s on one core of the dev PC's SSD, HDD and antivirus not measured) | |
@@ -108,7 +113,7 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Live online orders on a shop PC: pair with a real hub over https, order from a phone, sound plays, Accept prints the bill and KOT on the shop printer | |
 | Internet drop for 2-10 minutes during service: orders placed meanwhile arrive once after it returns; accepts made offline reach the customer | |
 | PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
-| Settings > API keys with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google map shows, "empire brookfield" suggests the right place, picking it moves the pin | |
+| Settings > Serviceability > Map with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google Maps, Google satellite and satellite with roads each show, switching back to the free map shows OpenStreetMap, "empire brookfield" suggests the right place, picking it moves the pin | |
 | Place search screen: suggestions appear while typing, arrow keys + Enter, pasted Google Maps coordinates and link | |
 | Online-order buzzer through the shop PC's speakers (and the Android machine's): loud enough at the counter, rings on the Billing screen, Silence works | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
@@ -121,6 +126,7 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 
 | Check | Result |
 |---|---|
+| Signed in, swipe the app away and open it again, and after a device restart: still signed in; Lock survives the same | |
 | Install the APK for the machine's processor (arm64-v8a or armeabi-v7a) and complete shop setup | |
 | A day of billing: speed of adding items and paying (target: under 0.2 s per tap) | |
 | Power cut or app killed during a bill: the bill is either complete or not there, numbering has no gap | |
@@ -129,6 +135,7 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 | Reports: Download CSV (Download folder) and Print / PDF (Android print screen, Save as PDF) | |
 | Install the ODS add-on from a .tiffinaddon file (Settings > This device > Add-ons), turn on online orders, pair with the hub, receive an order with the app in the background | |
 | Leave the app in the background for an hour, come back: the POS still answers | |
+| Hindi and the rupee sign on the built-in or a Bluetooth printer (the app draws them, op "render" in PrinterBridge) | |
 
 Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages). Node 24 runs; 177/184 backend tests pass (the 2 failures are timing on the slow emulator); the app starts the POS and shows the setup screen.
 
@@ -140,6 +147,43 @@ Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages).
 | A shop's own design compared with their old bill | |
 | Bill logo on real printers (58 and 80 mm, Posiflex PP8800, a cheap 58 mm): centred, dark enough, print speed, no garbage after the logo | |
 
+## Kitchen tickets (KOT)
+
+| Check | Result |
+|---|---|
+| Two prep stations on two real printers: a bill with items of both prints one ticket each, only their own items | |
+| Cart KOT button, then more items, then billing: the second ticket says ADD-ON KOT 2 and has only the new items | |
+| An item removed after sending, and a cleared cart after sending: CANCEL lines print | |
+| "With the bill" mode on the receipt printer: bill, then one ticket per station (customer KOT design) | |
+| An uploaded .tiffinkot design at 58 and 80 mm looks like its preview | |
+| Online order accepted with "print KOT only": no bill; ODS Bill button prints it once, the second time asks a manager | |
+
+## Swiggy and Zomato (UrbanPiper test account)
+
+| Check | Result |
+|---|---|
+| Hub on an https address; Hub settings: account saved with the pos-int details; Test connection says connected; a store saved on its page | |
+| Set up order links: 9 webhooks in Atlas (Settings > Webhooks) pointing at the hub, with the secret header | |
+| Send store details and Send menu: store and menu appear in Atlas; the activity list shows UrbanPiper's results | |
+| Atlas Developer Tools: Swiggy and Zomato test orders (delivery, pickup, cash, options) appear on the ODS, priced right | |
+| Accept (prep time), Ready, reject, cancel: Atlas shows Acknowledged, Food Ready, Cancelled with the reason | |
+| Platform cancel and rider updates from Developer Tools reach the ODS | |
+| Item sold out in the POS and the store pausing show in Atlas | |
+| Swiggy test order: Item out of stock, both choices (change order: number and PIN on the ODS; cancel) | |
+| Zomato test order: Customer's number, Rider check; a bulk test order: Ask for another rider | |
+| Packaging per item and as a percentage show on the test orders and the POS bill; a menu with 5% and 12% items is taken (tax codes) | |
+
 ## Accounting sign-off (CA)
 GST rates and inclusive/exclusive treatment, odd-paisa rule, discount before tax, round-off, invoice numbering
-and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month.
+and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month. Swiggy/Zomato bills: GST on food paid by the platform (section 9(5)), packaging charges, store-funded platform discounts, payment mode OTHER until the platform pays out.
+
+## Tiffin Data Manager (separate app)
+| Check | Result |
+|---|---|
+| Dev build and packaged build (win-unpacked) over a temporary shop: owner-only sign-in, dashboard, all data, bills view only, backup now; view only while a "POS" program runs (automated e2e) | Passed 2026-10-27, Windows 11 dev PC |
+| Installer on a PC without the POS: installs per user, opens a backup file from a USB drive (view only) | |
+| Installer on a PC with an older POS (e.g. 0.1.1) and real bills: view only with the "update the POS" message, the POS still opens afterwards | |
+| With the POS open: switches to view only within a few seconds; back to changes after the POS closes | |
+| Restore on a shop PC with the POS closed; then the POS opens with the restored data | |
+| Uninstalling it leaves the POS and its data untouched | |
+

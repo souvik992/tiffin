@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { all, get, run, AppError } from '../store/db.ts';
 import type { Actor, Ctx, Role } from './ctx.ts';
 import { getDevice } from './ctx.ts';
@@ -88,7 +88,9 @@ export function login(ctx: Ctx, userId: string, pin: string): { token: string; u
   const u = checkPin(ctx, userRow(ctx, userId), pin, false);
   const token = randomBytes(32).toString('hex');
   const actor: Actor = { userId: u.id, role: u.role, name: u.name };
-  ctx.sessions.set(token, { ...actor, token, lastSeen: ctx.clock.now() });
+  const now = ctx.clock.now();
+  ctx.sessions.set(token, { ...actor, token, lastSeen: now, savedAt: now });
+  run(ctx.db, 'INSERT INTO app_session(token_hash, user_id, created_at, last_seen) VALUES (?,?,?,?)', tokenHash(token), u.id, now, now);
   audit(ctx, u.id, 'auth.login', 'user', u.id);
   return { token, user: actor };
 }
@@ -101,20 +103,62 @@ export function loginByMobile(ctx: Ctx, mobile: string, pin: string): { token: s
     throw e;
   }
 }
-export function logout(ctx: Ctx, token: string): void { ctx.sessions.delete(token); }
+export function logout(ctx: Ctx, token: string): void { endSession(ctx, token); }
+
+// Sign-ins survive closing, a crash and a restart of the POS (restoring a backup's own sessions aside): the token's
+// SHA-256 is kept in app_session, never the token. Time never signs anyone out and nothing locks by itself (the owner's
+// choice: a busy counter must not lose its cashier); only sign-out, deactivating the user or the lock button do. A
+// locked sign-in (locked_at) stays locked across a restart until the same person's PIN is entered.
+const SAVE_EVERY_MS = 60_000; // last-seen is written at most once a minute per sign-in
+const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
+function endSession(ctx: Ctx, token: string): void {
+  ctx.sessions.delete(token);
+  run(ctx.db, 'DELETE FROM app_session WHERE token_hash = ?', tokenHash(token));
+}
+/** A sign-in from before a restart, if it is still known. */
+function storedSession(ctx: Ctx, token: string) {
+  const r = get<{ user_id: string; last_seen: number; locked_at: number | null }>(ctx.db, 'SELECT user_id, last_seen, locked_at FROM app_session WHERE token_hash = ?', tokenHash(token));
+  if (!r) return undefined;
+  const u = userRow(ctx, r.user_id);
+  if (!u) return undefined;
+  const s = { userId: u.id, role: u.role, name: u.name, token, lastSeen: r.last_seen, savedAt: r.last_seen, locked: r.locked_at !== null };
+  ctx.sessions.set(token, s);
+  return s;
+}
+/** Forgets sign-ins of users who were deactivated or removed (called at start-up). Time alone never ends a sign-in. */
+export function pruneSessions(ctx: Ctx): number {
+  return Number(run(ctx.db, 'DELETE FROM app_session WHERE user_id IN (SELECT id FROM app_user WHERE active = 0 OR deleted_at IS NOT NULL)').changes);
+}
+
+/** The lock button: this sign-in needs its own PIN again before anything else (kept across a restart). */
+export function lockSession(ctx: Ctx, token: string | undefined): void {
+  const actor = authenticate(ctx, token);
+  const s = ctx.sessions.get(token!)!;
+  s.locked = true;
+  run(ctx.db, 'UPDATE app_session SET locked_at = ? WHERE token_hash = ?', ctx.clock.now(), tokenHash(token!));
+  audit(ctx, actor.userId, 'auth.lock', 'user', actor.userId);
+}
+/** Unlocks with the PIN of the person who is signed in (wrong PINs count toward the usual PIN lockout). */
+export function unlockSession(ctx: Ctx, token: string | undefined, pin: string): Actor {
+  const s = token ? ctx.sessions.get(token) ?? storedSession(ctx, token) : undefined;
+  if (!s) throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401);
+  const u = checkPin(ctx, userRow(ctx, s.userId), pin, false);
+  if (!u.active || u.deleted_at) { endSession(ctx, s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
+  s.locked = false; s.lastSeen = ctx.clock.now();
+  run(ctx.db, 'UPDATE app_session SET locked_at = NULL, last_seen = ? WHERE token_hash = ?', s.lastSeen, tokenHash(s.token));
+  audit(ctx, u.id, 'auth.unlock', 'user', u.id);
+  return { userId: u.id, role: u.role, name: u.name };
+}
 
 export function authenticate(ctx: Ctx, token: string | undefined): Actor {
-  const s = token ? ctx.sessions.get(token) : undefined;
+  const s = token ? ctx.sessions.get(token) ?? storedSession(ctx, token) : undefined;
   if (!s) throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401);
-  const idleMs = loadSettings(ctx).idleLockSeconds * 1000;
+  if (s.locked) throw new AppError('SESSION_LOCKED', `Locked. ${s.name}, enter your PIN to continue.`, 401, { userId: s.userId, name: s.name });
   const now = ctx.clock.now();
-  if (idleMs > 0 && now - s.lastSeen > idleMs) {
-    ctx.sessions.delete(s.token);
-    throw new AppError('SESSION_LOCKED', 'Locked after inactivity. Enter your PIN.', 401);
-  }
   s.lastSeen = now;
+  if (now - (s.savedAt ?? 0) >= SAVE_EVERY_MS) { s.savedAt = now; run(ctx.db, 'UPDATE app_session SET last_seen = ? WHERE token_hash = ?', now, tokenHash(s.token)); }
   const u = userRow(ctx, s.userId);
-  if (!u || !u.active || u.deleted_at) { ctx.sessions.delete(s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
+  if (!u || !u.active || u.deleted_at) { endSession(ctx, s.token); throw new AppError('UNAUTHENTICATED', 'Please sign in.', 401); }
   return { userId: s.userId, role: u.role, name: u.name };
 }
 
@@ -221,6 +265,7 @@ export function deactivateUser(ctx: Ctx, actor: Actor, requestId: string, userId
     if (userId === actor.userId) throw new AppError('SELF', 'You cannot deactivate yourself.', 409);
     run(ctx.db, 'UPDATE app_user SET active = 0, version = version + 1, updated_at = ? WHERE id = ?', ctx.clock.now(), userId);
     for (const [t, s] of ctx.sessions) if (s.userId === userId) ctx.sessions.delete(t);
+    run(ctx.db, 'DELETE FROM app_session WHERE user_id = ?', userId);
     audit(ctx, actor.userId, 'user.deactivate', 'user', userId);
     return { ok: true };
   });

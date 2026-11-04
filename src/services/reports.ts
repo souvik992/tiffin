@@ -55,7 +55,7 @@ export function invoiceRegisterCsv(ctx: Ctx, fromMs: number, toMs: number): stri
 export function recomputeDailySummary(ctx: Ctx): void {
   const inv = all<{ id: string; device_id: string; issued_at: number; doc_type: string; status: string; grand_total: number; tax: number; discount_total: number }>(ctx.db,
     'SELECT id, device_id, issued_at, doc_type, status, grand_total, cgst + sgst + igst + cess AS tax, discount_total FROM invoice');
-  const pays = all<{ invoice_id: string; mode: string; amount: number }>(ctx.db, 'SELECT invoice_id, mode, amount FROM payment');
+  const pays = all<{ invoice_id: string; mode: string; amount: number }>(ctx.db, 'SELECT invoice_id, mode, amount FROM payment_effective');
   const byInv = new Map<string, Array<{ mode: string; amount: number }>>();
   for (const p of pays) byInv.set(p.invoice_id, [...(byInv.get(p.invoice_id) ?? []), p]);
   const agg = new Map<string, Record<SummaryCol, number> & { day: string; device: string }>();

@@ -33,7 +33,7 @@ test('items: veg, non-veg or not set; duplicate names refused on create and rena
 test('categories: create, rename, reorder in one step, item counts, and delete only when empty', () => {
   const env = makeEnv(); try {
     const tg = gst5(env);
-    const combos = createCategory(env.ctx, env.manager, rid(), { name: 'Combos', kitchenStation: 'kitchen' }).id;
+    const combos = createCategory(env.ctx, env.manager, rid(), { name: 'Combos', prepStationId: get<{ id: string }>(env.ctx.db, "SELECT id FROM prep_station WHERE name = 'Kitchen'")!.id }).id;
     assert.equal(code(() => createCategory(env.ctx, env.manager, rid(), { name: 'combos' })), 'DUPLICATE');
     assert.equal(code(() => createCategory(env.ctx, env.cashier, rid(), { name: 'X' })), 'FORBIDDEN');
     const burgers = get<{ id: string }>(env.ctx.db, "SELECT id FROM category WHERE name = 'Burgers'")!.id;

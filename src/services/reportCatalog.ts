@@ -91,7 +91,7 @@ const payments: Def = {
         sum(CASE WHEN i.doc_type = 'TAX_INVOICE' THEN 1 ELSE 0 END) AS count,
         sum(CASE WHEN i.doc_type = 'TAX_INVOICE' THEN p.amount ELSE 0 END) AS received,
         sum(CASE WHEN i.doc_type = 'CREDIT_NOTE' THEN p.amount ELSE 0 END) AS refunded
-      FROM payment p JOIN invoice i ON i.id = p.invoice_id WHERE i.status = 'ISSUED' AND ${IN_RANGE} GROUP BY p.mode ORDER BY received DESC`, b.fromMs, b.toMs)
+      FROM payment_effective p JOIN invoice i ON i.id = p.invoice_id WHERE i.status = 'ISSUED' AND ${IN_RANGE} GROUP BY p.mode ORDER BY received DESC`, b.fromMs, b.toMs)
       .map((r) => ({ mode: MODE[r.mode] ?? r.mode, count: r.count, received: r.received, refunded: r.refunded, net: r.received - r.refunded }));
     const columns: Column[] = [{ key: 'mode', label: 'Payment mode', type: 'text' }, { key: 'count', label: 'Payments', type: 'int' }, { key: 'received', label: 'Received', type: 'money' }, { key: 'refunded', label: 'Refunded', type: 'money' }, { key: 'net', label: 'Net', type: 'money' }];
     const totals = totalsOf(columns, rows);
@@ -215,7 +215,7 @@ const bills: Def = {
   key: 'bills', title: 'Bill register', group: 'Tax', description: 'Every bill and credit note with its status, payments and tax (for your accountant).',
   build(ctx, b) {
     const rows = all<Row & { doc_type: string; status: string; channel: string }>(ctx.db, `SELECT i.invoice_no AS invoiceNo, i.doc_type, i.status, i.issued_at AS at, i.token_no AS token, u.name AS cashier, o.channel,
-        coalesce((SELECT group_concat(p.mode, ' + ') FROM payment p WHERE p.invoice_id = i.id), '') AS paidBy,
+        coalesce((SELECT group_concat(p.mode, ' + ') FROM payment_effective p WHERE p.invoice_id = i.id), '') AS paidBy,
         coalesce(oi.invoice_no, '') AS against, i.buyer_gstin AS buyerGstin, i.taxable_total AS taxable, (i.cgst + i.sgst + i.igst + i.cess) AS tax,
         i.discount_total AS discount, i.round_off AS roundOff, i.grand_total AS total
       FROM invoice i JOIN app_user u ON u.id = i.created_by JOIN sale_order o ON o.id = i.order_id LEFT JOIN invoice oi ON oi.id = i.original_invoice_id
@@ -262,7 +262,7 @@ const shifts: Def = {
   key: 'shifts', title: 'Shifts and cash', group: 'Controls', description: 'Each shift: opening cash, cash sales, expected and counted cash, and the difference.',
   build(ctx, b) {
     const rows = all<{ id: string; opened_at: number; closed_at: number | null; cashier: string; opening_cash: number; expected_cash: number | null; counted_cash: number | null; cash: number | null; bills: number | null }>(ctx.db, `SELECT s.id, s.opened_at, s.closed_at, u.name AS cashier, s.opening_cash, s.expected_cash, s.counted_cash,
-        (SELECT sum(${SIGNED('p.amount')}) FROM payment p JOIN invoice i ON i.id = p.invoice_id WHERE i.shift_id = s.id AND i.status = 'ISSUED' AND p.mode = 'CASH') AS cash,
+        (SELECT sum(${SIGNED('p.amount')}) FROM payment_effective p JOIN invoice i ON i.id = p.invoice_id WHERE i.shift_id = s.id AND i.status = 'ISSUED' AND p.mode = 'CASH') AS cash,
         (SELECT count(*) FROM invoice i WHERE i.shift_id = s.id AND ${BILL}) AS bills
       FROM shift s JOIN app_user u ON u.id = s.user_id WHERE s.opened_at >= ? AND s.opened_at < ? ORDER BY s.opened_at`, b.fromMs, b.toMs)
       .map((s) => {

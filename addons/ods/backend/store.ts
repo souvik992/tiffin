@@ -48,7 +48,7 @@ export function setState(host: HostApi, id: string, state: OrderState, extra: { 
 }
 
 // ---- outbox: every change for the hub is stored first, then sent until the hub confirms it (survives restarts)
-export interface OutboxRow { id: number; order_id: string; action: 'received' | 'accept' | 'reject' | 'state'; body_json: string; idem_key: string; attempts: number }
+export interface OutboxRow { id: number; order_id: string; action: 'received' | 'accept' | 'reject' | 'state' | 'platform-action'; body_json: string; idem_key: string; attempts: number }
 export function enqueue(host: HostApi, orderId: string, action: OutboxRow['action'], body: unknown, idemKey: string) {
   host.db.run('INSERT OR IGNORE INTO ods_outbox (order_id, action, body_json, idem_key, created_at) VALUES (?,?,?,?,?)', orderId, action, JSON.stringify(body), idemKey, host.ctx.clock.now());
 }
@@ -61,13 +61,60 @@ const FEE_TAX = 'ods_fee_tax_group';
 /** Settings ending in "_key" are secret: the POS never lists them (src/services/settings.ts). */
 const GOOGLE_KEY = 'ods_google_maps_key';
 export const readFeeTaxGroup = (host: HostApi): string | null => host.getSetting(FEE_TAX) || null;
+
+/** What prints when an online order is accepted (by staff or automatically): the bill, the kitchen tickets. Default: both. */
+export interface PrintOnAccept { bill: boolean; kot: boolean }
+const PRINT_ON_ACCEPT = 'ods_print_on_accept';
+export function readPrintOnAccept(host: HostApi): PrintOnAccept {
+  try { const v = JSON.parse(host.getSetting(PRINT_ON_ACCEPT) || '{}') as Partial<PrintOnAccept>; return { bill: v.bill !== false, kot: v.kot !== false }; } catch { return { bill: true, kot: true }; }
+}
+export function savePrintOnAccept(host: HostApi, actor: Actor, input: unknown): PrintOnAccept {
+  host.assertPerm(actor, 'settings.write');
+  const b = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  if (typeof b.bill !== 'boolean' || typeof b.kot !== 'boolean') throw new host.AppError('VALIDATION', 'Choose what prints on accepting.');
+  const v = { bill: b.bill, kot: b.kot };
+  host.setSetting(PRINT_ON_ACCEPT, JSON.stringify(v));
+  host.audit(host.ctx, actor.userId, 'ods.print_on_accept', 'settings', PRINT_ON_ACCEPT, v);
+  return v;
+}
 export function saveFeeTaxGroup(host: HostApi, taxGroupId: string | null) {
   if (taxGroupId !== null && !host.db.get('SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', taxGroupId)) throw new host.AppError('VALIDATION', 'Choose a GST rate from the list.');
   host.setSetting(FEE_TAX, taxGroupId ?? '');
 }
 
-/** Google Maps (map pictures + place search) when the owner set a key in Settings > API keys; else free OpenStreetMap. */
+/** The owner's Google key (Settings > Serviceability > Map). Used only while a Google map is chosen: see googleKeyInUse. */
 export const readGoogleKey = (host: HostApi): string | null => host.getSetting(GOOGLE_KEY) || null;
+
+// ---- which map Settings > Serviceability shows (and which place search goes with it)
+export type MapStyle = 'osm' | 'google-road' | 'google-satellite' | 'google-hybrid';
+const MAP_STYLES: Array<{ id: MapStyle; label: string; google: boolean }> = [
+  { id: 'osm', label: 'Free map (OpenStreetMap)', google: false },
+  { id: 'google-road', label: 'Google Maps', google: true },
+  { id: 'google-satellite', label: 'Google satellite', google: true },
+  { id: 'google-hybrid', label: 'Google satellite with roads', google: true },
+];
+const MAP_STYLE = 'ods_map_style';
+/** The chosen map; the free map when nothing is chosen, or a Google map was chosen and the key was removed since. */
+export function readMapStyle(host: HostApi): MapStyle {
+  const s = MAP_STYLES.find((m) => m.id === host.getSetting(MAP_STYLE));
+  return s && (!s.google || readGoogleKey(host)) ? s.id : 'osm';
+}
+/** The key, while a Google map is chosen (Google map pictures and place search); null = the free map and free search. */
+export const googleKeyInUse = (host: HostApi): string | null => (readMapStyle(host) === 'osm' ? null : readGoogleKey(host));
+export interface MapView { style: MapStyle; styles: Array<{ id: MapStyle; label: string; google: boolean; available: boolean }>; google: ApiKeysView['google'] }
+export function mapView(host: HostApi): MapView {
+  const key = Boolean(readGoogleKey(host));
+  return { style: readMapStyle(host), styles: MAP_STYLES.map((m) => ({ ...m, available: !m.google || key })), google: apiKeysView(host).google };
+}
+/** Owner only. A Google map needs the key first. */
+export function saveMapStyle(host: HostApi, actor: Actor, style: unknown) {
+  host.assertPerm(actor, 'settings.write');
+  const s = MAP_STYLES.find((m) => m.id === style);
+  if (!s) throw new host.AppError('VALIDATION', 'Choose a map from the list.');
+  if (s.google && !readGoogleKey(host)) throw new host.AppError('VALIDATION', 'Save a Google Maps key first (below the map choice).');
+  host.setSetting(MAP_STYLE, s.id);
+  host.audit(host.ctx, actor.userId, 'ods.map_style', 'settings', MAP_STYLE, { style: s.id });
+}
 /** What screens see: never the key itself. */
 export interface ApiKeysView { google: { set: boolean; hint: string | null } }
 export function apiKeysView(host: HostApi): ApiKeysView {

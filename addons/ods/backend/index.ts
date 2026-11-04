@@ -1,7 +1,7 @@
 import type { HostApi } from '../../../src/addons/host.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
 import { REJECT_REASONS } from '../../../contract/src/types.ts';
-import type { RejectReason } from '../../../contract/src/types.ts';
+import type { PlatformAction, RejectReason } from '../../../contract/src/types.ts';
 import { readOnlineConfig, saveOnlineConfig } from './onlineConfig.ts';
 import type { OnlineInput } from './onlineConfig.ts';
 import { readServiceability, saveServiceability } from './serviceability.ts';
@@ -10,7 +10,8 @@ import { makePlaces } from './places.ts';
 import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
-import { MIGRATIONS, apiKeysView, readFeeTaxGroup, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
+import { readPrintOnAccept, savePrintOnAccept } from './store.ts';
+import { MIGRATIONS, apiKeysView, mapView, readFeeTaxGroup, saveMapStyle, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
 export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: ConnectorOptions } = {}): Connector {
@@ -50,11 +51,17 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
   host.route('POST', '/menu-sync/now', {}, async (c) => {
     host.assertPerm(c.actor, 'settings.write');
     if (!conn.link().paired) throw new host.AppError('NOT_CONNECTED', 'Connect this POS to the order hub first (Order hub, above).', 409);
-    try { await conn.publish(true); } catch (e) { throw new host.AppError('SYNC_FAILED', `The menu could not be sent: ${(e as Error).message}. Check the internet connection.`, 503); }
-    return { publishedAt: readPublishedAt(host) };
+    // everything again: the menu and every photo, whatever was sent before
+    let sent: { items: number; photos: number } | null;
+    try { sent = await conn.publish(true, true); } catch (e) { throw new host.AppError('SYNC_FAILED', `The menu could not be sent: ${(e as Error).message}. Check the internet connection.`, 503); }
+    return { publishedAt: readPublishedAt(host), items: sent?.items ?? 0, photos: sent?.photos ?? 0 };
   });
 
-  // ---- API keys (owner only; the keys never leave the POS backend)
+  // ---- which map Serviceability shows (everyone who sees Serviceability; the owner chooses)
+  host.route('GET', '/map', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...mapView(host), maps: mapAttribution(host) }; });
+  host.route('PUT', '/map', {}, (c) => { saveMapStyle(host, c.actor, body(c).style); return { ...mapView(host), maps: mapAttribution(host) }; });
+
+  // ---- API keys (owner only, in Serviceability > Map; the keys never leave the POS backend)
   host.route('GET', '/api-keys', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return apiKeysView(host); });
   host.route('PUT', '/api-keys', {}, (c) => { const b = body(c); if ('google' in b) saveGoogleKey(host, c.actor, b.google); return apiKeysView(host); });
   host.route('POST', '/api-keys/test', {}, async (c) => {
@@ -64,6 +71,12 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     return { search, map };
   });
   host.route('GET', '/tax-groups', {}, () => host.billing.menu(host.ctx).taxGroups);
+  // printing: on accepting, and the ODS's Bill and KOT buttons
+  host.route('GET', '/print-options', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readPrintOnAccept(host), buttons: Boolean(host.printing) }; });
+  host.route('PUT', '/print-options', {}, (c) => ({ ...savePrintOnAccept(host, c.actor, body(c)), buttons: Boolean(host.printing) }));
+  for (const what of ['bill', 'kot'] as const) {
+    host.route('POST', `/orders/:id/print-${what}`, {}, (c) => conn.print(c.actor, c.params.id!, what, c.requestId, body(c).override as { userId: string; pin: string } | undefined));
+  }
 
   // ---- order hub
   host.route('GET', '/hub', {}, () => conn.link());
@@ -102,6 +115,8 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     const rider = b.rider && typeof b.rider === 'object' ? { name: String((b.rider as Record<string, unknown>).name ?? '').trim().slice(0, 60), phone: String((b.rider as Record<string, unknown>).phone ?? '').trim().slice(0, 15) || null } : undefined;
     return conn.step(c.actor, c.params.id!, to, { rider, reasonText: typeof b.reasonText === 'string' ? b.reasonText.slice(0, 200) : undefined, override: b.override as { userId: string; pin: string } | undefined });
   });
+  // Swiggy / Zomato: items out of stock, the customer's number, another rider, rider check
+  host.route('POST', '/orders/:id/platform-action', {}, (c) => conn.platformAction(c.actor, c.params.id!, body(c) as unknown as PlatformAction, c.requestId));
 
   // ---- map
   host.route('GET', '/tiles/:z/:x/:y', { auth: false }, async (c) => { // <img> tags cannot sign in; these are public map pictures

@@ -28,6 +28,39 @@ export interface PlaceOrderRequest {
   expectedTotal: number;
 }
 
+/** A Swiggy or Zomato order (through UrbanPiper): what the platform says about it. Missing on the store's own app and website orders. */
+export interface ExternalOrder {
+  platform: 'swiggy' | 'zomato';
+  /** The platform's own order number (what its rider and the customer quote). */
+  orderId: string;
+  /** Who delivers: the platform's riders, or the store's own (self-delivery). */
+  deliveredBy: 'platform' | 'store';
+  /** The OTP the platform's rider gives at pickup, when the platform sends one. */
+  otp: string | null;
+  /** What the platform charged the customer (paise), with its own discounts and charges. */
+  platformTotal: number;
+  charges: Array<{ title: string; amount: number }>;
+  discounts: Array<{ title: string; amount: number; byStore: boolean }>;
+  /** Things the store should know before accepting (an item not on the POS menu, cash the rider collects, ...). */
+  notes: string[];
+  /** The platform rider's progress as the platform words it ("Assigned", "At store", ...); set by the POS from order.rider events. */
+  riderStatus?: string | null;
+  /** Zomato bulk order: the store may ask for an extra rider. */
+  bulk?: boolean;
+}
+
+/** What the store can ask the platform about one of its orders (POST /v1/pos/orders/{id}/platform-action). */
+export type PlatformAction =
+  /** Swiggy, before the food is ready: these items ran out. allowEdit: Swiggy asks the customer to change the order (the
+   * store gets the customer's masked number and a PIN to call); false: the order is cancelled. */
+  | { action: 'items_out_of_stock'; itemIds: string[]; allowEdit: boolean }
+  /** Zomato bulk orders: one more rider. */
+  | { action: 'extra_rider' }
+  /** Zomato: the customer's (masked) phone number. */
+  | { action: 'customer_phone' }
+  /** Zomato rider safety check: body temperature (Fahrenheit) and mask. riderPhone: the store's own rider only. */
+  | { action: 'rider_check'; temperatureF: number; wearingMask: boolean; riderPhone?: string | null };
+
 export interface OrderLine { itemId: string; name: string; qtyMilli: number; unitPrice: number; modifiers: Array<{ id: string; name: string; price: number }>; note: string | null; lineTotal: number }
 
 /** An order as the hub stores it and sends it to the POS. */
@@ -63,14 +96,20 @@ export interface Order {
   posBillNo: string | null;
   rejectReason: RejectReason | null;
   reasonText: string | null;
+  /** Swiggy / Zomato orders only. */
+  external?: ExternalOrder | null;
 }
 
 /** Events the hub pushes down the POS's SSE stream (GET /v1/pos/events). `seq` is the SSE event id; the POS resumes with Last-Event-ID. */
 export type PosEvent =
   | { seq: number; type: 'order.created'; at: number; order: Order }
-  | { seq: number; type: 'order.cancelled'; at: number; orderId: string; by: 'customer'; reasonText: string | null }
+  | { seq: number; type: 'order.cancelled'; at: number; orderId: string; by: 'customer' | 'aggregator'; reasonText: string | null }
   | { seq: number; type: 'order.auto_rejected'; at: number; orderId: string }
-  | { seq: number; type: 'order.updated'; at: number; orderId: string; state: OrderState; by: 'pos' };
+  | { seq: number; type: 'order.updated'; at: number; orderId: string; state: OrderState; by: 'pos' | 'aggregator' }
+  /** Swiggy / Zomato: their rider's details and progress (assigned, at the store, out for delivery, ...). */
+  | { seq: number; type: 'order.rider'; at: number; orderId: string; rider: Rider | null; riderStatus: string | null }
+  /** Swiggy / Zomato: something the store should read on the order (the customer's number, a refused request, ...). */
+  | { seq: number; type: 'order.notice'; at: number; orderId: string; text: string };
 
 /** Events the hub pushes to the customer app (GET /v1/orders/{id}/events). */
 export type CustomerEvent = { seq: number; type: 'order.state'; at: number; orderId: string; state: OrderState; label: string; etaMinutes: number | null; rider: Rider | null };
