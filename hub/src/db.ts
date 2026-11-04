@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS sync_event (
   business_date TEXT, created_at TEXT NOT NULL, received_at INTEGER NOT NULL, PRIMARY KEY (store_id, stream_id, seq)
 );
 CREATE INDEX IF NOT EXISTS sync_event_day ON sync_event(store_id, business_date);
+-- website builder sign-ins (src/site.ts): one row per signed-in browser, 30 days; a new editor password ends them all
+CREATE TABLE IF NOT EXISTS site_session (token_hash TEXT PRIMARY KEY, store_id TEXT NOT NULL REFERENCES store(id), expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS store_licence (store_id TEXT PRIMARY KEY REFERENCES store(id), licence_key TEXT NOT NULL, updated_at INTEGER NOT NULL);
 `;
 
@@ -91,7 +93,11 @@ export function openHubDb(path: string): Db {
   // columns added after the first release (CREATE TABLE IF NOT EXISTS does not add them to an existing database)
   const storeCols = new Set((db.prepare('PRAGMA table_info(store)').all() as Array<{ name: string }>).map((c) => c.name));
   if (!storeCols.has('paused_reason')) db.exec('ALTER TABLE store ADD COLUMN paused_reason TEXT'); // set: paused by the hub admin
-  if (!storeCols.has('website_json')) db.exec('ALTER TABLE store ADD COLUMN website_json TEXT'); // website settings (src/website.ts)
+  // the store's website design (src/site.ts): website_json is the published copy, site_draft_json what the builder saved
+  if (!storeCols.has('website_json')) db.exec('ALTER TABLE store ADD COLUMN website_json TEXT');
+  for (const [col, type] of [['site_draft_json', 'TEXT'], ['site_published_at', 'INTEGER'], ['site_draft_at', 'INTEGER'], ['site_password_hash', 'TEXT']]) {
+    if (!storeCols.has(col!)) db.exec(`ALTER TABLE store ADD COLUMN ${col} ${type}`);
+  }
   return db;
 }
 

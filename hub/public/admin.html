@@ -169,7 +169,7 @@
   const keyStore = { get: () => { try { return sessionStorage.getItem('hubAdminKey') || ''; } catch { return ''; } },
     set: (v) => { try { v ? sessionStorage.setItem('hubAdminKey', v) : sessionStorage.removeItem('hubAdminKey'); } catch { /* private window */ } } };
   let key = keyStore.get(), overview = null, timer = null, settingsDirty = false;
-  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false, up: new Map(), licence: new Map() };
+  const ui = { orderStore: '', orderStatus: 'open', expanded: new Set(), links: new Map(), pausing: false, up: new Map(), licence: new Map(), sitePasswords: new Map() };
 
   if (location.protocol === 'http:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) $('insecure').classList.remove('hidden');
 
@@ -236,7 +236,7 @@
     $('settings').classList.toggle('hidden', !signedIn || r.tab !== 'settings');
     for (const a of document.querySelectorAll('nav [data-tab]')) a.classList.toggle('on', a.dataset.tab === r.tab);
   }
-  window.addEventListener('hashchange', () => { ui.pausing = false; ui.websiteDirty = false; show(); refresh(); });
+  window.addEventListener('hashchange', () => { ui.pausing = false; show(); refresh(); });
 
   function signOut(msg) { key = ''; keyStore.set(''); overview = null; clearInterval(timer); timer = null; $('loginErr').textContent = msg || ''; show(); }
   const typing = () => document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.closest('#store, #storeList');
@@ -248,7 +248,7 @@
       renderWarnings(); fillStoreFilter();
       const r = route();
       if (r.tab === 'orders') await renderOrders();
-      else if (r.slug) { if (!typing() && !ui.websiteDirty) await renderStore(r.slug); }
+      else if (r.slug) { if (!typing()) await renderStore(r.slug); }
       else if (r.tab === 'stores') renderStores();
       if (!settingsDirty) fillSettings();
       if (r.tab === 'settings' && !(document.activeElement && document.activeElement.closest('#upAccount'))) await renderAccount();
@@ -388,8 +388,8 @@
         s.pausedReason ? h('div', { class: 'box' }, 'Paused. Customers see: ', h('b', {}, s.pausedReason)) : null,
         link ? linkBox(link, 'Connection link for this store:') : null),
 
-      h('h2', {}, 'Website'),
-      websiteForm(slug, s.website),
+      h('h2', {}, 'Website builder'),
+      siteEditorCard(slug, s.website),
 
       h('h2', {}, 'POS devices'),
       h('div', { class: 'card scroll' }, s.devices.length ? h('table', {},
@@ -411,57 +411,18 @@
       p ? h('p', { class: 'muted' }, `Set by the shop in its POS (Settings > Online orders and Serviceability) and sent here with menu version ${s.menuVersion}. Change them there.`) : null);
   }
 
-  // What the store's ordering website shows. Saved on the hub; the website picks it up on its next page load.
-  const WEB = [
-    ['heroTitle', 'Home page title', 'Freshly cooked, delivered hot', 80, 'Empty: the website’s own text (its js/config.js).'],
-    ['heroSubtitle', 'Home page subtitle', 'Made to order the moment the kitchen accepts.', 200, ''],
-    ['heroImage', 'Home page photo', 'https://example.com/photo.jpg', 500, 'A wide photo, https:// address. Empty: the first dish photo.'],
-    ['announcement', 'Announcement', 'Free delivery above ₹499 this week', 200, 'Shown above the header on every page. Empty: none.'],
-    ['about', 'About the restaurant', 'Home-style food cooked fresh every day.', 300, 'Shown in the footer.', true],
-    ['phone', 'Phone number', '+91 98765 43210', 20, 'Shown in the footer, tap to call.'],
-    ['address', 'Address', '12, 80 Feet Road, Kalyan Nagar, Bengaluru', 200, 'Shown in the footer and for pickup.'],
-  ];
-  function websiteForm(slug, w) {
-    const inputs = {}, errs = {};
-    const saved = h('span', { class: 'muted' }), err = h('div', { class: 'err' });
-    const dirty = () => { ui.websiteDirty = true; saved.textContent = ''; };
-    const field = ([k, label, ph, max, hint, area]) => {
-      inputs[k] = h(area ? 'textarea' : 'input', { id: `w-${k}`, maxlength: String(max), placeholder: ph, rows: area ? '2' : null, oninput: dirty });
-      inputs[k].value = w[k] || '';
-      errs[k] = h('div', { class: 'err' });
-      return h('div', {}, h('label', { for: `w-${k}` }, label), inputs[k], hint ? h('div', { class: 'hint' }, hint) : null, errs[k]);
+  // The website builder lives on the ordering website (/admin). Here only its sign-in: one password per store, shown once.
+  function siteEditorCard(slug, w) {
+    const err = h('div', { class: 'err' }), shown = ui.sitePasswords.get(slug);
+    const make = async () => {
+      if (w.editorPassword && !confirm('Make a new website editor password? The old one stops working and everyone signed in to the website builder is signed out.')) return;
+      try { ui.sitePasswords.set(slug, (await api('POST', `/v1/admin/stores/${encodeURIComponent(slug)}/site-password`, {})).password); renderStore(slug); } catch (e) { err.textContent = e.message; }
     };
-    // colour: a picker plus the code, and a way back to the website's own colour
-    inputs.brandColor = h('input', { id: 'w-brandColor', maxlength: '7', placeholder: 'Website default', style: 'flex:1', oninput: () => { dirty(); if (/^#[0-9a-f]{6}$/i.test(inputs.brandColor.value)) picker.value = inputs.brandColor.value; } });
-    inputs.brandColor.value = w.brandColor || '';
-    const picker = h('input', { type: 'color', 'aria-label': 'Pick the colour', style: 'width:48px;padding:2px;height:38px', oninput: () => { dirty(); inputs.brandColor.value = picker.value; } });
-    picker.value = w.brandColor || '#f5a85c';
-    errs.brandColor = h('div', { class: 'err' });
-    const color = h('div', {}, h('label', { for: 'w-brandColor' }, 'Main colour'),
-      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, picker, inputs.brandColor, h('button', { type: 'button', onclick: () => { dirty(); inputs.brandColor.value = ''; } }, 'Default')),
-      h('div', { class: 'hint' }, 'Buttons and highlights. Pick a darker colour so white text stays readable.'), errs.brandColor);
-
-    const form = h('form', { onsubmit: async (ev) => {
-      ev.preventDefault();
-      err.textContent = ''; for (const e of Object.values(errs)) e.textContent = '';
-      const body = Object.fromEntries(Object.keys(inputs).map((k) => [k, inputs[k].value]));
-      try {
-        const { website } = await api('PUT', `/v1/admin/stores/${encodeURIComponent(slug)}/website`, body);
-        for (const k of Object.keys(inputs)) inputs[k].value = website[k];
-        ui.websiteDirty = false;
-        saved.textContent = 'Saved. The website shows it the next time a customer opens or reloads it.';
-      } catch (e) {
-        if (e.fields) for (const [k, m] of Object.entries(e.fields)) { if (errs[k]) errs[k].textContent = m; else err.textContent = m; }
-        else err.textContent = e.message;
-      }
-    } },
-      h('div', { class: 'grid' }, WEB.slice(0, 4).map(field)),
-      h('div', { class: 'grid' }, WEB.slice(4).map(field), color),
-      err,
-      h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Save website'), saved));
     return h('div', { class: 'card' },
-      h('p', { class: 'muted', style: 'margin:0' }, 'What this store’s ordering website shows. The menu, prices, photos and opening hours come from the POS.'),
-      form);
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'The shop designs its ordering website itself, in the website builder: open the website’s address with /admin at the end and sign in with this password. It works for this store only.'),
+      kv('Editor password', w.editorPassword ? chip('ok', 'Set') : chip('plain', 'Not set')), kv('Website last published', w.publishedAt ? when(w.publishedAt) : 'Never (the standard design)'),
+      shown ? h('div', { class: 'box' }, 'New password (shown only now; send it to the shop): ', h('b', { style: 'font-family:ui-monospace,Consolas,monospace;font-size:16px' }, shown)) : null,
+      h('div', { class: 'actions' }, h('button', { onclick: make }, w.editorPassword ? 'New editor password' : 'Make editor password')), err);
   }
 
   // ------------------------------------------------------------ DinePOS outlets: sales sent up, licence renewals down

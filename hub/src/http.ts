@@ -32,7 +32,7 @@ const json = (res: ServerResponse, status: number, body: unknown, cors = false) 
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(text), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...(cors ? CORS : {}) });
   res.end(text);
 };
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key, X-Order-Token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Max-Age': '600' };
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Idempotency-Key, X-Order-Token, X-Site-Token', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Max-Age': '600' };
 
 /** Requests per minute per IP and kind (simple fixed window). The limit is read on each request (admin settings). */
 function limiter(perMinute: () => number) {
@@ -74,6 +74,17 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   const up = o.urbanpiper ?? new UrbanPiper(hub);
   add('GET', '/health', () => ({ ok: true }));
 
+  // ---- website builder (the ordering website's /admin page): one store's editor password, then a token (X-Site-Token)
+  const siteLoginLimit = limiter(() => 10);
+  const siteToken = (c: Ctx) => (typeof c.req.headers['x-site-token'] === 'string' ? c.req.headers['x-site-token'] : undefined);
+  add('POST', '/v1/site/:slug/login', (c) => { siteLoginLimit(c.ip); return hub.siteLogin(c.params.slug!, (c.body as { password?: unknown } | null)?.password); }, { cors: true });
+  add('POST', '/v1/site/:slug/logout', (c) => hub.siteLogout(c.params.slug!, siteToken(c)), { cors: true });
+  add('GET', '/v1/site/:slug', (c) => hub.siteForEditor(c.params.slug!, siteToken(c)), { cors: true });
+  add('PUT', '/v1/site/:slug/draft', (c) => hub.saveSiteDraft(c.params.slug!, siteToken(c), (c.body as { site?: unknown } | null)?.site), { cors: true, maxBody: 256 * 1024 });
+  add('POST', '/v1/site/:slug/publish', (c) => hub.publishSite(c.params.slug!, siteToken(c)), { cors: true });
+  add('POST', '/v1/site/:slug/discard', (c) => hub.discardSiteDraft(c.params.slug!, siteToken(c)), { cors: true });
+  add('PUT', '/v1/site/:slug/images/:name', (c) => hub.putSiteImage(c.params.slug!, siteToken(c), c.params.name!, (c.body as { dataBase64?: unknown } | null)?.dataBase64), { cors: true, maxBody: 2_100_000 });
+
   // ---- admin
   // A connection link carries the hub address and a one-use pairing code: the shop pastes only this into its POS.
   const base = (c: Ctx) => (o.publicUrl ?? `${String(c.req.headers['x-forwarded-proto'] ?? 'http').split(',')[0]!.trim()}://${String(c.req.headers['x-forwarded-host'] ?? c.req.headers.host ?? 'localhost')}`).replace(/\/+$/, '');
@@ -88,7 +99,7 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('GET', '/v1/admin/stores/:slug/sales', (c) => { admin(c); return hub.sync.sales(hub.store({ slug: c.params.slug! }).id, Number(c.query.get('days') ?? 14)); });
   add('GET', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.licenceInfo(hub.store({ slug: c.params.slug! }).id); });
   add('PUT', '/v1/admin/stores/:slug/licence', (c) => { admin(c); return hub.sync.setLicence(hub.store({ slug: c.params.slug! }).id, (c.body as { key?: unknown } | null)?.key); });
-  add('PUT', '/v1/admin/stores/:slug/website', (c) => { admin(c); return { website: hub.saveWebsite(c.params.slug!, c.body) }; });
+  add('POST', '/v1/admin/stores/:slug/site-password', (c) => { admin(c); return hub.newSitePassword(c.params.slug!); });
   add('GET', '/v1/admin/stores/:slug/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.params.slug!, limit: Number(c.query.get('limit') ?? 50) }); });
   add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
 

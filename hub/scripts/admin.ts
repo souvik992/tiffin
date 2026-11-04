@@ -5,6 +5,7 @@
 // Links use HUB_PUBLIC_URL (the hub's https address), else http://localhost:<HUB_PORT>.
 //   npm run admin -- list
 //   npm run admin -- revoke-device <deviceId>
+//   npm run admin -- site-password <slug>                 -> a new password for the store's website builder (/admin)
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { Hub, HubError } from '../src/hub.ts';
@@ -29,8 +30,10 @@ try {
     }
   } else if (cmd === 'revoke-device' && a) {
     hub.revokeDevice(a); console.log(`Device ${a} can no longer connect.`);
+  } else if (cmd === 'site-password' && a) {
+    console.log(`Website builder password for ${a}: ${hub.newSitePassword(a).password}\n(The old one no longer works. Sign in at the website's address with /admin at the end.)`);
   } else {
-    console.log('Commands: create-store <slug> "<name>" | pairing-code <slug> | list | revoke-device <deviceId>');
+    console.log('Commands: create-store <slug> "<name>" | pairing-code <slug> | list | revoke-device <deviceId> | site-password <slug>');
     process.exitCode = 2;
   }
 } catch (e) {
