@@ -63,6 +63,11 @@ from one address are refused for the rest of the minute).
   time limit), channels, pickup and delivery, payments, pickup minimum and time, packaging charge, GST on charges,
   location, road factor, delivery bands, opening hours and menu by category. They are read-only here: the shop changes
   them in its POS, which sends them with the menu.
+- **Website** (on each store's page): what the store's ordering website shows: home page title, subtitle and photo,
+  an announcement above the header, "about" text, phone, address and main colour. Saved on the store
+  (`src/website.ts`, column `website_json`) and sent to the website with the store page (`website` in
+  `GET /v1/stores/<slug>`); the website shows it on its next page load. Empty fields fall back to the website's own
+  `js/config.js`.
 - **Add a store** to get a **connection link** (`<hub address>/connect/<code>`, Copy button). The shop pastes only this
   into its POS (Settings > Online orders > Order hub). It works once and for a limited time (Hub settings); make a new
   one from the store's page. Opened in a browser, the link only explains where to paste it.
@@ -77,7 +82,7 @@ from one address are refused for the rest of the minute).
 The admin calls (`X-Admin-Key` header): `GET /v1/admin/overview`, `PUT /v1/admin/settings`, `POST /v1/admin/stores`
 and `POST /v1/admin/stores/<slug>/pairing-code` (both return `connectUrl`), `GET /v1/admin/stores/<slug>`,
 `GET /v1/admin/orders?store=<slug>&status=open|all&limit=`, `GET /v1/admin/stores/<slug>/orders`,
-`PUT /v1/admin/stores/<slug>/pause` (`{ paused, reason }`), `POST /v1/admin/devices/<id>/revoke`.
+`PUT /v1/admin/stores/<slug>/pause` (`{ paused, reason }`), `PUT /v1/admin/stores/<slug>/website` (any of the website fields), `POST /v1/admin/devices/<id>/revoke`.
 
 ### Stores and pairing from the command line
 

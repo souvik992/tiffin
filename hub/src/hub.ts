@@ -15,6 +15,8 @@ import { priceOrder } from '../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 import { checkSettings, SETTING_DEFAULTS } from './settings.ts';
 import type { HubSettings } from './settings.ts';
+import { checkWebsite, readWebsite } from './website.ts';
+import type { WebsiteSettings } from './website.ts';
 import { osrmRoadKm } from './routing.ts';
 
 /**
@@ -50,7 +52,7 @@ export interface HubOptions {
 }
 export interface DeviceRef { deviceId: string; storeId: string; slug: string }
 
-export interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null }
+export interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null; website_json: string | null }
 interface OrderRow { id: string; store_id: string; number: string; state: OrderState; data_json: string; access_hash: string; accept_by: number | null }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{2,40}$/;
@@ -194,6 +196,17 @@ export class Hub {
     return { slug, pausedReason: paused ? text : null };
   }
 
+  /** Changes some of a store's website settings (the others stay); empty text clears one. */
+  saveWebsite(slug: string, input: unknown): WebsiteSettings {
+    const s = this.store({ slug });
+    const c = checkWebsite(input);
+    if (!c.ok) throw new HubError('VALIDATION', Object.values(c.errors)[0]!, 400, { fields: c.errors });
+    const next = { ...readWebsite(s.website_json), ...c.value };
+    exec(this.db, 'UPDATE store SET website_json = ? WHERE id = ?', JSON.stringify(next), s.id);
+    this.opts.log?.info('website settings changed', { slug, fields: Object.keys(c.value) });
+    return next;
+  }
+
   private storeSummary(s: StoreRow) {
     const dayAgo = this.now() - 86_400_000;
     const m = this.menu(s);
@@ -225,6 +238,7 @@ export class Hub {
     for (const i of m?.items ?? []) perCategory.set(i.categoryId, (perCategory.get(i.categoryId) ?? 0) + 1);
     return {
       ...this.storeSummary(s),
+      website: readWebsite(s.website_json),
       published: m ? {
         options: m.options, serviceability: m.serviceability, feeTax: m.feeTax, roundToRupee: m.roundToRupee,
         menu: { items: m.items.length, unavailable: m.items.filter((i) => !i.available).length, categories: [...[...m.categories].sort((a, b) => a.sort - b.sort).map((c) => ({ name: c.name, items: perCategory.get(c.id) ?? 0 })), ...(perCategory.has(null) ? [{ name: 'No category', items: perCategory.get(null)! }] : [])] },
@@ -394,10 +408,11 @@ export class Hub {
     const full = this.menu(s);
     const m = full ? this.forChannel(full, channel) : null;
     const a = this.availability(s, m);
-    if (!m) return { slug: s.slug, name: s.name, open: false, reason: a.reason, menu: null };
+    const website = readWebsite(s.website_json);
+    if (!m) return { slug: s.slug, name: s.name, open: false, reason: a.reason, menu: null, website };
     const sv = m.serviceability;
     return {
-      slug: s.slug, name: s.name, open: a.open, reason: a.reason,
+      slug: s.slug, name: s.name, open: a.open, reason: a.reason, website,
       menu: { version: m.version, categories: m.categories, items: m.items.filter((i) => i.available).map(({ rateBp: _r, cessBp: _c, priceIncludesTax: _p, channels: _ch, prices: _pr, ...i }) => i), modifierGroups: m.modifierGroups },
       fulfilment: m.options.fulfilment, payments: { cod: m.options.payments.cod, online: m.options.payments.online && Boolean(this.opts.onlinePayments) },
       delivery: { location: sv.location ? { lat: sv.location.lat, lng: sv.location.lng } : null, zones: sv.zones, packagingFee: sv.packagingFee },

@@ -278,3 +278,32 @@ test('hub admin: order attempts that fail before an order exists (store offline,
     await s.close();
   } finally { await h.close(); cleanup(h.dir); }
 });
+
+test('hub admin: website settings per store are checked, saved, kept across restarts and sent to the website with the store page', async () => {
+  let h = await startHub();
+  try {
+    await h.call('POST', '/v1/admin/stores', { admin: true, body: { slug: 'demo-burger', name: 'Demo Burger Hub' } });
+    // before the POS publishes a menu, the website still gets its (empty) settings
+    assert.deepEqual((await h.call('GET', '/v1/stores/demo-burger')).json.website, { heroTitle: '', heroSubtitle: '', heroImage: '', about: '', phone: '', address: '', announcement: '', brandColor: '' });
+    assert.equal((await h.call('PUT', '/v1/admin/stores/demo-burger/website', { body: { heroTitle: 'x' } })).status, 403);
+    const bad = await h.call('PUT', '/v1/admin/stores/demo-burger/website', { admin: true, body: { heroImage: 'http://x.com/a.jpg', phone: 'call me', brandColor: 'orange', colour: '#fff', heroTitle: 'y'.repeat(81) } });
+    assert.equal(bad.status, 400);
+    assert.deepEqual(Object.keys(bad.json.error.details.fields).sort(), ['brandColor', 'colour', 'heroImage', 'heroTitle', 'phone']);
+    assert.equal((await h.call('PUT', '/v1/admin/stores/nope/website', { admin: true, body: { heroTitle: 'x' } })).status, 404);
+
+    const saved = await h.call('PUT', '/v1/admin/stores/demo-burger/website', { admin: true, body: { heroTitle: '  Hot  biryani ', phone: '+91 98765 43210', brandColor: '#EA580C', heroImage: 'https://example.com/hero.jpg', announcement: 'Closed on Diwali' } });
+    assert.equal(saved.status, 200);
+    assert.deepEqual([saved.json.website.heroTitle, saved.json.website.brandColor, saved.json.website.about], ['Hot biryani', '#ea580c', '']);
+    // a partial update keeps the other fields; empty clears one
+    await h.call('PUT', '/v1/admin/stores/demo-burger/website', { admin: true, body: { about: 'Since 1998', announcement: '' } });
+    h = await h.restart();
+    const site = (await h.call('GET', '/v1/stores/demo-burger')).json.website;
+    assert.deepEqual([site.heroTitle, site.phone, site.heroImage, site.about, site.announcement], ['Hot biryani', '+91 98765 43210', 'https://example.com/hero.jpg', 'Since 1998', '']);
+    assert.equal((await h.call('GET', '/v1/admin/stores/demo-burger', { admin: true })).json.website.about, 'Since 1998');
+    // with a published menu too
+    const code = (await h.call('POST', '/v1/admin/stores/demo-burger/pairing-code', { admin: true })).json.pairingCode;
+    const key = (await h.call('POST', '/v1/pos/pair', { body: { code, deviceName: 'Counter 1' } })).json.deviceKey as string;
+    await h.call('PUT', '/v1/pos/menu', { key, body: menu() });
+    assert.equal((await h.call('GET', '/v1/stores/demo-burger')).json.website.heroTitle, 'Hot biryani');
+  } finally { await h.close(); cleanup(h.dir); }
+});
