@@ -63,11 +63,9 @@ from one address are refused for the rest of the minute).
   time limit), channels, pickup and delivery, payments, pickup minimum and time, packaging charge, GST on charges,
   location, road factor, delivery bands, opening hours and menu by category. They are read-only here: the shop changes
   them in its POS, which sends them with the menu.
-- **Website** (on each store's page): what the store's ordering website shows: home page title, subtitle and photo,
-  an announcement above the header, "about" text, phone, address and main colour. Saved on the store
-  (`src/website.ts`, column `website_json`) and sent to the website with the store page (`website` in
-  `GET /v1/stores/<slug>`); the website shows it on its next page load. Empty fields fall back to the website's own
-  `js/config.js`.
+- **Website builder password** (on each store's page): the store designs its own ordering website in the website
+  builder (the website's `/admin` page). Here you only make its password (shown once; a new one signs every builder
+  out), and see when the website was last published. Also `npm run admin -- site-password <slug>`.
 - **Add a store** to get a **connection link** (`<hub address>/connect/<code>`, Copy button). The shop pastes only this
   into its POS (Settings > Online orders > Order hub). It works once and for a limited time (Hub settings); make a new
   one from the store's page. Opened in a browser, the link only explains where to paste it.
@@ -82,7 +80,7 @@ from one address are refused for the rest of the minute).
 The admin calls (`X-Admin-Key` header): `GET /v1/admin/overview`, `PUT /v1/admin/settings`, `POST /v1/admin/stores`
 and `POST /v1/admin/stores/<slug>/pairing-code` (both return `connectUrl`), `GET /v1/admin/stores/<slug>`,
 `GET /v1/admin/orders?store=<slug>&status=open|all&limit=`, `GET /v1/admin/stores/<slug>/orders`,
-`PUT /v1/admin/stores/<slug>/pause` (`{ paused, reason }`), `PUT /v1/admin/stores/<slug>/website` (any of the website fields), `POST /v1/admin/devices/<id>/revoke`.
+`PUT /v1/admin/stores/<slug>/pause` (`{ paused, reason }`), `POST /v1/admin/stores/<slug>/site-password` (a new website builder password), `POST /v1/admin/devices/<id>/revoke`.
 
 ### Stores and pairing from the command line
 
@@ -202,3 +200,22 @@ See `docs/ONLINE_ORDERS_PLAN.md` for the failure cases (F1 to F13).
 - Admin accounts: one shared admin key, no per-person logins or audit log.
 
 Tests: `npm test` (from `hub/`) or `node --test --test-concurrency=1 hub/test/*.test.ts` from the repo root.
+
+## Website builder
+
+The ordering website's `/admin` page is a website builder: the shop signs in with its **website editor password**
+(made on the admin page or with `npm run admin -- site-password <slug>`; it works for that store only) and designs the
+website beside a live preview: theme (colours, fonts, corners, buttons, header; ready-made looks), logo, tab icon,
+Google title and description, share picture, contact and social links, how dishes show (cards or list, photos,
+descriptions, veg marks, category buttons), an announcement bar, and the home page as sections it can add, reorder,
+hide and edit: hero, featured dishes, menu (always one), about, gallery, reviews, opening hours, contact and map, FAQ,
+text. Photos are uploaded to the hub (made smaller in the browser first). Changes are saved as a **draft**; **Publish**
+makes them live (customers get the design with the store, `site` in `GET /v1/stores/<slug>`). The menu, prices, item
+photos and opening hours still come from the POS.
+
+Every saved design is checked field by field (`src/site.ts`): unknown fields and wrong values are refused, and a broken
+saved design falls back to the standard one. Calls (CORS, `X-Site-Token` from the sign-in, 30 days):
+`POST /v1/site/<slug>/login` (`{ password }`, 10 per minute per address), `POST /v1/site/<slug>/logout`,
+`GET /v1/site/<slug>` (draft, published, unpublished), `PUT /v1/site/<slug>/draft` (`{ site }`),
+`POST /v1/site/<slug>/publish`, `POST /v1/site/<slug>/discard`, `PUT /v1/site/<slug>/images/<sha256>.<jpg|png|webp>`
+(`{ dataBase64 }`, the same checks as POS menu photos; the design refers to it as `hub:<name>`).

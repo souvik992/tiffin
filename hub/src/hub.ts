@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { exec, hash, many, one, openHubDb, tx } from './db.ts';
 import { BackupStore } from './backups.ts';
@@ -15,8 +15,7 @@ import { priceOrder } from '../../contract/src/menu.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 import { checkSettings, SETTING_DEFAULTS } from './settings.ts';
 import type { HubSettings } from './settings.ts';
-import { checkWebsite, readWebsite } from './website.ts';
-import type { WebsiteSettings } from './website.ts';
+import { checkSite, readSite } from './site.ts';
 import { osrmRoadKm } from './routing.ts';
 
 /**
@@ -52,11 +51,14 @@ export interface HubOptions {
 }
 export interface DeviceRef { deviceId: string; storeId: string; slug: string }
 
-export interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null; website_json: string | null }
+export interface StoreRow { id: string; slug: string; name: string; menu_json: string | null; menu_version: number; accepting: number; accepting_reason: string | null; order_counter: number; last_seen_at: number | null; created_at: number; paused_reason: string | null;
+  website_json: string | null; site_draft_json: string | null; site_published_at: number | null; site_draft_at: number | null; site_password_hash: string | null }
 interface OrderRow { id: string; store_id: string; number: string; state: OrderState; data_json: string; access_hash: string; accept_by: number | null }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{2,40}$/;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** A website builder sign-in lasts 30 days. */
+const SITE_SESSION_MS = 30 * 86_400_000;
 /** Orders the store still has to act on (sent, being made, on the way). */
 const OPEN_STATES = "'SENT_TO_STORE','RECEIVED','ACCEPTED','PREPARING','READY','OUT_FOR_DELIVERY'";
 /** Admin page filters: which order states each one shows (failed and all also show failed order attempts). */
@@ -196,15 +198,82 @@ export class Hub {
     return { slug, pausedReason: paused ? text : null };
   }
 
-  /** Changes some of a store's website settings (the others stay); empty text clears one. */
-  saveWebsite(slug: string, input: unknown): WebsiteSettings {
+  // ---------------------------------------------------------------- website builder (src/site.ts, the website's /admin page)
+
+  /** A new website-editor password for one store, shown once. It signs out every builder of that store. */
+  newSitePassword(slug: string): { slug: string; password: string } {
     const s = this.store({ slug });
-    const c = checkWebsite(input);
+    const raw = Array.from({ length: 12 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join('');
+    tx(this.db, () => {
+      exec(this.db, 'UPDATE store SET site_password_hash = ? WHERE id = ?', hash(`site:${s.id}:${raw}`), s.id);
+      exec(this.db, 'DELETE FROM site_session WHERE store_id = ?', s.id);
+    });
+    this.opts.log?.info('website editor password set', { slug });
+    return { slug, password: `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}` };
+  }
+
+  siteLogin(slug: string, password: unknown) {
+    const s = this.store({ slug });
+    const raw = String(password ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const got = Buffer.from(hash(`site:${s.id}:${raw}`)), want = Buffer.from(s.site_password_hash ?? '');
+    if (!s.site_password_hash || got.length !== want.length || !timingSafeEqual(got, want)) throw new HubError('BAD_PASSWORD', 'That password is not right. Ask the hub admin for the website editor password.', 401);
+    const token = `tsw_${randomBytes(32).toString('base64url')}`, expiresAt = this.now() + SITE_SESSION_MS;
+    exec(this.db, 'DELETE FROM site_session WHERE expires_at < ?', this.now());
+    exec(this.db, 'INSERT INTO site_session (token_hash, store_id, expires_at, created_at) VALUES (?,?,?,?)', hash(token), s.id, expiresAt, this.now());
+    return { token, expiresAt, store: { slug: s.slug, name: s.name } };
+  }
+
+  siteLogout(slug: string, token: string | undefined) {
+    const s = this.siteStore(slug, token);
+    exec(this.db, 'DELETE FROM site_session WHERE token_hash = ? AND store_id = ?', hash(token!), s.id);
+    return { ok: true };
+  }
+
+  /** The store a builder sign-in belongs to; a token of another store, an ended or an expired one is refused. */
+  private siteStore(slug: string, token: string | undefined): StoreRow {
+    const s = this.store({ slug });
+    const row = token ? one<{ expires_at: number }>(this.db, 'SELECT expires_at FROM site_session WHERE token_hash = ? AND store_id = ?', hash(token), s.id) : undefined;
+    if (!row || row.expires_at < this.now()) throw new HubError('UNAUTHENTICATED', 'Sign in to the website builder again.', 401);
+    return s;
+  }
+
+  private siteState(s: StoreRow) {
+    const published = readSite(s.website_json);
+    const draft = s.site_draft_json ? readSite(s.site_draft_json) : published;
+    return { store: { slug: s.slug, name: s.name }, draft, published, draftSavedAt: s.site_draft_at, publishedAt: s.site_published_at, unpublished: JSON.stringify(draft) !== JSON.stringify(published) };
+  }
+
+  siteForEditor(slug: string, token: string | undefined) { return this.siteState(this.siteStore(slug, token)); }
+
+  saveSiteDraft(slug: string, token: string | undefined, input: unknown) {
+    const s = this.siteStore(slug, token);
+    const c = checkSite(input);
     if (!c.ok) throw new HubError('VALIDATION', Object.values(c.errors)[0]!, 400, { fields: c.errors });
-    const next = { ...readWebsite(s.website_json), ...c.value };
-    exec(this.db, 'UPDATE store SET website_json = ? WHERE id = ?', JSON.stringify(next), s.id);
-    this.opts.log?.info('website settings changed', { slug, fields: Object.keys(c.value) });
-    return next;
+    exec(this.db, 'UPDATE store SET site_draft_json = ?, site_draft_at = ? WHERE id = ?', JSON.stringify(c.value), this.now(), s.id);
+    return this.siteState(this.store({ id: s.id }));
+  }
+
+  /** The draft goes live: customers see it on their next page load. */
+  publishSite(slug: string, token: string | undefined) {
+    const s = this.siteStore(slug, token);
+    const draft = s.site_draft_json ? readSite(s.site_draft_json) : readSite(s.website_json);
+    exec(this.db, 'UPDATE store SET website_json = ?, site_draft_json = NULL, site_published_at = ? WHERE id = ?', JSON.stringify(draft), this.now(), s.id);
+    this.opts.log?.info('website published', { slug });
+    return this.siteState(this.store({ id: s.id }));
+  }
+
+  /** Throws the draft away: the builder shows the published website again. */
+  discardSiteDraft(slug: string, token: string | undefined) {
+    const s = this.siteStore(slug, token);
+    exec(this.db, 'UPDATE store SET site_draft_json = NULL, site_draft_at = NULL WHERE id = ?', s.id);
+    return this.siteState(this.store({ id: s.id }));
+  }
+
+  /** A photo for the website (logo, hero, gallery), kept with the store's menu photos; the design refers to it as hub:<name>. */
+  putSiteImage(slug: string, token: string | undefined, name: string, dataBase64: unknown) {
+    const s = this.siteStore(slug, token);
+    this.saveImage(s.id, name, dataBase64);
+    return { ok: true, ref: `hub:${name}` };
   }
 
   private storeSummary(s: StoreRow) {
@@ -238,7 +307,7 @@ export class Hub {
     for (const i of m?.items ?? []) perCategory.set(i.categoryId, (perCategory.get(i.categoryId) ?? 0) + 1);
     return {
       ...this.storeSummary(s),
-      website: readWebsite(s.website_json),
+      website: { editorPassword: Boolean(s.site_password_hash), publishedAt: s.site_published_at },
       published: m ? {
         options: m.options, serviceability: m.serviceability, feeTax: m.feeTax, roundToRupee: m.roundToRupee,
         menu: { items: m.items.length, unavailable: m.items.filter((i) => !i.available).length, categories: [...[...m.categories].sort((a, b) => a.sort - b.sort).map((c) => ({ name: c.name, items: perCategory.get(c.id) ?? 0 })), ...(perCategory.has(null) ? [{ name: 'No category', items: perCategory.get(null)! }] : [])] },
@@ -344,16 +413,17 @@ export class Hub {
   }
 
   /** A menu photo from the POS. Its name is the SHA-256 of its bytes, so a wrong or damaged file is refused. */
-  putImage(dev: DeviceRef, name: string, dataBase64: unknown) {
+  putImage(dev: DeviceRef, name: string, dataBase64: unknown) { return this.saveImage(dev.storeId, name, dataBase64); }
+  private saveImage(storeId: string, name: string, dataBase64: unknown) {
     const m = /^([0-9a-f]{64})\.(jpg|png|webp)$/.exec(name);
     if (!m) throw new HubError('VALIDATION', 'Unknown photo name.');
     if (typeof dataBase64 !== 'string' || dataBase64.length > 2_000_000) throw new HubError('TOO_LARGE', 'The photo is too large.', 413);
     const bytes = Buffer.from(dataBase64, 'base64');
     if (createHash('sha256').update(bytes).digest('hex') !== m[1]) throw new HubError('VALIDATION', 'The photo does not match its name.');
-    const kind = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'jpg' : bytes.readUInt32BE(0) === 0x89504e47 ? 'png' : bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP' ? 'webp' : null;
+    const kind = bytes.length < 12 ? null : bytes[0] === 0xff && bytes[1] === 0xd8 ? 'jpg' : bytes.readUInt32BE(0) === 0x89504e47 ? 'png' : bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP' ? 'webp' : null;
     if (kind !== m[2]) throw new HubError('VALIDATION', 'This is not a JPG, PNG or WebP photo.');
-    if ((one<{ n: number }>(this.db, 'SELECT COUNT(*) AS n FROM image WHERE store_id = ?', dev.storeId)?.n ?? 0) >= 3000) throw new HubError('TOO_MANY', 'Too many photos for one store.', 409);
-    exec(this.db, 'INSERT OR IGNORE INTO image(store_id, name, type, bytes, created_at) VALUES (?,?,?,?,?)', dev.storeId, name, { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[kind], bytes, this.now());
+    if ((one<{ n: number }>(this.db, 'SELECT COUNT(*) AS n FROM image WHERE store_id = ?', storeId)?.n ?? 0) >= 3000) throw new HubError('TOO_MANY', 'Too many photos for one store.', 409);
+    exec(this.db, 'INSERT OR IGNORE INTO image(store_id, name, type, bytes, created_at) VALUES (?,?,?,?,?)', storeId, name, { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[kind], bytes, this.now());
     return { ok: true };
   }
 
@@ -408,11 +478,11 @@ export class Hub {
     const full = this.menu(s);
     const m = full ? this.forChannel(full, channel) : null;
     const a = this.availability(s, m);
-    const website = readWebsite(s.website_json);
-    if (!m) return { slug: s.slug, name: s.name, open: false, reason: a.reason, menu: null, website };
+    const site = readSite(s.website_json); // the published website design
+    if (!m) return { slug: s.slug, name: s.name, open: false, reason: a.reason, menu: null, site };
     const sv = m.serviceability;
     return {
-      slug: s.slug, name: s.name, open: a.open, reason: a.reason, website,
+      slug: s.slug, name: s.name, open: a.open, reason: a.reason, site,
       menu: { version: m.version, categories: m.categories, items: m.items.filter((i) => i.available).map(({ rateBp: _r, cessBp: _c, priceIncludesTax: _p, channels: _ch, prices: _pr, ...i }) => i), modifierGroups: m.modifierGroups },
       fulfilment: m.options.fulfilment, payments: { cod: m.options.payments.cod, online: m.options.payments.online && Boolean(this.opts.onlinePayments) },
       delivery: { location: sv.location ? { lat: sv.location.lat, lng: sv.location.lng } : null, zones: sv.zones, packagingFee: sv.packagingFee },
