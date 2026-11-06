@@ -231,3 +231,16 @@ event stream as a `guest.request` event (no event number, never replayed). The P
 - If the POS does not answer within 15 s, the guest gets "did not answer in time" (504).
 - Limits: 240 requests a minute per address, and at most 40 waiting requests per store.
 - The page and its script and style files are kept for a minute.
+
+## DinePOS devices from anywhere (tunnel)
+
+DinePOS captain phones, kitchen screens and terminals can reach their outlet over mobile data through this hub
+(DinePOS "Settings > Cloud sync > Devices from anywhere"; the same relay as the separate DinePOS Cloud).
+
+- The outlet's main PC keeps one outgoing WebSocket to `/v1/pos/tunnel`, authorised with its device key. Requests and
+  live streams for `https://<store>.<hub domain>/` go down it (`src/tunnel.ts`; `src/ws.ts` is the small WebSocket
+  server). The main PC stays the outlet's only database; devices still need pairing and a staff PIN.
+- `GET /v1/pos/tunnel-info` gives the outlet its device address; `GET /v1/tls-ask` lets Caddy make a certificate on
+  demand for known stores only. `HUB_DEVICE_DOMAIN` sets the domain (default: the host of `HUB_PUBLIC_URL`).
+- Servers installed before this: run the one-line installer again (it keeps the key, settings and data). It adds the
+  `*.<domain>` site with on-demand HTTPS to the Caddyfile; `tiffin-hub-update` alone does not change Caddy.

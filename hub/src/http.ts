@@ -6,6 +6,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { Hub, HubError } from './hub.ts';
 import { UrbanPiper } from './urbanpiper.ts';
 import { GuestRelay, GUEST_CSP } from './relay.ts';
+import { REQUEST_HEADERS, Tunnels } from './tunnel.ts';
+import { acceptUpgrade, refuseUpgrade } from './ws.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 
 /**
@@ -24,6 +26,12 @@ export interface HttpOptions {
   urbanpiper?: UrbanPiper;
   /** DinePOS add-on guest pages relayed to the store's POS (P5-03). Not given: one is made here. */
   relay?: GuestRelay;
+  /**
+   * P6-02: devices reach an outlet at https://<store>.<deviceDomain>/ (default: the host of publicUrl). Each outlet's
+   * main PC keeps a tunnel open to /v1/pos/tunnel; requests and live streams for its address go through it.
+   */
+  deviceDomain?: string;
+  tunnels?: Tunnels;
 }
 
 interface Ctx { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; query: URLSearchParams; body: unknown; ip: string }
@@ -76,6 +84,56 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
 
   const up = o.urbanpiper ?? new UrbanPiper(hub);
   const relay = o.relay ?? new GuestRelay(hub);
+  const tunnels = o.tunnels ?? new Tunnels();
+  const deviceDomain = (o.deviceDomain ?? (o.publicUrl ? new URL(o.publicUrl).hostname : '')).toLowerCase();
+  const deviceScheme = o.publicUrl ? new URL(o.publicUrl).protocol : 'https:';
+  const deviceLimit = limiter(() => 1200);
+  /** The store whose device address this request is for (Host = <store>.<deviceDomain>), or null. */
+  const outletOf = (req: IncomingMessage): { id: string; slug: string } | null | 'unknown' => {
+    if (!deviceDomain) return null;
+    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    if (!host.endsWith(`.${deviceDomain}`)) return null;
+    const label = host.slice(0, -(deviceDomain.length + 1));
+    if (!label || label.includes('.')) return null;
+    try {
+      const st = hub.store({ slug: label });
+      return { id: st.id, slug: st.slug };
+    } catch {
+      return 'unknown';
+    }
+  };
+  const pickHeaders = (req: IncomingMessage) => {
+    const h: Record<string, string> = {};
+    for (const k of REQUEST_HEADERS) {
+      const v = req.headers[k];
+      if (typeof v === 'string') h[k] = v;
+    }
+    return h;
+  };
+  /** A device's request to its outlet, through the outlet's tunnel. */
+  const forwardToOutlet = async (req: IncomingMessage, res: ServerResponse, outlet: { id: string }) => {
+    try {
+      deviceLimit(req.socket.remoteAddress ?? '?');
+      let body: Buffer | null = null;
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const ch of req) {
+          size += (ch as Buffer).length;
+          if (size > 16 * 1024 * 1024) throw new HubError('TOO_LARGE', 'Request too large.', 413);
+          chunks.push(ch as Buffer);
+        }
+        body = Buffer.concat(chunks);
+      }
+      const a = await tunnels.request(outlet.id, { method: req.method ?? 'GET', path: req.url ?? '/', headers: pickHeaders(req), body });
+      res.writeHead(a.status, { ...a.headers, 'Content-Length': a.body.length });
+      res.end(req.method === 'HEAD' ? undefined : a.body);
+    } catch (e) {
+      if (res.headersSent) return void res.end();
+      const err = e instanceof HubError ? e : new HubError('INTERNAL', 'Something went wrong. Please try again.', 500);
+      json(res, err.status, { ok: false, error: { code: err.code, message: err.message } });
+    }
+  };
   // a guest page load is the page, its script and style, the menu, photos, then a status check every few seconds
   const guestLimit = limiter(() => 240);
   add('GET', '/health', () => ({ ok: true }));
@@ -170,6 +228,26 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
     const beat = setInterval(() => { try { c.res.write(': ping\n\n'); hub.streamOpened(dev.storeId); hub.streamClosed(dev.storeId); } catch { clearInterval(beat); } }, heartbeat);
     c.req.on('close', () => { clearInterval(beat); hub.bus.off('pos', onEvent); hub.bus.off('relay', onRelay); hub.streamClosed(dev.storeId); });
     return Symbol.for('handled');
+  });
+
+  // ---- P6-02: devices from anywhere
+  /** Caddy asks before making an HTTPS certificate on demand: only the cloud's own name and its stores' addresses. */
+  add('GET', '/v1/tls-ask', (c) => {
+    const d = String(c.query.get('domain') ?? '').toLowerCase();
+    if (deviceDomain && d === deviceDomain) return { ok: true };
+    if (deviceDomain && d.endsWith(`.${deviceDomain}`)) {
+      const label = d.slice(0, -(deviceDomain.length + 1));
+      if (label && !label.includes('.')) {
+        hub.store({ slug: label }); // NOT_FOUND for an unknown store
+        return { ok: true };
+      }
+    }
+    throw new HubError('NOT_FOUND', 'Not an address of this hub.', 404);
+  });
+  /** The address devices use for this outlet, and whether its tunnel is up. */
+  add('GET', '/v1/pos/tunnel-info', (c) => {
+    const dev = device(c);
+    return { deviceUrl: deviceDomain ? `${deviceScheme}//${dev.slug}.${deviceDomain}` : null, connected: tunnels.online(dev.storeId) };
   });
 
   // ---- DinePOS add-on guest pages, relayed to the store's POS (P5-03, src/relay.ts)
@@ -267,6 +345,10 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
 
   const server = http.createServer(async (req, res) => {
     let route: Route | undefined;
+    // P6-02: everything for https://<store>.<cloud>/ goes to that outlet's main PC
+    const outlet = outletOf(req);
+    if (outlet === 'unknown') return json(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'No DinePOS outlet at this address.' } });
+    if (outlet) return void forwardToOutlet(req, res, outlet);
     try {
       const url = new URL(req.url ?? '/', 'http://hub');
       let params: Record<string, string> = {};
@@ -299,6 +381,37 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
       json(res, 500, { error: { code: 'INTERNAL', message: 'Something went wrong. Please try again.' } }, route?.cors);
     }
   });
-  server.on('close', () => relay.close());
+  // P6-02: the outlet's tunnel (its main PC connects out), and devices' live streams through it
+  server.on('upgrade', (req: IncomingMessage, socket, head: Buffer) => {
+    try {
+      const path = new URL(req.url ?? '/', 'http://x').pathname;
+      const outlet = outletOf(req);
+      if (outlet === 'unknown') return refuseUpgrade(socket, 404, 'Not Found');
+      if (outlet) {
+        if (path !== '/v1/stream') return refuseUpgrade(socket, 404, 'Not Found');
+        const origin = req.headers.origin;
+        // a page of this outlet's own address, the DinePOS terminal app, or a native client (no Origin)
+        if (origin && origin !== 'app://dinepos' && origin.toLowerCase() !== `${deviceScheme}//${String(req.headers.host ?? '').toLowerCase()}`) return refuseUpgrade(socket, 403, 'Forbidden');
+        if (!tunnels.online(outlet.id)) return refuseUpgrade(socket, 503, 'Service Unavailable');
+        const conn = acceptUpgrade(req, socket, head, 1024 * 1024);
+        if (conn) tunnels.openStream(outlet.id, conn, pickHeaders(req));
+        return;
+      }
+      if (path === '/v1/pos/tunnel') {
+        const dev = hub.device(/^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1]);
+        const conn = acceptUpgrade(req, socket, head, 32 * 1024 * 1024);
+        if (conn) tunnels.attachOutlet(dev.storeId, conn);
+        return;
+      }
+      refuseUpgrade(socket, 404, 'Not Found');
+    } catch (e) {
+      refuseUpgrade(socket, e instanceof HubError ? e.status : 500, e instanceof HubError ? 'Refused' : 'Error');
+    }
+  });
+  server.on('close', () => {
+    relay.close();
+    tunnels.close();
+  });
   return server;
 }
+
