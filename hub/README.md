@@ -219,3 +219,15 @@ saved design falls back to the standard one. Calls (CORS, `X-Site-Token` from th
 `GET /v1/site/<slug>` (draft, published, unpublished), `PUT /v1/site/<slug>/draft` (`{ site }`),
 `POST /v1/site/<slug>/publish`, `POST /v1/site/<slug>/discard`, `PUT /v1/site/<slug>/images/<sha256>.<jpg|png|webp>`
 (`{ dataBase64 }`, the same checks as POS menu photos; the design refers to it as `hub:<name>`).
+
+## DinePOS add-on guest pages (relay)
+
+DinePOS add-ons such as Table QR can let guests on mobile data reach their pages through the hub:
+`<hub>/s/<store>/a/<addon>/...` (`src/relay.ts`). The hub stores nothing. It sends each request down the store's own POS
+event stream as a `guest.request` event (no event number, never replayed). The POS answers with
+`POST /v1/pos/relay/:id`, and the hub passes that answer back to the phone with a strict content policy.
+
+- If no POS is connected, the guest gets "The restaurant's system is not connected right now" (503).
+- If the POS does not answer within 15 s, the guest gets "did not answer in time" (504).
+- Limits: 240 requests a minute per address, and at most 40 waiting requests per store.
+- The page and its script and style files are kept for a minute.

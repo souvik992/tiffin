@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { Hub, HubError } from './hub.ts';
 import { UrbanPiper } from './urbanpiper.ts';
+import { GuestRelay, GUEST_CSP } from './relay.ts';
 import type { PublishedMenu } from '../../contract/src/menu.ts';
 
 /**
@@ -21,6 +22,8 @@ export interface HttpOptions {
   publicUrl?: string;
   /** Swiggy / Zomato through UrbanPiper. Not given: one is made here (it listens to the hub; make only one per hub). */
   urbanpiper?: UrbanPiper;
+  /** DinePOS add-on guest pages relayed to the store's POS (P5-03). Not given: one is made here. */
+  relay?: GuestRelay;
 }
 
 interface Ctx { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; query: URLSearchParams; body: unknown; ip: string }
@@ -72,6 +75,9 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   const heartbeat = o.heartbeatMs ?? 15_000;
 
   const up = o.urbanpiper ?? new UrbanPiper(hub);
+  const relay = o.relay ?? new GuestRelay(hub);
+  // a guest page load is the page, its script and style, the menu, photos, then a status check every few seconds
+  const guestLimit = limiter(() => 240);
   add('GET', '/health', () => ({ ok: true }));
 
   // ---- website builder (the ordering website's /admin page): one store's editor password, then a token (X-Site-Token)
@@ -159,10 +165,55 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
     for (let batch = hub.eventsSince(dev.storeId, last); batch.length; batch = hub.eventsSince(dev.storeId, last)) for (const ev of batch) send(ev);
     const onEvent = (storeId: string, ev: { seq: number; type: string }) => { if (storeId === dev.storeId) send(ev); };
     hub.bus.on('pos', onEvent);
+    const onRelay = (storeId: string, ev: unknown) => { if (storeId === dev.storeId) c.res.write(`event: guest.request\ndata: ${JSON.stringify(ev)}\n\n`); };
+    hub.bus.on('relay', onRelay);
     const beat = setInterval(() => { try { c.res.write(': ping\n\n'); hub.streamOpened(dev.storeId); hub.streamClosed(dev.storeId); } catch { clearInterval(beat); } }, heartbeat);
-    c.req.on('close', () => { clearInterval(beat); hub.bus.off('pos', onEvent); hub.streamClosed(dev.storeId); });
+    c.req.on('close', () => { clearInterval(beat); hub.bus.off('pos', onEvent); hub.bus.off('relay', onRelay); hub.streamClosed(dev.storeId); });
     return Symbol.for('handled');
   });
+
+  // ---- DinePOS add-on guest pages, relayed to the store's POS (P5-03, src/relay.ts)
+  add('POST', '/v1/pos/relay/:id', (c) => relay.answer(device(c).storeId, c.params.id!, c.body), { maxBody: 4 * 1024 * 1024 });
+  add('GET', '/s/:slug/a/:addon', (c) => {
+    c.res.writeHead(301, { Location: `/s/${encodeURIComponent(c.params.slug!)}/a/${encodeURIComponent(c.params.addon!)}/${c.query.toString() ? `?${c.query.toString()}` : ''}`, 'Cache-Control': 'no-store' });
+    c.res.end();
+    return Symbol.for('handled');
+  });
+  const guest = async (c: Ctx, rest: string[]) => {
+    guestLimit(c.ip);
+    const path = `/a/${c.params.addon!}/${rest.join('/')}`;
+    let a;
+    try {
+      a = await relay.forward(c.params.slug!, { method: c.req.method === 'POST' ? 'POST' : 'GET', path, query: c.query.toString(), body: c.req.method === 'POST' ? JSON.stringify(c.body ?? {}) : null, ip: c.ip });
+    } catch (e) {
+      // the guest page shows the server's message; a browser opening the page itself gets a short page
+      if (e instanceof HubError && !path.includes('/api/') && !/\.(js|css)$/.test(path)) {
+        const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not available</title><body style="font-family:system-ui;padding:2rem;text-align:center"><p style="font-size:2rem">&#127869;</p><p>${e.message.replace(/[<>&]/g, '')}</p></body>`;
+        c.res.writeHead(e.status, { ...PAGE_HEADERS, 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'Referrer-Policy': 'no-referrer' });
+        c.res.end(page);
+        return Symbol.for('handled');
+      }
+      throw e;
+    }
+    const bytes = Buffer.from(a.bodyBase64, 'base64');
+    c.res.writeHead(a.status, {
+      'Content-Type': a.contentType,
+      'Content-Length': bytes.length,
+      'Cache-Control': a.cacheControl ?? 'no-store',
+      'Content-Security-Policy': GUEST_CSP,
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+    });
+    c.res.end(bytes);
+    return Symbol.for('handled');
+  };
+  for (const method of ['GET', 'POST']) {
+    add(method, '/s/:slug/a/:addon/', (c) => guest(c, ['']));
+    add(method, '/s/:slug/a/:addon/:pa', (c) => guest(c, [c.params.pa!]));
+    add(method, '/s/:slug/a/:addon/:pa/:pb', (c) => guest(c, [c.params.pa!, c.params.pb!]));
+    add(method, '/s/:slug/a/:addon/:pa/:pb/:pc', (c) => guest(c, [c.params.pa!, c.params.pb!, c.params.pc!]));
+  }
 
   // ---- customer
   add('GET', '/v1/stores/:slug', (c) => hub.storePublic(c.params.slug!, c.query.get('channel') === 'app' ? 'app' : 'website'), { cors: true });
@@ -214,7 +265,7 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
     return Symbol.for('handled');
   });
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     let route: Route | undefined;
     try {
       const url = new URL(req.url ?? '/', 'http://hub');
@@ -248,4 +299,6 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
       json(res, 500, { error: { code: 'INTERNAL', message: 'Something went wrong. Please try again.' } }, route?.cors);
     }
   });
+  server.on('close', () => relay.close());
+  return server;
 }
