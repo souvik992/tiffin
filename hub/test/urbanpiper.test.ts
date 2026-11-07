@@ -527,3 +527,27 @@ test('urbanpiper: the Postman test-order collection (hub/postman) places a Swigg
     await pos.close();
   } finally { await h.close(); cleanup(h.dir); }
 });
+
+test('urbanpiper: with two outlets, each Swiggy/Zomato order goes to the outlet whose UrbanPiper store ID it carries', async () => {
+  const up = fakeUrbanPiper();
+  const h = await startHub(undefined, undefined, up.fetch);
+  try {
+    const { key: keyA, hook } = await setup(h); // demo-burger = TIFFIN-KN-1
+    const b = (await h.call('POST', '/v1/admin/stores', { admin: true, body: { slug: 'hebbal', name: 'Hebbal' } })).json;
+    const keyB = (await h.call('POST', '/v1/pos/pair', { body: { code: b.pairingCode, deviceName: 'Counter' } })).json.deviceKey as string;
+    await h.call('PUT', '/v1/pos/menu', { key: keyB, body: ONLINE_MENU({ storeName: 'Hebbal' }) });
+    await h.call('PUT', '/v1/pos/status', { key: keyB, body: { accepting: true } });
+    assert.equal((await h.call('PUT', '/v1/admin/stores/hebbal/urbanpiper', { admin: true, body: { ...DETAILS, locationRef: 'TIFFIN-HB-1', address: 'Hebbal' } })).status, 200);
+    const posA = posStream(h.base, keyA), posB = posStream(h.base, keyB);
+    assert.equal((await hook('18', relay({ id: 11, store: 'TIFFIN-HB-1' }))).status, 200);
+    assert.equal((await hook('18', relay({ id: 12, store: 'TIFFIN-KN-1', channel: 'zomato' }))).status, 200);
+    await posB.waitFor((e) => e.some((x) => x.type === 'order.created'));
+    await posA.waitFor((e) => e.some((x) => x.type === 'order.created'));
+    const ids = (pos: typeof posA) => pos.events.filter((x) => x.type === 'order.created').map((x) => (x.order as any).channel);
+    assert.deepEqual(ids(posB), ['swiggy'], 'the Hebbal order reached Hebbal only');
+    assert.deepEqual(ids(posA), ['zomato'], 'the Kalyan Nagar order reached Kalyan Nagar only');
+    // with two outlets linked, an order without a store ID cannot be guessed: refused
+    assert.equal((await hook('18', relay({ id: 13, store: '' }))).status, 422);
+    await posA.close(); await posB.close();
+  } finally { await h.close(); cleanup(h.dir); }
+});
