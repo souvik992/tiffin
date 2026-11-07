@@ -402,3 +402,20 @@ test('ODS connector: a delivery order on the ODS: on the way (rider) and deliver
     await until(() => pendingOutbox(s.host).length === 0, 'nothing left to send');
   } finally { await s.close(); }
 });
+
+test('ODS connector: when the hub holds a higher menu version (a restored backup, the store published from before), the POS catches up and its new settings arrive', async () => {
+  const s = await setup();
+  try {
+    await until(() => s.conn.link().state === 'connected', 'connected');
+    await s.conn.publish();
+    // the hub has version 50 from before, saved just now: the hub would call version 2 from this POS stale
+    s.hub.db.prepare("UPDATE store SET menu_version = 50, menu_at = ? WHERE slug = 'demo'").run(Date.now());
+    const evening = Object.fromEntries(['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ open: '12:00', close: '23:59' }]])) as Hours;
+    saveServiceability(s.host, s.env.owner, rid(), { ...DEFAULT_SERVICEABILITY, location: { lat: 13.0213, lng: 77.646, label: 'Store' }, hours: evening, roadFactor: 1 });
+    await s.conn.publish();
+    const m = s.hub.menu(s.hub.store({ slug: 'demo' }))!;
+    assert.deepEqual(m.serviceability.hours['0'], [{ open: '12:00', close: '23:59' }], 'the new opening times reached the hub');
+    assert.equal(m.version, 51);
+    assert.equal(s.host.getSetting('ods_menu_version'), '51');
+  } finally { await s.close(); }
+});

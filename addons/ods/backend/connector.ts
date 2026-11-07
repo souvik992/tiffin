@@ -267,9 +267,19 @@ export class Connector {
     };
     const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
     if (force || hash !== this.host.getSetting(MENU_HASH)) {
-      const version = Number(this.host.getSetting(MENU_VER) || 0) + 1;
-      const r = await this.f(this.url('/v1/pos/menu'), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ ...body, version }), signal: AbortSignal.timeout(15_000) });
-      if (!r.ok) throw new Error(`publishing the menu failed (${r.status})`);
+      const send = async (version: number) => {
+        const r = await this.f(this.url('/v1/pos/menu'), { method: 'PUT', headers: this.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ ...body, version }), signal: AbortSignal.timeout(15_000) });
+        if (!r.ok) throw new Error(`publishing the menu failed (${r.status})`);
+        return (await r.json().catch(() => ({}))) as { version?: number; stale?: boolean };
+      };
+      let version = Number(this.host.getSetting(MENU_VER) || 0) + 1;
+      const first = await send(version);
+      // the hub holds a higher version (a restored backup here, or this store published from before): catch up and send again
+      if (first.stale && Number.isSafeInteger(first.version)) {
+        version = first.version! + 1;
+        const again = await send(version);
+        if (again.stale) throw new Error('the hub kept an older menu; trying again shortly');
+      }
       this.host.setSetting(MENU_VER, String(version));
       this.host.setSetting(MENU_HASH, hash);
       savePublishedAt(this.host, Date.now());
