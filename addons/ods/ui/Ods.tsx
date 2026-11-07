@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff, Printer as PrinterIcon } from 'lucide-react';
 import { BASE, host } from './host.ts';
 import { setSoundOn } from './buzzer.ts';
-import { ChannelBadge } from './channels.tsx';
+import { ChannelBadge, channelStripe } from './channels.tsx';
 import { CHANNEL_LABELS, useOnlineConfig } from './online.ts';
 import type { Order } from '../../../contract/src/types.ts';
 import type { OrderState } from '../../../contract/src/order.ts';
@@ -118,10 +118,10 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
   const accept = (acceptPriceChange = false) => act(() => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/accept`, { prepMinutes: prep, acceptPriceChange }, newKey()), `${o.number} accepted: bill and kitchen ticket sent to the printer.`);
 
   return (
-    <article className={`rounded-xl border p-3 text-sm ${isNew ? 'border-primary bg-accent/40' : 'border-border bg-background'}`} aria-label={`Order ${o.number}`}>
+    <article className={`rounded-xl border border-l-4 p-3 text-sm ${isNew ? 'border-primary bg-accent/40' : 'border-border bg-background'} ${channelStripe(d.channel)}`} aria-label={`Order ${o.number} from ${d.channel}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <b className="text-base">{o.number}</b>
         <ChannelBadge channel={d.channel} size="md" />
+        <b className="text-base">{o.number}</b>
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{d.fulfilment === 'DELIVERY' ? `Delivery${d.distanceKm !== null ? ` · ${d.distanceKm} km` : ''}` : 'Pickup'}</span>
         <span className="ml-auto text-xs text-muted-foreground">{ago(d.placedAt)}</span>
       </div>
