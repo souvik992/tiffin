@@ -5,6 +5,8 @@ import type { TestHub } from './helpers.ts';
 import type { Fetcher } from '../src/urbanpiper.ts';
 import { buildMenu, refusalDetails, STAGING_URL, TOKEN_HEADER, upTimings } from '../src/urbanpiper.ts';
 import { one } from '../src/db.ts';
+import { readFileSync } from 'node:fs';
+const until = async (fn: () => boolean, what: string, ms = 3000) => { const end = Date.now() + ms; while (!fn()) { if (Date.now() > end) throw new Error(`timed out: ${what}`); await new Promise((r) => setTimeout(r, 20)); } };
 
 /** A stand-in UrbanPiper: records each call and answers like the docs (api-docs.urbanpiper.com/downstream). */
 function fakeUrbanPiper() {
@@ -493,4 +495,35 @@ test('urbanpiper: an empty Swiggy/Zomato menu says whether the channels are off 
   const b = buildMenu(none, ['swiggy', 'zomato'], NO_PACKAGING, () => null);
   assert.match(b.errors[0]!, /No menu items are chosen for Swiggy or Zomato/);
   assert.match(b.errors[0]!, /menu version 8/);
+});
+
+test('urbanpiper: the Postman test-order collection (hub/postman) places a Swiggy and a Zomato order and cancels the last one', async () => {
+  const up = fakeUrbanPiper();
+  const h = await startHub(undefined, undefined, up.fetch);
+  try {
+    const { key } = await setup(h);
+    const pos = posStream(h.base, key);
+    const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_account')!.webhook_token;
+    const col = JSON.parse(readFileSync(new URL('../postman/UrbanPiper-test-orders.postman_collection.json', import.meta.url), 'utf8'));
+    const vars: Record<string, string> = { hub: h.base, bizId: '324255', token, storeRef: 'TIFFIN-KN-1' };
+    const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? '');
+    const send = async (name: string, orderId?: number) => {
+      const it = col.item.find((x: { name: string }) => x.name.startsWith(name));
+      if (orderId) { vars.orderId = String(orderId); vars.nowMs = String(Date.now()); }
+      const headers = Object.fromEntries(it.request.header.map((x: { key: string; value: string }) => [x.key, fill(x.value)]));
+      const r = await fetch(fill(it.request.url), { method: 'POST', headers, body: fill(it.request.body.raw) });
+      return { status: r.status, json: await r.json() as any };
+    };
+    const sw = await send('Swiggy order', 1762500001);
+    assert.equal(sw.status, 200, JSON.stringify(sw.json));
+    assert.match(sw.json.order_ref_id, /^S-/);
+    const zo = await send('Zomato order', 1762500002);
+    assert.equal(zo.status, 200, JSON.stringify(zo.json));
+    assert.match(zo.json.order_ref_id, /^Z-/);
+    await pos.waitFor((e) => e.filter((x) => x.type === 'order.created').length === 2);
+    assert.equal((await send('Platform cancels')).status, 200);
+    const zid = (pos.events.find((x) => x.type === 'order.created' && (x.order as any).channel === 'zomato')!.order as any).id;
+    await until(() => h.hub.order(zid)?.state === 'CANCELLED', 'the Zomato order is cancelled');
+    await pos.close();
+  } finally { await h.close(); cleanup(h.dir); }
 });

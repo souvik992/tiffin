@@ -133,6 +133,7 @@ one sent; the sales view counts each bill and each business day once. The admin 
 ## Swiggy and Zomato (through UrbanPiper)
 
 Orders from Swiggy and Zomato come through UrbanPiper (`src/urbanpiper.ts`; their guide: https://api-docs.urbanpiper.com/downstream).
+Test orders without a platform: import `postman/UrbanPiper-test-orders.postman_collection.json` into Postman (Swiggy order, Zomato cash order, platform cancel; the webhook secret is read once on the server with `sudo sqlite3 /var/lib/tiffin-hub/hub.db "SELECT webhook_token FROM up_account"`).
 One UrbanPiper account serves all stores. On the admin page:
 
 1. **Hub settings > Swiggy & Zomato (UrbanPiper account)**: the test account (pos-int.urbanpiper.com) until UrbanPiper
