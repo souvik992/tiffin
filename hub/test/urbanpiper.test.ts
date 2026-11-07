@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { cleanup, menu, posStream, startHub } from './helpers.ts';
 import type { TestHub } from './helpers.ts';
 import type { Fetcher } from '../src/urbanpiper.ts';
-import { buildMenu, STAGING_URL, TOKEN_HEADER } from '../src/urbanpiper.ts';
+import { buildMenu, refusalDetails, STAGING_URL, TOKEN_HEADER, upTimings } from '../src/urbanpiper.ts';
 import { one } from '../src/db.ts';
 
 /** A stand-in UrbanPiper: records each call and answers like the docs (api-docs.urbanpiper.com/downstream). */
 function fakeUrbanPiper() {
   const calls: Array<{ method: string; path: string; headers: Record<string, string>; body: any }> = [];
-  const state = { webhooks: [] as any[], down: 0, status: new Map<string, number>(), refuseFeature: false };
+  const state = { webhooks: [] as any[], down: 0, status: new Map<string, number>(), refuseFeature: false, menuRefusal: null as unknown };
   const reply = (status: number, json: unknown) => ({ status, text: async () => JSON.stringify(json) });
   const fetch: Fetcher = async (url, init) => {
     const path = url.replace(STAGING_URL, '');
@@ -21,6 +21,7 @@ function fakeUrbanPiper() {
     if (path === '/external/api/v1/webhooks/' && init.method === 'POST') return reply(200, { status: 'success', message: 'webhooks has been successfully created.', webhook_id: 100 + calls.length });
     if (/^\/external\/api\/v1\/webhooks\/\d+\/$/.test(path)) return reply(200, { status: 'success' });
     if (path === '/external/api/v1/stores/') return reply(200, { status: 'success', message: 'Your request has been queued.', reference: 'ref-store-1' });
+    if (path.startsWith('/external/api/v1/inventory/locations/') && state.menuRefusal) return reply(400, state.menuRefusal);
     if (path.startsWith('/external/api/v1/inventory/locations/')) return reply(200, { status: 'success', message: 'Your request has been queued.', reference: 'ref-menu-1' });
     if (path === '/external/api/v1/aggregator/zomato/feature-action/') return state.refuseFeature ? reply(400, { status: 'error', message: 'not enabled for this outlet' }) : reply(200, { status: 'success', message: 'Your request has been enqueued to be dispatched to Zomato' });
     if (path === '/hub/api/v1/orders/items-oos/') return reply(200, { status: 'success', message: 'Your request has been queued.', reference_id: 'oos-1' });
@@ -437,5 +438,46 @@ test("urbanpiper: the store tells Swiggy which items ran out, asks Zomato for th
     await h.up.pump();
     await pos.waitFor((e) => e.some((x) => x.type === 'order.notice' && String(x.text).includes("customer's number asked for: UrbanPiper refused (400): not enabled for this outlet")));
     await pos.close();
+  } finally { await h.close(); cleanup(h.dir); }
+});
+
+test('urbanpiper: opening times past midnight are split at midnight (UrbanPiper wants each slot within one day)', () => {
+  const h = { '0': [{ open: '12:00', close: '11:59' }], '1': [{ open: '12:00', close: '11:59' }], '2': [{ open: '18:00', close: '00:00' }], '3': [{ open: '10:00', close: '15:00' }, { open: '19:00', close: '02:00' }], '4': [], '5': [], '6': [{ open: '20:00', close: '01:30' }] };
+  const t = upTimings(h);
+  const day = (d: string) => t.find((x) => x.day === d)?.slots;
+  assert.deepEqual(day('sunday'), [{ start_time: '00:00:00', end_time: '01:30:00' }, { start_time: '12:00:00', end_time: '23:59:59' }], 'Saturday night runs into Sunday');
+  assert.deepEqual(day('monday'), [{ start_time: '00:00:00', end_time: '11:59:00' }, { start_time: '12:00:00', end_time: '23:59:59' }]);
+  assert.deepEqual(day('tuesday'), [{ start_time: '00:00:00', end_time: '11:59:00' }, { start_time: '18:00:00', end_time: '23:59:59' }], 'closing at 00:00 ends the day');
+  assert.deepEqual(day('wednesday'), [{ start_time: '10:00:00', end_time: '15:00:00' }, { start_time: '19:00:00', end_time: '23:59:59' }]);
+  assert.deepEqual(day('thursday'), [{ start_time: '00:00:00', end_time: '02:00:00' }]);
+  assert.equal(day('friday'), undefined);
+  for (const d of t) for (const s of d.slots) assert.ok(s.start_time < s.end_time, `${d.day} ${s.start_time}-${s.end_time}`);
+  assert.deepEqual(upTimings({ '0': [{ open: '00:00', close: '23:59' }] }), [{ day: 'sunday', slots: [{ start_time: '00:00:00', end_time: '23:59:00' }] }]);
+});
+
+test('urbanpiper: a refusal shows the details UrbanPiper sent, not only its headline', () => {
+  const d = refusalDetails({ status: 'error', message: 'We noticed some errors in your POS menu. Please check the report for more details.', errors: { items: [{ ref_id: 'burger', error: 'Invalid food_type' }], taxes: ['Tax code CGST_2.5_P is not allowed'] } }, 'We noticed some errors in your POS menu. Please check the report for more details.');
+  assert.match(d, /burger/);
+  assert.match(d, /Invalid food_type/);
+  assert.match(d, /CGST_2\.5_P is not allowed/);
+  assert.doesNotMatch(d, /We noticed/);
+  assert.equal(refusalDetails({ status: 'error', message: 'x' }, 'x'), '');
+});
+
+test('urbanpiper: a menu UrbanPiper refuses shows why, and an unknown store says to send the store details first', async () => {
+  const up = fakeUrbanPiper();
+  const h = await startHub(undefined, undefined, up.fetch);
+  try {
+    await setup(h);
+    up.state.menuRefusal = { status: 'error', message: 'We noticed some errors in your POS menu. Please check the report for more details.', report: { items: [{ ref_id: 'burger', errors: ['price must be above 0'] }] } };
+    const m = (await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/menu', { admin: true })).json;
+    assert.equal(m.ok, false);
+    assert.match(m.message, /burger/);
+    assert.match(m.message, /price must be above 0/);
+    up.state.menuRefusal = { status: 'error', message: 'Invalid location reference' };
+    const m2 = (await h.call('POST', '/v1/admin/stores/demo-burger/urbanpiper/menu', { admin: true })).json;
+    assert.match(m2.message, /does not have this store yet/);
+    const view = (await h.call('GET', '/v1/admin/stores/demo-burger/urbanpiper', { admin: true })).json;
+    assert.ok(JSON.stringify(view).includes('price must be above 0'), 'the activity list keeps the details');
   } finally { await h.close(); cleanup(h.dir); }
 });

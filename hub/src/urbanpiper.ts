@@ -255,7 +255,11 @@ export class UrbanPiper {
   private refusal(status: number, json: any): string {
     if (status === 401 || status === 403) return 'UrbanPiper refused the API username, API key or Biz ID. Check them (the test and live accounts have different keys).';
     const m = str(json?.message) || str(json?.error?.message) || str(json?.error) || str(json?.detail);
-    return `UrbanPiper refused (${status})${m ? `: ${m.slice(0, 300)}` : '.'}`;
+    const hint = /invalid location reference/i.test(m)
+      ? ' UrbanPiper does not have this store yet. Press Send store details, wait until the activity list shows them accepted (a few minutes), then send the menu.'
+      : '';
+    const details = refusalDetails(json, m);
+    return `UrbanPiper refused (${status})${m ? `: ${m.slice(0, 300)}` : '.'}${details ? ` Details: ${details}` : ''}${hint}`;
   }
   /** An admin action now: ok with UrbanPiper's message, or the reason in words. storeId null: the account's activity. */
   private async now(storeId: string | null, kind: string, method: string, path: string, body?: unknown): Promise<{ ok: boolean; message: string; json: any }> {
@@ -318,7 +322,7 @@ export class UrbanPiper {
 
   storeBody(s: StoreRow, l: LinkRow, m: PublishedMenu) {
     const sv = m.serviceability, z = sv.zones[0];
-    const timings = DAYS.map((day, d) => ({ day, slots: (sv.hours[String(d) as keyof typeof sv.hours] ?? []).map((x) => ({ start_time: `${x.open}:00`, end_time: `${x.close}:00` })) })).filter((d) => d.slots.length);
+    const timings = upTimings(sv.hours);
     return {
       stores: [{
         ref_id: l.location_ref, name: m.storeName || s.name, city: l.city, address: l.address || sv.location?.label || '', ...(l.phone ? { contact_phone: l.phone } : {}),
@@ -526,7 +530,7 @@ export class UrbanPiper {
   }
 
   private note(storeId: string | null, dir: 'in' | 'out', kind: string, ok: boolean, text: string) {
-    exec(this.hub.db, 'INSERT INTO up_log (store_id, at, dir, kind, ok, text) VALUES (?,?,?,?,?,?)', storeId, this.hub.now(), dir, kind.slice(0, 120), ok ? 1 : 0, text.slice(0, 500));
+    exec(this.hub.db, 'INSERT INTO up_log (store_id, at, dir, kind, ok, text) VALUES (?,?,?,?,?,?)', storeId, this.hub.now(), dir, kind.slice(0, 120), ok ? 1 : 0, text.slice(0, 1500));
     exec(this.hub.db, 'DELETE FROM up_log WHERE store_id IS ? AND id <= (SELECT id FROM up_log WHERE store_id IS ? ORDER BY id DESC LIMIT 1 OFFSET 500)', storeId, storeId);
   }
 
@@ -700,6 +704,50 @@ const ALCOHOL = /\b(beer|rum|whisky|whiskey|vodka|wine|gin|tequila|brandy|cigare
 /** The published menu as UrbanPiper's Add/Update Menu body for one store, with the platforms' rules checked
  * (aggregator-constraints/swiggy and /zomato). POS prices that include GST are sent without it, since the platforms add
  * the GST from the tax entries: the customer then pays the POS price. */
+/** The store's opening times in UrbanPiper's shape. UrbanPiper wants every slot to start and end on the same day; the
+ * POS allows a slot that closes at or before it opens (it runs past midnight), so that one is split: the rest of the day,
+ * then the next morning. A slot closing at 00:00 ends at 23:59:59. Touching or overlapping slots of a day are joined. */
+export function upTimings(hours: Partial<Record<string, Array<{ open: string; close: string }>>>) {
+  const min = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const END = 24 * 60;
+  const days: Array<Array<[number, number]>> = DAYS.map(() => []);
+  for (let d = 0; d < 7; d++) {
+    for (const s of hours[String(d)] ?? []) {
+      const a = min(s.open), b = min(s.close);
+      if (b > a) days[d]!.push([a, b]);
+      else { days[d]!.push([a, END]); if (b > 0) days[(d + 1) % 7]!.push([0, b]); }
+    }
+  }
+  const time = (m: number) => (m >= END ? '23:59:59' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`);
+  return DAYS.map((day, d) => {
+    const joined: Array<[number, number]> = [];
+    for (const [a, b] of days[d]!.sort((x, y) => x[0] - y[0])) {
+      const last = joined[joined.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b); else joined.push([a, b]);
+    }
+    return { day, slots: joined.map(([a, b]) => ({ start_time: time(a), end_time: time(b) })) };
+  }).filter((d) => d.slots.length);
+}
+
+/** What else UrbanPiper said in a refusal (its menu "report", field errors): up to 8 short lines, besides the main message. */
+export function refusalDetails(json: unknown, main: string): string {
+  const out: string[] = [];
+  const walk = (v: unknown, path: string, depth: number) => {
+    if (depth > 8 || out.length >= 8) return;
+    if (typeof v === 'string' || typeof v === 'number') {
+      const t = String(v).trim();
+      if (!t || t === main || /^(error|success|failed)$/i.test(t) || /^(status|code|err_code)$/.test(path.split('.').pop() ?? '')) return;
+      const line = `${path ? `${path}: ` : ''}${t}`.slice(0, 200);
+      if (!out.includes(line)) out.push(line);
+      return;
+    }
+    if (Array.isArray(v)) { v.forEach((x, i) => walk(x, path ? `${path}[${i}]` : `[${i}]`, depth + 1)); return; }
+    if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { if (depth === 0 && k === 'message') continue; walk(x, path ? `${path}.${k}` : k, depth + 1); }
+  };
+  walk(json, '', 0);
+  return out.join('; ');
+}
+
 export function buildMenu(m: PublishedMenu, platforms: Platform[], packaging: Packaging, imageUrl: (name: string) => string | null) {
   const warnings: string[] = [], errors: string[] = [];
   const off = platforms.filter((p) => !m.options.channels[p]);
