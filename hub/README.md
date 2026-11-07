@@ -221,6 +221,36 @@ saved design falls back to the standard one. Calls (CORS, `X-Site-Token` from th
 `POST /v1/site/<slug>/publish`, `POST /v1/site/<slug>/discard`, `PUT /v1/site/<slug>/images/<sha256>.<jpg|png|webp>`
 (`{ dataBase64 }`, the same checks as POS menu photos; the design refers to it as `hub:<name>`).
 
+## Brand website: orders go to the nearest outlet
+
+A store's own page (`/order/<store>`) sends every order to that store. A **brand** is one ordering website for several
+outlets: `/order/<brand>`. Make it on the admin page (**Brands**: add a brand, then add its outlets; a store is in one
+brand at most, and brand and store addresses never clash).
+
+- The customer chooses pickup or delivery and gives their location first.
+- **Delivery** goes to the nearest outlet that can take it right now: POS online, shift open, not paused, inside its
+  opening hours, delivery on, and the address inside its delivery bands. If the nearest cannot, the next nearest is
+  tried. **Pickup** goes to the nearest open outlet that offers pickup.
+- Distance is by road when the hub has a routing server (Hub settings), otherwise straight line × the outlet's road
+  factor: the same distance its delivery bands use.
+- The customer then sees the chosen outlet's name and distance, and orders from **its own menu, prices, GST and fees**.
+  If the address or pickup/delivery changes, the outlet is chosen again; cart items the new outlet does not sell are
+  taken out and the customer is told.
+- The order is placed in that outlet exactly like a store-page order. If the choice changed after the customer saw it
+  (an outlet closed or opened), nothing is placed (`OUTLET_CHANGED`) and the page shows the new outlet. A placed order
+  never moves to another outlet.
+- No outlet can take it: the customer sees "no outlet delivers here right now" (or "is open for pickup"), and the admin
+  page lists a failed attempt (`NO_OUTLET`) under the brand's main outlet.
+- The website design is the **main outlet's** (the first outlet added; **Make main** changes it), made in that outlet's
+  website builder.
+
+Calls: admin (`X-Admin-Key`) `GET /v1/admin/brands`, `POST /v1/admin/brands` (`{ slug, name }`),
+`GET /v1/admin/brands/<brand>`, `PUT|DELETE /v1/admin/brands/<brand>/stores/<store>` (add or take out; the store and its
+orders are untouched), `PUT /v1/admin/brands/<brand>/main` (`{ store }`). Customers (CORS): `GET /v1/brands/<brand>`
+(name, design, outlets), `POST /v1/brands/<brand>/outlet` (`{ fulfilment, location }` → the outlet's store page and
+distance, or `NO_OUTLET`), `POST /v1/brands/<brand>/orders` (the store-page order body plus `store`, the outlet shown,
+and `near`, the customer's location for pickup; `Idempotency-Key` as for store orders). Code: `src/brands.ts`.
+
 ## DinePOS add-on guest pages (relay)
 
 DinePOS add-ons such as Table QR can let guests on mobile data reach their pages through the hub:
