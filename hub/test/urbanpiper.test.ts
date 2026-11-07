@@ -505,7 +505,7 @@ test('urbanpiper: the Postman test-order collection (hub/postman) places a Swigg
     const pos = posStream(h.base, key);
     const token = one<{ webhook_token: string }>(h.hub.db, 'SELECT webhook_token FROM up_account')!.webhook_token;
     const col = JSON.parse(readFileSync(new URL('../postman/UrbanPiper-test-orders.postman_collection.json', import.meta.url), 'utf8'));
-    const vars: Record<string, string> = { hub: h.base, bizId: '324255', token, storeRef: 'TIFFIN-KN-1' };
+    const vars: Record<string, string> = { hub: h.base, bizId: '324255', token, storeRef: 'TIFFIN-KN-1', item1: 'burger', item2: 'cola' }; // real ids on the test menu
     const fill = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? '');
     const send = async (name: string, orderId?: number) => {
       const it = col.item.find((x: { name: string }) => x.name.startsWith(name));
@@ -521,6 +521,14 @@ test('urbanpiper: the Postman test-order collection (hub/postman) places a Swigg
     assert.equal(zo.status, 200, JSON.stringify(zo.json));
     assert.match(zo.json.order_ref_id, /^Z-/);
     await pos.waitFor((e) => e.filter((x) => x.type === 'order.created').length === 2);
+    // the items are the menu's own (matched by id): priced from the menu, no "check the items" note, so they can be accepted
+    for (const e of pos.events.filter((x) => x.type === 'order.created')) {
+      const o = e.order as any;
+      assert.deepEqual(o.external.notes.filter((n: string) => /Check the items/.test(n)), [], JSON.stringify(o.external.notes));
+      assert.ok(o.lines.every((l: any) => ['burger', 'cola'].includes(l.itemId)));
+    }
+    const cols = col.variable.map((v: { key: string }) => v.key);
+    assert.ok(cols.includes('item1') && cols.includes('item2'), 'the collection asks for two real item ids');
     assert.equal((await send('Platform cancels')).status, 200);
     const zid = (pos.events.find((x) => x.type === 'order.created' && (x.order as any).channel === 'zomato')!.order as any).id;
     await until(() => h.hub.order(zid)?.state === 'CANCELLED', 'the Zomato order is cancelled');
