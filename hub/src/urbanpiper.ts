@@ -787,9 +787,10 @@ export function buildMenu(m: PublishedMenu, platforms: Platform[], packaging: Pa
     option_groups: groups.map((g, i) => ({ ref_id: g.id, title: g.name, min_selectable: g.minSelect, max_selectable: g.maxSelect, active: true, sort_order: i + 1, item_ref_ids: items.filter((it) => it.modifierGroupIds.includes(g.id)).map((it) => it.id) })),
     options: [...new Map(groups.flatMap((g) => g.modifiers.map((x) => [x.id, { x, gids: groups.filter((gg) => gg.modifiers.some((y) => y.id === x.id)).map((gg) => gg.id), g }] as const))).values()]
       .map(({ x, gids, g }, i) => ({ ref_id: x.id, title: x.name, price: rupees(exTax(x.price, firstItem(g.id))), available: true, sold_at_store: true, sort_order: i + 1, opt_grp_ref_ids: gids })),
-    // codes: CGST_P / SGST_P (UrbanPiper's India codes); with more than one GST rate each rate gets its own code (CGST_2.5_P, ...)
+    // codes: UrbanPiper takes only CGST_P / SGST_P (IGST_P) for India, any other code is refused; with more than one GST
+    // rate each rate is its own pair with those codes, told apart by its title ("CGST 2.5%") and its items
     taxes: rates.flatMap((r) => (['CGST', 'SGST'] as const).map((t) => ({
-      code: rates.length === 1 ? `${t}_P` : `${t}_${r / 200}_P`, title: t, active: true, structure: { value: r / 200 }, item_ref_ids: items.filter((i) => i.rateBp === r).map((i) => i.id),
+      code: `${t}_P`, title: rates.length === 1 ? t : `${t} ${r / 200}%`, description: `${r / 200}% ${t}`, active: true, structure: { value: r / 200 }, item_ref_ids: items.filter((i) => i.rateBp === r).map((i) => i.id),
     }))),
     // packaging: item level only (Swiggy takes no order-level charges; Zomato only percentages on the order), titled as both require
     ...(packaging.mode === 'none' ? {} : {
