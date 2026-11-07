@@ -122,7 +122,7 @@ export class Hub {
   createStore(slug: string, name: string) {
     if (!SLUG.test(slug)) throw new HubError('VALIDATION', 'The store address must be 3-41 lowercase letters, digits or dashes.');
     if (!name.trim() || name.length > 80) throw new HubError('VALIDATION', 'Enter the store name.');
-    if (one(this.db, 'SELECT 1 FROM store WHERE slug = ?', slug)) throw new HubError('SLUG_TAKEN', 'That store address is already used.', 409);
+    if (one(this.db, 'SELECT 1 FROM store WHERE slug = ? UNION ALL SELECT 1 FROM brand WHERE slug = ?', slug, slug)) throw new HubError('SLUG_TAKEN', 'That address is already used by a store or a brand.', 409);
     const id = randomUUID();
     exec(this.db, 'INSERT INTO store (id, slug, name, created_at) VALUES (?,?,?,?)', id, slug, name.trim(), this.now());
     return { storeId: id, slug, name: name.trim(), pairingCode: this.newPairingCode(id) };
@@ -369,7 +369,8 @@ export class Hub {
     } catch (err) { this.opts.log?.warn('could not record a failed order attempt', String(err)); }
   }
 
-  private roadKm(): HubOptions['roadKm'] {
+  /** The road-distance service in use (options, or the routingUrl setting), or undefined: straight line x road factor. */
+  roadKm(): HubOptions['roadKm'] {
     if (this.opts.roadKm) return this.opts.roadKm;
     const url = this.settings().routingUrl;
     if (!url) return undefined;
@@ -608,6 +609,11 @@ export class Hub {
     for (const ev of result.evs) this.bus.emit('pos', s.id, ev);
     this.emitCustomer(result.out.order);
     return result.out;
+  }
+
+  /** The answer already given to this order request (same idempotency key at this store), or null. */
+  placedBefore(slug: string, idemKey: string | undefined): { order: Order; accessToken: string } | null {
+    return idemKey ? this.idemGet(`place:${slug}`, idemKey) as { order: Order; accessToken: string } | null : null;
   }
 
   orderForCustomer(id: string, token: string | undefined): Order {

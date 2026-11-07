@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { Hub, HubError } from './hub.ts';
 import { UrbanPiper } from './urbanpiper.ts';
+import { Brands } from './brands.ts';
 import { GuestRelay, GUEST_CSP } from './relay.ts';
 import { REQUEST_HEADERS, Tunnels } from './tunnel.ts';
 import { acceptUpgrade, refuseUpgrade } from './ws.ts';
@@ -167,6 +168,15 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   add('GET', '/v1/admin/stores/:slug/orders', (c) => { admin(c); return hub.adminOrders({ slug: c.params.slug!, limit: Number(c.query.get('limit') ?? 50) }); });
   add('POST', '/v1/admin/devices/:id/revoke', (c) => { admin(c); hub.revokeDevice(c.params.id!); return { ok: true }; });
 
+  // ---- brands: one website for several outlets; each order goes to the nearest outlet that can take it
+  const brands = new Brands(hub);
+  add('GET', '/v1/admin/brands', (c) => { admin(c); return { brands: brands.adminList() }; });
+  add('POST', '/v1/admin/brands', (c) => { admin(c); const b = c.body as { slug?: string; name?: string } | null; return brands.create(String(b?.slug ?? ''), String(b?.name ?? '')); });
+  add('GET', '/v1/admin/brands/:slug', (c) => { admin(c); return brands.adminView(c.params.slug!); });
+  add('PUT', '/v1/admin/brands/:slug/stores/:store', (c) => { admin(c); return brands.addStore(c.params.slug!, c.params.store!); });
+  add('DELETE', '/v1/admin/brands/:slug/stores/:store', (c) => { admin(c); return brands.removeStore(c.params.slug!, c.params.store!); });
+  add('PUT', '/v1/admin/brands/:slug/main', (c) => { admin(c); return brands.setMain(c.params.slug!, String((c.body as { store?: unknown } | null)?.store ?? '')); });
+
   // ---- Swiggy / Zomato through UrbanPiper: the store's details (admin), and UrbanPiper's webhooks
   // the one UrbanPiper account (Hub settings)
   add('GET', '/v1/admin/urbanpiper', (c) => { admin(c); return up.accountView(base(c)); });
@@ -303,6 +313,9 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
   }, { cors: true });
   add('POST', '/v1/stores/:slug/quote', (c) => hub.quote(c.params.slug!, c.body as Parameters<Hub['quote']>[1]), { cors: true });
   add('POST', '/v1/stores/:slug/orders', async (c) => { orderLimit(c.ip); return hub.placeOrder(c.params.slug!, c.body, idem(c)); }, { cors: true });
+  add('GET', '/v1/brands/:slug', (c) => brands.publicView(c.params.slug!), { cors: true });
+  add('POST', '/v1/brands/:slug/outlet', (c) => { guestLimit(c.ip); return brands.outletFor(c.params.slug!, c.body); }, { cors: true });
+  add('POST', '/v1/brands/:slug/orders', async (c) => { orderLimit(c.ip); return brands.placeOrder(c.params.slug!, c.body, idem(c)); }, { cors: true });
   add('POST', '/v1/otp/send', (c) => { otpLimit(c.ip); return hub.otpSend(String((c.body as { mobile?: string })?.mobile ?? '')); }, { cors: true });
   add('POST', '/v1/otp/verify', (c) => { const b = c.body as { mobile?: string; otp?: string }; return hub.otpVerify(String(b?.mobile ?? ''), String(b?.otp ?? '')); }, { cors: true });
   add('GET', '/v1/orders/:id', (c) => hub.orderForCustomer(c.params.id!, orderToken(c)), { cors: true });
@@ -337,7 +350,8 @@ export function createHubServer(hub: Hub, o: HttpOptions = {}): http.Server {
 
   // ---- demo ordering page (phase 2 replaces it with the store apps)
   add('GET', '/order/:slug', (c) => {
-    const html = readFileSync(join(pub, 'order.html'), 'utf8').replace('__STORE__', JSON.stringify(decodeURIComponent(c.params.slug!)));
+    const slug = decodeURIComponent(c.params.slug!);
+    const html = readFileSync(join(pub, 'order.html'), 'utf8').replace('__STORE__', JSON.stringify(slug)).replace('__BRAND__', brands.isBrand(slug) ? 'true' : 'false');
     c.res.writeHead(200, { ...PAGE_HEADERS, 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:" });
     c.res.end(html);
     return Symbol.for('handled');

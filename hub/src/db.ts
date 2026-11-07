@@ -79,6 +79,12 @@ CREATE INDEX IF NOT EXISTS sync_event_day ON sync_event(store_id, business_date)
 -- website builder sign-ins (src/site.ts): one row per signed-in browser, 30 days; a new editor password ends them all
 CREATE TABLE IF NOT EXISTS site_session (token_hash TEXT PRIMARY KEY, store_id TEXT NOT NULL REFERENCES store(id), expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS store_licence (store_id TEXT PRIMARY KEY REFERENCES store(id), licence_key TEXT NOT NULL, updated_at INTEGER NOT NULL);
+-- brand websites (src/brands.ts, P6-05): one website for several outlets, each order going to the nearest outlet that can
+-- take it. A brand's slug never equals a store's (both are served at /order/<slug>). main_store_id: the outlet whose
+-- published website design the brand website shows. brand_store: a store is in at most one brand.
+CREATE TABLE IF NOT EXISTS brand (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, main_store_id TEXT REFERENCES store(id), created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS brand_store (store_id TEXT PRIMARY KEY REFERENCES store(id), brand_id TEXT NOT NULL REFERENCES brand(id), added_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS brand_store_brand ON brand_store(brand_id);
 `;
 
 export type Db = DatabaseSync;
