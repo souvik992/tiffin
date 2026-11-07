@@ -481,3 +481,14 @@ test('urbanpiper: a menu UrbanPiper refuses shows why, and an unknown store says
     assert.ok(JSON.stringify(view).includes('price must be above 0'), 'the activity list keeps the details');
   } finally { await h.close(); cleanup(h.dir); }
 });
+
+test('urbanpiper: an empty Swiggy/Zomato menu says whether the channels are off or no items are chosen, and which POS settings the hub has', () => {
+  const off = ONLINE_MENU({ version: 7, options: { acceptMode: 'manual', acceptTimeoutMin: 5, channels: { app: true, website: true, swiggy: false, zomato: false }, fulfilment: { pickup: true, delivery: true }, payments: { online: false, cod: true } } });
+  const a = buildMenu(off, ['swiggy', 'zomato'], NO_PACKAGING, () => null);
+  assert.match(a.errors[0]!, /Swiggy and Zomato are switched off in the POS/);
+  assert.match(a.errors[0]!, /menu version 7/);
+  const none = ONLINE_MENU({ version: 8, items: menu().items.map((i) => ({ ...i, channels: ['website' as const] })) });
+  const b = buildMenu(none, ['swiggy', 'zomato'], NO_PACKAGING, () => null);
+  assert.match(b.errors[0]!, /No menu items are chosen for Swiggy or Zomato/);
+  assert.match(b.errors[0]!, /menu version 8/);
+});

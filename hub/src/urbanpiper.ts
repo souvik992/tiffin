@@ -754,7 +754,12 @@ export function buildMenu(m: PublishedMenu, platforms: Platform[], packaging: Pa
   if (off.length) warnings.push(`${off.map((p) => NAME[p]).join(' and ')} ${off.length > 1 ? 'are' : 'is'} switched off in the POS (Settings > Online orders > Sales channels), so no items are listed there.`);
   const listed = (it: MenuItem) => platforms.filter((p) => (it.channels ? it.channels.includes(p) : m.options.channels[p]));
   const items = m.items.filter((it) => listed(it).length);
-  if (!items.length) errors.push('No menu items are listed for Swiggy or Zomato. In the POS, switch the channels on (Settings > Online orders) and choose their items.');
+  if (!items.length) {
+    const sent = `The hub has the POS settings of menu version ${m.version}; if you already changed this in the POS, press Save there again and check that the version on this page goes up.`;
+    errors.push(off.length === platforms.length
+      ? `${off.map((p) => NAME[p]).join(' and ')} ${off.length > 1 ? 'are' : 'is'} switched off in the POS. Switch ${off.length > 1 ? 'them' : 'it'} on in Settings > Online orders > Sales channels. ${sent}`
+      : `No menu items are chosen for ${platforms.filter((p) => !off.includes(p)).map((p) => NAME[p]).join(' or ')} in the POS. Choose them in Settings > Online orders > Menu sync. ${sent}`);
+  }
   // UrbanPiper has GST taxes only (CGST, SGST): GST is taken out of GST-inclusive prices and added back by the platform as
   // taxes; cess stays inside the price. Either way the customer pays what the POS bill says.
   const exTax = (p: number, it: Pick<MenuItem, 'priceIncludesTax' | 'rateBp' | 'cessBp'>) => (it.priceIncludesTax ? Math.round(p * (10000 + it.cessBp) / (10000 + it.rateBp + it.cessBp)) : Math.round(p * (10000 + it.cessBp) / 10000));
