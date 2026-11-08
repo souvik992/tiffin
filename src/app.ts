@@ -8,6 +8,8 @@ import { runBackup } from './services/backup.ts';
 import { scheduleCloudBackups } from './services/cloudBackup.ts';
 import { applyPendingRestore } from './services/restore.ts';
 import { EMPTY_ADDONS, loadAddons } from './addons/host.ts';
+import { DEFAULT_CLOUD_URL, renew, TRUSTED_KEYS, type LicenceConfig } from './licence/service.ts';
+import { hardwareId } from './licence/hardware.ts';
 
 export interface BackendOptions {
   dataDir: string;
@@ -22,6 +24,11 @@ export interface BackendOptions {
   /** This POS version, for add-on compatibility. "-dev" versions accept any add-on version. */
   posVersion?: string;
   trustedAddonKeys?: readonly string[];
+  /**
+   * P8-10: check the licence (the installed desktop app; POS_LICENCE=on). Off: development runs and tests are never
+   * locked. cloudUrl: DinePOS Cloud for activation and renewals (default the customer portal's address).
+   */
+  licence?: { enforced: boolean; cloudUrl?: string };
 }
 
 export interface Backend { port: number; readonly server: Server; shutdown: (reason: string) => Promise<void> }
@@ -67,7 +74,13 @@ async function boot(o: BackendOptions, wantPort: number, restart: () => void): P
   queue.start(1000);
   const stopBackups = o.scheduleBackups === false ? () => {} : scheduleBackups(ctx);
   const stopCloud = o.scheduleBackups === false ? () => {} : scheduleCloudBackups(ctx);
-  const server = createServer(ctx, { queue, secret: o.secret, addons, restart });
+  const licence: LicenceConfig = { enforced: o.licence?.enforced === true, hardwareId: hardwareId(), cloudUrl: o.licence?.cloudUrl ?? DEFAULT_CLOUD_URL, trusted: TRUSTED_KEYS };
+  // renewals and paid keys from DinePOS Cloud: soon after start, then every hour (quiet when offline or not linked)
+  const renewNow = () => void renew(ctx, licence).catch((e) => ctx.logger.warn('licence renewal failed', String(e)));
+  const firstRenew = licence.enforced ? setTimeout(renewNow, 30_000) : null;
+  const renewTimer = licence.enforced ? setInterval(renewNow, 3_600_000) : null;
+  firstRenew?.unref(); renewTimer?.unref();
+  const server = createServer(ctx, { queue, secret: o.secret, addons, restart, licence });
   const port = await listen(server, wantPort);
   ctx.logger.info(`POS backend listening on http://127.0.0.1:${port}`, { dataDir: o.dataDir, launchSecret: Boolean(o.secret) });
 
@@ -75,6 +88,8 @@ async function boot(o: BackendOptions, wantPort: number, restart: () => void): P
   const shutdown = (reason: string) => closing ??= (async () => {
     ctx.logger.info(`${reason}: shutting down`);
     queue.stop(); stopBackups(); stopCloud();
+    if (firstRenew) clearTimeout(firstRenew);
+    if (renewTimer) clearInterval(renewTimer);
     await addons.stop();
     await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections(); });
     try { await runBackup(ctx, 'close'); } catch (e) { ctx.logger.error('close backup failed', String(e)); }

@@ -490,6 +490,15 @@ ALTER TABLE app_user ADD COLUMN mobile TEXT;
 CREATE UNIQUE INDEX app_user_mobile ON app_user(mobile) WHERE mobile IS NOT NULL AND deleted_at IS NULL;
 `;
 
+// V15 (fine-dine ADR-0007, P8-10): the licence. One row: the installed key, the 30 days an install that already had bills
+// gets to activate, the latest time seen (the clock cannot be turned back), and the DinePOS Cloud link for renewals.
+const V15 = `
+CREATE TABLE licence (
+  id INTEGER PRIMARY KEY CHECK (id = 1), key_text TEXT, installed_at INTEGER, grace_until INTEGER,
+  last_seen_at INTEGER NOT NULL DEFAULT 0, cloud_url TEXT, device_key TEXT, created_at INTEGER NOT NULL
+);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'initial', sql: V1 },
   { version: 2, name: 'inventory', sql: V2 },
@@ -505,5 +514,6 @@ export const MIGRATIONS: Migration[] = [
   { version: 12, name: 'counter_extras', sql: V12 },
   { version: 13, name: 'session_lock', sql: V13 },
   { version: 14, name: 'kitchen_tickets', sql: V14 },
+  { version: 15, name: 'licence', sql: V15 },
 ];
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

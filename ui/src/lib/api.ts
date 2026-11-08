@@ -168,6 +168,16 @@ export const AUTH_LOST = new Set(['UNAUTHENTICATED', 'SESSION_LOCKED']);
 
 export const newKey = (): string => crypto.randomUUID();
 
+/** P8-10: this POS's licence (GET /api/licence). Not usable: the licence lock screen. */
+export interface LicenceInfo {
+  enforced: boolean; usable: boolean;
+  state: 'off' | 'none' | 'invalid' | 'ok' | 'expiring' | 'grace' | 'expired' | 'activate';
+  message: string; hardwareId: string; trial: boolean; licensee: string | null; expiresAt: string | null; daysLeft: number | null;
+  graceEndsAt: string | null; linked: boolean; renewUrl: string; portalUrl: string;
+}
+/** Raised on the window when the backend refuses a call for the licence (the app shows its lock screen). */
+export const LICENCE_EVENT = 'pos-licence-required';
+
 export interface ApiOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -215,6 +225,7 @@ export function createApi(o: ApiOptions) {
         ? new ApiError(err.code, err.message ?? 'Something went wrong.', res.status, err.details)
         : new ApiError('HTTP_' + res.status, res.status >= 500 ? 'The billing service is not responding. Check that it is running.' : 'Something went wrong. Please try again.', res.status);
       if (AUTH_LOST.has(e.code)) o.onAuthLost?.(e.code, e.details);
+      if (e.code === 'LICENCE_REQUIRED' && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(LICENCE_EVENT, { detail: e.details }));
       throw e;
     }
     return { res, text };
@@ -234,6 +245,10 @@ export function createApi(o: ApiOptions) {
     lock: () => request<{ locked: boolean }>('POST', '/auth/lock', {}),
     unlock: (pin: string) => request<{ user: Me }>('POST', '/auth/unlock', { pin }),
     me: () => get<Me>('/me'),
+    // licence (P8-10): these answer while the POS is locked
+    licence: () => get<LicenceInfo>('/licence'),
+    activateLicence: (input: { mode: 'trial' | 'signin'; email: string; password: string; outletName?: string | null }) => request<LicenceInfo>('POST', '/licence/activate', input),
+    installLicence: (key: string) => request<LicenceInfo>('POST', '/licence/install', { key }),
     // catalog
     catalog: () => get<Catalog>('/catalog'),
     createItem: (input: ItemInput, key?: string) => change<Item>('POST', '/items', input, key),

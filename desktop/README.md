@@ -139,6 +139,6 @@ How it behaves:
 
 * **Code-signing certificate:** none yet. This is a purchase plus company identity checks (see above).
 * **Update server:** not set up. Any static HTTPS host works.
-* **Licensing:** not built. It needs a decision on the model (per outlet or per counter, trial, offline grace period) and a licence server.
+* **Licensing:** the installed app checks its licence (`POS_LICENCE=on` when packaged; never in `npm start` or tests). Without a usable licence it shows only the lock screen: sign in with the portal account (30-day trial, or the key the account has), Renew (portal.posinext.com), or paste a key. Keys come from DinePOS Cloud (fine-dine `cloud/hub`), renew hourly while online. `POS_CLOUD_URL` points it at another cloud (testing).
 * **Encryption at rest (SQLCipher):** not built. `node:sqlite` cannot open an encrypted database. It needs a SQLCipher-capable SQLite build (a native module) plus a recovery key. See `docs/DECISIONS.md`.
 * **Tested on one PC only:** one Windows 11 developer PC, without admin rights. Not tested on low-end shop PCs or touch screens. Not tested with a real receipt printer from inside the app. See `docs/HARDWARE_TEST_PLAN.md`.

@@ -19,7 +19,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (224 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (228 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `hub/` | `npm run dev` (local hub + demo store, prints a POS connection link and the admin page key), `npm start`, `npm run admin -- create-store|pairing-code|list|revoke-device`, `npm test`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
@@ -51,6 +51,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 - **Every receipt build passes `...designOptions(ctx)`**: the active design, the UPI id and the logo.
 - **Bills show the store details valid at issue time** (`storeAt`, `outlet_version` is append-only). Never read the live outlet row for a bill.
 - **Restore never swaps the database under a running POS:** it is staged (`src/services/restore.ts`) and `startBackend` restarts itself in place and applies it before opening the database. Online backups (`src/services/cloudBackup.ts`) stay off until the owner pairs and switches them on.
+- **Licence (src/licence/):** the installed desktop app (POS_LICENCE=on) locks every API route except `/api/ping` and `/api/licence*` without a usable key (`LICENCE_REQUIRED`); the UI then shows only `screens/Licence.tsx`. `src/licence/key.ts`, `status.ts`, `hardware.ts`, `signing.ts` are copies of fine-dine `packages/licensing`: keep them the same. Keys must say `product: "tiffin_qsr"`.
 - **Offline mode is the default.** Online orders live in the add-on; anything there that connects out must check `isOnlineMode(host)` (addons/ods/backend/onlineConfig.ts) first.
 - **Add-ons:** backend code may import only `contract/` and *types* from `src/` (everything else via `HostApi`); screens use `window.__POS__`; each add-on ships its own Tailwind CSS (the POS CSS only has classes the POS uses), with every utility selector wrapped in `:where()` by its build (`weaken-css.mjs`) so it can never override POS layouts. Signing key: `%USERPROFILE%\.tiffinpos\addon-signing\private.pem`, never in the repo. Android release key: `%USERPROFILE%\.tiffinpos\android-signing\` (release.jks + release.properties), never in the repo.
 - **Tiffin Data Manager opens `%LOCALAPPDATA%\TiffinPOS\data` by default.** On this PC always run it with `POS_DATA_DIR` (and `MANAGER_HOME`) set to temp folders; never install it here.
