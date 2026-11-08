@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "node scripts/dev.ts",
     "restore": "node scripts/restore.ts",
-    "receipt": "node scripts/receipt.ts"
+    "receipt": "node scripts/receipt.ts",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

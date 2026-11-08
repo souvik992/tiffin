@@ -26,6 +26,8 @@ The billing UI lives in `ui/`. Install it once with `cd ui && npm install`. Then
 
 The Windows desktop app (installer, one window, no Node.js needed on the shop PC) lives in `desktop/`: see `desktop/README.md`. `npm run dist` there builds `TiffinPOS-Setup-<version>.exe`.
 
+**Releasing to customers:** `npm run release` (repository root) builds the Tiffin POS and ODS installers on this PC and uploads them to DinePOS Cloud, which offers them in the customer portal (fine-dine roadmap P8-11; settings in `%USERPROFILE%\.dinepos\release.json`, see `scripts/release.mjs`). CI builds installers only as test artifacts.
+
 For a real shop, do not run the seed. `POST /api/setup` creates the outlet, counter and owner on first run.
 
 ## Layout
