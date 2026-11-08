@@ -12,12 +12,20 @@ import { Purchases } from './screens/Purchases.tsx';
 import { Settings } from './screens/Settings.tsx';
 import { Reports } from './screens/Reports.tsx';
 import { loadAddonScreens, useAddons } from './lib/addons.ts';
+import { LicenceBanner, LicenceLock, useLicence } from './screens/Licence.tsx';
 
 // Hash routes (#/orders) work the same from the dev server and from file:// inside the Electron host.
 // Unknown names may be add-on screens, which load after sign-in.
 const parseRoute = (): Route => window.location.hash.replace(/^#\/?/, '') || 'billing';
 
 function Screens() {
+  const lic = useLicence();
+  // P8-10: no usable licence: only the licence lock screen (sign-in and everything else are locked by the backend too)
+  if (lic.licence && !lic.licence.usable) return <LicenceLock licence={lic.licence} onChanged={lic.set} />;
+  return <><LicenceBanner licence={lic.licence} /><SignedIn /></>;
+}
+
+function SignedIn() {
   const { user, locked, restore, api } = useSession();
   const [route, setRoute] = useState<Route>(parseRoute);
   const [restoring, setRestoring] = useState(true);

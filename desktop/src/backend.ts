@@ -9,7 +9,9 @@ async function main() {
   const dataDir = process.env.POS_DATA_DIR, secret = process.env.POS_LAUNCH_SECRET;
   if (!dataDir || !secret) throw new Error('POS_DATA_DIR and POS_LAUNCH_SECRET must be set by the desktop app.');
   delete process.env.POS_LAUNCH_SECRET; // not inherited by PowerShell print helpers
-  const backend = await startBackend({ dataDir, port: 0, secret, addonsDir: process.env.POS_ADDONS_DIR ?? null, posVersion: process.env.POS_APP_VERSION });
+  const backend = await startBackend({ dataDir, port: 0, secret, addonsDir: process.env.POS_ADDONS_DIR ?? null, posVersion: process.env.POS_APP_VERSION,
+    // P8-10: the installed app checks its licence (main.ts sets POS_LICENCE=on when packaged)
+    licence: { enforced: process.env.POS_LICENCE === 'on', cloudUrl: process.env.POS_CLOUD_URL || undefined } });
   parent.on('message', (e) => {
     if ((e.data as { type?: string })?.type === 'shutdown') void backend.shutdown('desktop app closing').finally(() => process.exit(0));
   });

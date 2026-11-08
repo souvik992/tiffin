@@ -43,24 +43,38 @@ import { istDay } from '../core/numbering.ts';
 import { arr, bool, discount, int, nullable, obj, oneOf, opt, override, payment, str } from './validate.ts';
 import { createCoupon, listCoupons, updateCoupon } from '../services/coupons.ts';
 import type { V } from './validate.ts';
+import { activate, installKey, licenceInfo, DEFAULT_CLOUD_URL, TRUSTED_KEYS, type LicenceConfig, type LicenceInfo } from '../licence/service.ts';
+import { hardwareId } from '../licence/hardware.ts';
 
 interface RC {
   ctx: Ctx; actor: Actor; params: Record<string, string>; query: URLSearchParams; body: unknown; requestId: string; token: string | undefined;
   req: IncomingMessage; res: ServerResponse;
 }
 type Handler = (c: RC) => unknown | Promise<unknown>;
-interface Route { method: string; re: RegExp; keys: string[]; auth: boolean; idem: boolean; handler: Handler; format?: 'json' | 'csv' | 'sse' }
+interface Route { method: string; re: RegExp; keys: string[]; auth: boolean; idem: boolean; handler: Handler; format?: 'json' | 'csv' | 'sse'; /** P8-10: answers while the POS is locked for its licence */ unlicensed?: boolean }
 
 const MAX_BODY = 2_000_000;
 
-export interface ServerOptions { port?: number; host?: string; queue?: PrintQueue | null; /** Desktop app: required in X-POS-Secret on every request. */ secret?: string; /** Signed add-ons loaded at startup (src/addons/host.ts). */ addons?: LoadedAddons; /** Restarts the backend in place (startBackend): applies a staged restore. */ restart?: () => void }
+export interface ServerOptions { port?: number; host?: string; queue?: PrintQueue | null; /** Desktop app: required in X-POS-Secret on every request. */ secret?: string; /** Signed add-ons loaded at startup (src/addons/host.ts). */ addons?: LoadedAddons; /** Restarts the backend in place (startBackend): applies a staged restore. */ restart?: () => void; /** P8-10: the licence (not given: not enforced). */ licence?: LicenceConfig }
 
-export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAddons; restart?: () => void }): Route[] {
+/** P8-10: the licence as the server sees it, worked out at most every 30 seconds (and again after a change). */
+export interface LicenceGate { cfg: LicenceConfig; info(ctx: Ctx): LicenceInfo; changed(): void }
+export function licenceGate(cfg: LicenceConfig): LicenceGate {
+  let cached: { at: number; info: LicenceInfo } | null = null;
+  return {
+    cfg,
+    info(ctx) { if (!cached || Date.now() - cached.at > 30_000) cached = { at: Date.now(), info: licenceInfo(ctx, cfg) }; return cached.info; },
+    changed() { cached = null; },
+  };
+}
+const DEV_LICENCE: LicenceConfig = { enforced: false, hardwareId: '', cloudUrl: DEFAULT_CLOUD_URL, trusted: TRUSTED_KEYS };
+
+export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAddons; restart?: () => void; licence?: LicenceGate }): Route[] {
   const routes: Route[] = [];
-  const add = (method: string, path: string, o: { auth?: boolean; idem?: boolean; format?: Route['format'] }, handler: Handler) => {
+  const add = (method: string, path: string, o: { auth?: boolean; idem?: boolean; format?: Route['format']; unlicensed?: boolean }, handler: Handler) => {
     const keys: string[] = [];
     const re = new RegExp('^' + path.replace(/:([a-zA-Z]+)/g, (_, k: string) => { keys.push(k); return '([^/]+)'; }) + '$');
-    routes.push({ method, re, keys, auth: o.auth !== false, idem: o.idem ?? method !== 'GET', handler, format: o.format });
+    routes.push({ method, re, keys, auth: o.auth !== false, idem: o.idem ?? method !== 'GET', handler, format: o.format, unlicensed: o.unlicensed === true });
   };
   const body = <T>(c: RC, v: V<T>): T => v(c.body, '');
   const rid = (c: RC) => c.requestId;
@@ -74,7 +88,27 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
 
   // ---- public ----
   const boot = crypto.randomUUID();
-  add('GET', '/api/ping', { auth: false }, () => ({ ok: true, boot }));
+  add('GET', '/api/ping', { auth: false, unlicensed: true }, () => ({ ok: true, boot }));
+
+  // ---- licence (P8-10): answer while the POS is locked; once it is usable, changing it needs an owner
+  const gate = opts.licence ?? licenceGate({ ...DEV_LICENCE, hardwareId: hardwareId() });
+  const licenceActor = (c: RC): string | null => {
+    if (!gate.info(c.ctx).usable) return null; // locked: whoever is at this PC may activate it
+    const actor = authenticate(c.ctx, c.token);
+    assertPerm(actor, 'settings.write');
+    return actor.userId;
+  };
+  add('GET', '/api/licence', { auth: false, unlicensed: true }, (c) => gate.info(c.ctx));
+  add('POST', '/api/licence/activate', { auth: false, idem: false, unlicensed: true }, async (c) => {
+    const b = body(c, obj({ mode: oneOf('trial', 'signin'), email: str({ min: 3, max: 254 }), password: str({ min: 1, max: 200 }), outletName: opt(nullable(str({ max: 80 }))) }));
+    const userId = licenceActor(c);
+    try { return await activate(c.ctx, gate.cfg, b, userId); } finally { gate.changed(); }
+  });
+  add('POST', '/api/licence/install', { auth: false, idem: false, unlicensed: true }, (c) => {
+    const b = body(c, obj({ key: str({ min: 20, max: 4000 }) }));
+    const userId = licenceActor(c);
+    try { return installKey(c.ctx, gate.cfg, b.key, { userId, source: 'pasted' }); } finally { gate.changed(); }
+  });
   add('GET', '/api/login-users', { auth: false }, (c) => listLoginUsers(c.ctx));
   add('POST', '/api/setup', { auth: false }, (c) => setupFirstRun(c.ctx, rid(c), body(c, obj({
     outlet: obj({ name: str({ min: 1, max: 80 }), gstin: opt(nullable(str({ max: 15 }))), fssaiNo: opt(nullable(str({ max: 14 }))), stateCode: str({ min: 2, max: 2 }), address: opt(nullable(str({ max: 200 }))), phone: opt(nullable(str({ max: 15 }))) }),
@@ -406,7 +440,8 @@ function sameSecret(got: string | string[] | undefined, want: Buffer): boolean {
 }
 
 export function createServer(ctx: Ctx, opts: ServerOptions = {}): http.Server {
-  const routes = buildRoutes({ queue: opts.queue ?? null, addons: opts.addons, restart: opts.restart });
+  const gate = licenceGate(opts.licence ?? { ...DEV_LICENCE, hardwareId: hardwareId() });
+  const routes = buildRoutes({ queue: opts.queue ?? null, addons: opts.addons, restart: opts.restart, licence: gate });
   const secret = opts.secret ? Buffer.from(opts.secret) : null;
   const server = http.createServer(async (req, res) => {
     try {
@@ -426,6 +461,11 @@ export function createServer(ctx: Ctx, opts: ServerOptions = {}): http.Server {
         break;
       }
       if (!route) throw new AppError(pathMatched ? 'METHOD_NOT_ALLOWED' : 'NOT_FOUND', pathMatched ? 'Method not allowed.' : 'No such endpoint.', pathMatched ? 405 : 404);
+      // P8-10: without a usable licence, only the licence routes answer (the screen shows its lock)
+      if (!route.unlicensed && gate.cfg.enforced) {
+        const lic = gate.info(ctx);
+        if (!lic.usable) throw new AppError('LICENCE_REQUIRED', lic.message, 403, { licence: lic });
+      }
       const mutating = req.method !== 'GET' && req.method !== 'HEAD';
       // Forces a CORS preflight for cross-site pages, which this server never approves.
       if (mutating && req.headers['content-length'] !== '0' && req.headers['content-length'] !== undefined && !(req.headers['content-type'] ?? '').startsWith('application/json')) {

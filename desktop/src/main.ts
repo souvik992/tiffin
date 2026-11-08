@@ -52,7 +52,7 @@ function startBackendProcess(): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = utilityProcess.fork(join(__dirname, 'backend.cjs'), [], {
       serviceName: `${PRODUCT} backend`, stdio: 'pipe',
-      env: { ...process.env, POS_DATA_DIR: dataDir, POS_LAUNCH_SECRET: secret, POS_ADDONS_DIR: addonsDir, POS_APP_VERSION: app.getVersion() },
+      env: { ...process.env, POS_DATA_DIR: dataDir, POS_LAUNCH_SECRET: secret, POS_ADDONS_DIR: addonsDir, POS_APP_VERSION: app.getVersion(), POS_LICENCE: app.isPackaged ? 'on' : (process.env.POS_LICENCE ?? 'off') },
     });
     backend = child;
     child.stdout?.on('data', (d: Buffer) => log(`[backend] ${d.toString()}`));

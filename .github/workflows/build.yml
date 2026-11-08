@@ -1,5 +1,7 @@
 # Every push: run all tests, then build the Windows installer and the Android apps from the same commit.
-# Downloads: the run's page on GitHub > Artifacts.
+# Downloads: the run's page on GitHub > Artifacts. Every push to main also publishes the Windows installers (Tiffin POS
+# and the ODS add-on) as a GitHub Release: DinePOS Cloud's download catalogue offers the newest one in the customer
+# portal (fine-dine ADR-0007, P8-03).
 name: Build Windows and Android
 
 on:
@@ -74,10 +76,28 @@ jobs:
         run: |
           node scripts/build.mjs
           npx electron-builder --win --config electron-builder.config.cjs --publish never
+      # The ODS add-on is signed with the vendor's add-on key. Add the private key's PEM text as the repository secret
+      # TIFFIN_ADDON_SIGNING_KEY; without it this step is skipped and the release has the POS installer only.
+      - name: ODS add-on installer
+        shell: bash
+        env:
+          ADDON_KEY: ${{ secrets.TIFFIN_ADDON_SIGNING_KEY }}
+        run: |
+          if [ -z "$ADDON_KEY" ]; then
+            echo "::warning title=ODS not built::Add the TIFFIN_ADDON_SIGNING_KEY secret to build and publish the ODS installer."
+            exit 0
+          fi
+          npm ci
+          (cd addons/ods && npm ci)
+          printf '%s\n' "$ADDON_KEY" > "$RUNNER_TEMP/addon-signing.pem"
+          (cd addons/ods && POS_ADDON_SIGNING_KEY="$RUNNER_TEMP/addon-signing.pem" npm run installer)
+          rm -f "$RUNNER_TEMP/addon-signing.pem"
       - uses: actions/upload-artifact@v4
         with:
           name: TiffinPOS-Windows
-          path: desktop/release/*.exe
+          path: |
+            desktop/release/*.exe
+            addons/dist/installers/TiffinPOS-ODS-Setup-*.exe
       - name: Build Tiffin Data Manager installer
         working-directory: desktop
         env:
@@ -133,3 +153,28 @@ jobs:
           name: TiffinPOS-Android
           path: android/app/build/outputs/apk/*/*.apk
           if-no-files-found: error
+
+  release:
+    name: Release
+    # Pushes to main only (never pull requests): one release per build, marked latest.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TiffinPOS-Windows
+          path: out
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=$(find out -name '*.exe' | sort)
+          version=$(basename "$(find out -name 'TiffinPOS-Setup-*.exe' | head -1)" .exe | sed 's/^TiffinPOS-Setup-//')
+          tag="tiffin-build-${{ github.run_number }}"
+          notes="Tiffin POS ${version}, build ${{ github.run_number }} from ${GITHUB_SHA::7}. Windows installers are not code-signed yet: Windows SmartScreen may warn."
+          gh release create "$tag" $files --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Tiffin POS ${version} (build ${{ github.run_number }})" --notes "$notes" --latest
