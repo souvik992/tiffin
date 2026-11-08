@@ -49,7 +49,8 @@ function target() {
   let cfg = {};
   const file = path.join(homedir(), '.dinepos', 'release.json');
   if (existsSync(file)) {
-    try { cfg = JSON.parse(readFileSync(file, 'utf8')); } catch { fail(`${file} is not valid JSON.`); }
+    // a BOM (PowerShell 5.1's Set-Content -Encoding utf8 writes one) is not JSON; trimStart() drops it
+    try { cfg = JSON.parse(readFileSync(file, 'utf8').trimStart()); } catch (e) { fail(`${file} is not valid JSON (${e.message}).`); }
   }
   const hubUrl = (process.env.DINEPOS_HUB_URL ?? cfg.hubUrl ?? '').replace(/\/+$/, '');
   const adminKey = process.env.DINEPOS_HUB_ADMIN_KEY ?? cfg.adminKey ?? '';
