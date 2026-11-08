@@ -25,18 +25,19 @@ const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 
+// what CI's Windows job does (build.yml); unsigned until there is a code-signing certificate
+const POS_BUILD = [
+  { cwd: 'desktop', cmd: 'node', args: ['scripts/build.mjs'] },
+  { cwd: 'desktop', cmd: 'npx', args: ['electron-builder', '--win', '--config', 'electron-builder.config.cjs', '--publish', 'never'], env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } },
+];
+// The ODS installer uses the icon and NSIS that a Tiffin POS build leaves behind (addons/ods/scripts/installer.mjs)
+const POS_ICON = path.join(repo, 'desktop', 'release', '.icon-ico', 'icon.ico');
 const ITEMS = [
-  {
-    id: 'tiffin', name: 'Tiffin POS', dir: path.join(repo, 'desktop', 'release'), file: /^TiffinPOS-Setup-(.+)\.exe$/,
-    // what CI's Windows job does (build.yml); unsigned until there is a code-signing certificate
-    build: [
-      { cwd: 'desktop', cmd: 'node', args: ['scripts/build.mjs'] },
-      { cwd: 'desktop', cmd: 'npx', args: ['electron-builder', '--win', '--config', 'electron-builder.config.cjs', '--publish', 'never'], env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } },
-    ],
-  },
+  { id: 'tiffin', name: 'Tiffin POS', dir: path.join(repo, 'desktop', 'release'), file: /^TiffinPOS-Setup-(.+)\.exe$/, build: POS_BUILD },
   {
     id: 'tiffin-ods', name: 'ODS', dir: path.join(repo, 'addons', 'dist', 'installers'), file: /^TiffinPOS-ODS-Setup-(.+)\.exe$/,
     build: [{ cwd: 'addons/ods', cmd: 'npm', args: ['run', 'installer'] }],
+    before: () => (existsSync(POS_ICON) ? [] : (console.warn('(Tiffin POS is built first: the ODS installer needs its icon and NSIS)'), POS_BUILD)),
     needs: () => process.env.POS_ADDON_SIGNING_KEY ?? path.join(homedir(), '.tiffinpos', 'addon-signing', 'private.pem'),
   },
 ].filter((i) => !only || i.id === only || i.id === `tiffin-${only}`);
@@ -125,7 +126,7 @@ if (!flag('--no-build')) {
   for (const item of ITEMS) {
     if (item.needs && !existsSync(item.needs())) { console.warn(`\n! ${item.name} skipped: its signing key (${item.needs()}) is not on this PC.`); continue; }
     console.warn(`\n=== Building ${item.name}`);
-    for (const step of item.build) run(step);
+    for (const step of [...(item.before?.() ?? []), ...item.build]) run(step);
     built.push(item.id);
   }
 }
