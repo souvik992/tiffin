@@ -4,15 +4,15 @@
     "arm64-v8a": [
       {
         "name": "c-ares",
-        "version": "1.34.8",
-        "filename": "pool/main/c/c-ares/c-ares_1.34.8_aarch64.deb",
-        "sha256": "7681fc23e822d7988ba8b2adf3468f93ae68f724dda365cff1385096a9fa87e6"
+        "version": "1.34.9",
+        "filename": "pool/main/c/c-ares/c-ares_1.34.9_aarch64.deb",
+        "sha256": "623d84855e176f3f2a415d24c0e1d2f529356f4b5439bb3313e6d7ff0da4585c"
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.09.25",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.09.25_all.deb",
-        "sha256": "57fab24bf4561bfdd35afe71bc1929914e51c35458cfd1fca2b15e54bc8df7af"
+        "version": "1:2026.11.05",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
+        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
       },
       {
         "name": "libc++",
@@ -28,15 +28,15 @@
       },
       {
         "name": "libsqlite",
-        "version": "3.54.0",
-        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.0_aarch64.deb",
-        "sha256": "9adf91e118fcf4d449f0fb9668485d895916c4f76c2407da17ba114406f43a58"
+        "version": "3.54.1-1",
+        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.1-1_aarch64.deb",
+        "sha256": "661fb995f7215845007b222a85266ae99d9443e87e0604f8677edfd738e6b81a"
       },
       {
         "name": "nodejs-lts",
-        "version": "24.18.0-1",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.18.0-1_aarch64.deb",
-        "sha256": "490f4d08c45b25a7ea7db6ee466ebb3ee61f07083260b85332704ed018f59a87"
+        "version": "24.22.2",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_aarch64.deb",
+        "sha256": "150d7dd382e92587808d96813b9538fe5c6c41fa33f1a1033daa4e30c6ff2695"
       },
       {
         "name": "openssl",
@@ -52,23 +52,23 @@
       },
       {
         "name": "zlib",
-        "version": "1.3.2",
-        "filename": "pool/main/z/zlib/zlib_1.3.2_aarch64.deb",
-        "sha256": "75e7d0af17fcc3b40004309fdc00a1ddb9ae08346dce5e269902c34ac3966ac9"
+        "version": "1.4",
+        "filename": "pool/main/z/zlib/zlib_1.4_aarch64.deb",
+        "sha256": "e3027565ae50bcd8ba5113c988b589754ae192c9cc3e6afbe3e4ed7c06b2598e"
       }
     ],
     "armeabi-v7a": [
       {
         "name": "c-ares",
-        "version": "1.34.8",
-        "filename": "pool/main/c/c-ares/c-ares_1.34.8_arm.deb",
-        "sha256": "efc1342b60bb5b6d71619b7dfb400d9fe921c1629bc5ae035adec0313767f868"
+        "version": "1.34.9",
+        "filename": "pool/main/c/c-ares/c-ares_1.34.9_arm.deb",
+        "sha256": "6c9b77ed08a606c854ea73875f7fb8ae389f7752b49e2b473d589a418ce222d1"
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.09.25",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.09.25_all.deb",
-        "sha256": "57fab24bf4561bfdd35afe71bc1929914e51c35458cfd1fca2b15e54bc8df7af"
+        "version": "1:2026.11.05",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
+        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
       },
       {
         "name": "libc++",
@@ -84,15 +84,15 @@
       },
       {
         "name": "libsqlite",
-        "version": "3.54.0",
-        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.0_arm.deb",
-        "sha256": "ab888d31c32139d9b9e0f59b3434c4e71d0f104485a4bd6d018c811c72b7a850"
+        "version": "3.54.1-1",
+        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.1-1_arm.deb",
+        "sha256": "32b5030544cff8fb9e762ff4824fb99d443a4ed7091422f348e3e99a0b4e0913"
       },
       {
         "name": "nodejs-lts",
-        "version": "24.18.0-1",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.18.0-1_arm.deb",
-        "sha256": "a6eb7719793366ab3a1768f849ce79ee0486c48a071e95ac4201010e153fe63a"
+        "version": "24.22.2",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_arm.deb",
+        "sha256": "7cf02b900b6f6555e80a5aa014ea15dcb4d1951edb0eced463cd744d645c1485"
       },
       {
         "name": "openssl",
@@ -108,23 +108,23 @@
       },
       {
         "name": "zlib",
-        "version": "1.3.2",
-        "filename": "pool/main/z/zlib/zlib_1.3.2_arm.deb",
-        "sha256": "c63ee590f2f02254725bdd8e415582c70737b63712a20d5395b45e4b13ffffc5"
+        "version": "1.4",
+        "filename": "pool/main/z/zlib/zlib_1.4_arm.deb",
+        "sha256": "a04f6ce4f36749b49a7ee0432e6fe3f235bdde95ed53f6b9f86138d58fbdc816"
       }
     ],
     "x86_64": [
       {
         "name": "c-ares",
-        "version": "1.34.8",
-        "filename": "pool/main/c/c-ares/c-ares_1.34.8_x86_64.deb",
-        "sha256": "c5d6194d69a04089040ca50dad96ed7df8773bd3c3d7c4be7d1dd5661ceae6b4"
+        "version": "1.34.9",
+        "filename": "pool/main/c/c-ares/c-ares_1.34.9_x86_64.deb",
+        "sha256": "ac96c37fcc9181d1a7095f60485457fe6c3d784a83b0e8e6e7af9b3bfceda237"
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.09.25",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.09.25_all.deb",
-        "sha256": "57fab24bf4561bfdd35afe71bc1929914e51c35458cfd1fca2b15e54bc8df7af"
+        "version": "1:2026.11.05",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
+        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
       },
       {
         "name": "libc++",
@@ -140,15 +140,15 @@
       },
       {
         "name": "libsqlite",
-        "version": "3.54.0",
-        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.0_x86_64.deb",
-        "sha256": "8c15e92cef3cb7dc387644c438aa35abab408e3211fcc9c0da6f35cfa0213202"
+        "version": "3.54.1-1",
+        "filename": "pool/main/libs/libsqlite/libsqlite_3.54.1-1_x86_64.deb",
+        "sha256": "497471806378934fec8a6f3b5db70cf52a3652828786a241e2e37eebc19112b0"
       },
       {
         "name": "nodejs-lts",
-        "version": "24.18.0-1",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.18.0-1_x86_64.deb",
-        "sha256": "2a41c61c609993a7d897fed130adf4d6debb0b30713ab85bb47c2fc8373458ba"
+        "version": "24.22.2",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_x86_64.deb",
+        "sha256": "0dbbc99d03af8093ce2b8029930fcf80b201372ed2cf2275722decdb8f974fbe"
       },
       {
         "name": "openssl",
@@ -164,9 +164,9 @@
       },
       {
         "name": "zlib",
-        "version": "1.3.2",
-        "filename": "pool/main/z/zlib/zlib_1.3.2_x86_64.deb",
-        "sha256": "c61b089dd30981452f5953b2bad4c4e7857062b2abd971f87fb0aec441bc02f4"
+        "version": "1.4",
+        "filename": "pool/main/z/zlib/zlib_1.4_x86_64.deb",
+        "sha256": "55ab8f16e492d6ed03c2e2bf701af52cf54a313442dd7adedd3d6f3e3eba2e4f"
       }
     ]
   }
