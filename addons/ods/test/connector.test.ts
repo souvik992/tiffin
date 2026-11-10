@@ -80,8 +80,11 @@ test('ODS connector: pairs, publishes, receives orders live, bills on accept (GS
     const placed = await s.order('9000000101');
     await until(() => getOrder(s.host, placed.order.id) !== null, 'order arrives');
     await until(() => s.hubState(placed.order.id) === 'RECEIVED', 'received confirmed');
+    const before = s.env.ctx.clock.now();
     const acc = s.conn.accept(s.env.cashier, placed.order.id, 12, rid());
     assert.equal(acc.billTotal, placed.order.total, 'POS bill = what the customer was charged');
+    assert.equal(acc.order.prepMinutes, 12);
+    assert.ok(acc.order.etaAt !== null && acc.order.etaAt >= before + 12 * 60_000 && acc.order.etaAt <= s.env.ctx.clock.now() + 12 * 60_000, 'ready time kept for the preparation clock');
     const inv = get<{ channel: string; external_id: string }>(s.env.ctx.db, 'SELECT o.channel, o.external_id FROM invoice i JOIN sale_order o ON o.id = i.order_id WHERE i.id = ?', acc.billInvoiceId!)!;
     assert.deepEqual({ ...inv }, { channel: 'WEBSITE', external_id: placed.order.number });
     assert.ok(get(s.env.ctx.db, "SELECT 1 FROM print_job WHERE ref_id = ? AND kind = 'KOT'", acc.billInvoiceId!), 'kitchen ticket queued');

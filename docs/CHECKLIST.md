@@ -92,6 +92,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [ ] Bulk photos screen seen in the desktop app with a real folder of shop photos
 - [x] Orders: today's bills, bill detail, reprint
 - [x] Failed-print alerts with retry, showing the bill number and printer
+- [x] Print alarm on every screen (`ui/src/components/PrintAlarm.tsx`, model `ui/src/lib/printAlarm.ts`): a bill or kitchen ticket that failed after the queue's retries shows a red banner ("Kitchen ticket (token 4, bill ...) did not print on Kitchen") and sounds an alarm every 4 s until Retry or dismiss; live from the events stream (print FAILED/PRINTED) plus a 10 s poll; only failures from the last 30 minutes ring (older ones stay in the Billing bell). Before, a failed KOT only showed as a small number on the Billing bell, refreshed every 20 s
 - [x] Split payment (up to 6 modes) checked by the backend; hold and resume with a held-bills list; customer name (optional), phone and note
 - [x] After-payment panel: change to give, live print status per job, print on screen, reprint
 - [x] Orders: cancel a bill and refund items (credit note) with manager approval; print on screen
@@ -194,6 +195,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Official Swiggy/Zomato logo files (their partner programmes provide them)
 - [x] Online-order buzzer on every screen (ODS 1.0.2): rings loudly and repeats while an order waits to be accepted, with a "New online order" banner (Silence, Open ODS); stops on accept/reject; the ODS Sound switch controls it; the desktop app lets it ring without a tap first
 - [x] Buzzer in the automatic accept mode (ODS 1.0.9): an order accepted automatically never waits, so it used to make no sound; now a new order rings twice and a banner shows it for 20 seconds on every screen ("Accepted automatically: the bill and kitchen ticket are printing"); orders already there when the POS starts do not ring. Tested in a browser with a test POS and hub (tones counted); not yet heard on the shop PC or an Android device
+- [x] Preparation clock and late alarm (ODS 1.0.14): accepting keeps the promised ready time (etaAt = accept + preparation minutes); the card counts down "Ready in m:ss" (red in the last 2 minutes), then "Late by n min" with a red card; a late order sounds a different (falling) alarm when it goes late and every minute after, with a "Running late" banner on every screen but the ODS (Silence, Open ODS), until it is marked Ready
 - [x] Menu photos sent to the hub (only missing ones, checked against their content name; removed with the item's photo); `image` on published menu items
 - [x] Live ODS screen: New / Preparing / Ready / On the way, sound on new orders, accept countdown, accept with preparation time (bill + KOT print at once), reject with reason, rider name and phone, delivered / collected, cancel with manager approval (cancels the bill)
 - [x] Online order bills: a normal GST bill per order (channel App / Website, order number kept), idempotent; price changed since ordering is flagged ("Accept at POS price"); a customer cancel that beats the accept is flagged with "Cancel bill"
@@ -251,5 +253,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Three KOT designs (.tiffinkot): customer KOT (standard = the shop's sample ticket), prep station KOT, online order KOT; upload, preview at 58/80 mm, back to standard (docs/KOT_TEMPLATES.md, templates/kot/)
 - [x] Cart KOT button (count of items not sent): send now, or print all again (REPRINT, manager approves); Orders: reprint kitchen ticket
 - [x] Online orders: "When an order is accepted, print" the bill and/or the KOT (manual or automatic accept); ODS Bill and KOT buttons (first print free, then a reprint with approval); online KOT shows channel, online number, delivery/pickup, customer
+- [x] Shop rehearsal end-to-end test (`desktop/test/shop.e2e.test.ts`, `npm run test:e2e:shop`): real desktop app + signed ODS + local hub + two TCP printers decoded from ESC/POS: buzzer, manual and automatic accept print one bill and the KOTs, item and order notes on the KOT, preparation clock, late alarm, category order on the POS and online, print alarm and Retry with the kitchen printer off
+- [ ] Online dine-in orders (no DINE_IN fulfilment; the hub refuses it), and an "already paid at the counter" online order that does not bill again: waiting for how the customer's dine-in orders arrive
 - [ ] KOT on a real kitchen printer (and with the bill on a real receipt printer); table numbers / dine-in on the KOT (the POS has no tables)
 

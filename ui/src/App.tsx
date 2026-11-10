@@ -13,6 +13,7 @@ import { Settings } from './screens/Settings.tsx';
 import { Reports } from './screens/Reports.tsx';
 import { loadAddonScreens, useAddons } from './lib/addons.ts';
 import { LicenceBanner, LicenceLock, useLicence } from './screens/Licence.tsx';
+import { PrintAlarm } from './components/PrintAlarm.tsx';
 
 // Hash routes (#/orders) work the same from the dev server and from file:// inside the Electron host.
 // Unknown names may be add-on screens, which load after sign-in.
@@ -41,6 +42,10 @@ function SignedIn() {
   if (restoring) return <Centered><p className="text-muted-foreground">Loading…</p></Centered>;
   if (locked) return <LockScreen />; // nothing else is on screen (or reachable by keyboard) while locked
   if (!user) return <Login />;
+  return <><Screen route={route} addons={addons} ready={ready} /><PrintAlarm /></>;
+}
+
+function Screen({ route, addons, ready }: { route: Route; addons: ReturnType<typeof useAddons>['addons']; ready: boolean }) {
   switch (route) {
     case 'menu-items': return <MenuItems />;
     case 'orders': return <Orders />;
