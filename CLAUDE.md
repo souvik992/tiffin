@@ -25,7 +25,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
 | `android/` | `node android/scripts/prepare.ts` (after `cd ui && npm run build`), then in `android/`: `gradlew.bat assembleDebug` (or `assembleRelease`, signed with the key in `%USERPROFILE%\.tiffinpos\android-signing`) with `JAVA_HOME` = Android Studio's `jbr`. `node android/scripts/github-secrets.ts` writes the 4 GitHub secrets for signed CI builds into a file next to the key. Emulator AVD `Pixel_10_Pro_XL` (x86_64); start it with `-memory 4096 -cores 4` (2 GB freezes its System UI). |
 | CI | `.github/workflows/build.yml`: every push runs all tests, then builds the Windows installer and the Android APKs (artifacts). |
-| `desktop/` | `npm start`, `npm test`, `npm run test:e2e`, `npm run typecheck`, `npm run dist` (installer; raise `version` in `desktop/package.json` for each release). Data Manager: `npm run start:manager`, `npm run test:e2e:manager`, `npm run dist:manager` (raise `version` in `electron-builder.manager.cjs`). |
+| `desktop/` | `npm start`, `npm test`, `npm run test:e2e`, `npm run test:e2e:shop` (online orders, printing and alarms against a local hub and TCP printers), `npm run typecheck`, `npm run dist` (installer; raise `version` in `desktop/package.json` for each release). Data Manager: `npm run start:manager`, `npm run test:e2e:manager`, `npm run dist:manager` (raise `version` in `electron-builder.manager.cjs`). |
 
 ## Working style
 - Small steps. Write the test first, then the code, then run `npm test` and `npm run typecheck` (and the ui/desktop equivalents if touched) before finishing.

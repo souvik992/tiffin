@@ -118,6 +118,8 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | Online-order buzzer through the shop PC's speakers (and the Android machine's): loud enough at the counter, rings on the Billing screen, Silence works | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
 
+Done on the dev PC (2026-11-10, POS dev build, ODS 1.0.14, `npm run test:e2e:shop`): the desktop app (Electron, temp data) with the signed ODS, a local hub and two network printers on TCP that recorded the ESC/POS bytes: buzzer rings within 0.5 s on Billing and repeats every 3 s until accepted; accept prints one bill and one KOT per prep station; item notes (`>> ...`) and the order note on the KOT; automatic accept rings and prints; after a window reload a waiting order still rings; the ODS Sound switch off silences everything on that PC (banner only); preparation clock and late alarm; print alarm with the kitchen printer off, Retry prints. Not on paper, not heard by a person.
+
 Done on the dev PC (2026-10-16, ODS 1.0.0): the built signed package in a POS backend (temp folder) with a hub on the same PC: pair, website order, live on the ODS in under 0.2 s, accept = GST bill with 5% GST fee lines, customer sees accepted + bill number, through to delivered; online orders could not be switched off while the order was open. The ODS installer installed into a temp folder, its copy loaded in a POS 0.3.0 and was switched off on POS 0.2.0, and it uninstalled cleanly. No printer was used; the ODS screen itself was not opened in Electron.
 
 Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; add-on installer installed into a temp folder silently and uninstalled cleanly (the real POS install was not touched).

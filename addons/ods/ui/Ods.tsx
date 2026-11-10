@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff, Printer as PrinterIcon } from 'lucide-react';
+import { AlarmClock, Bike, CheckCircle2, ChefHat, CircleAlert, Clock, Inbox, PackageCheck, Volume2, VolumeX, Wifi, WifiOff, Printer as PrinterIcon } from 'lucide-react';
 import { BASE, host } from './host.ts';
+import { prepClock } from './arrivals.ts';
 import { setSoundOn } from './buzzer.ts';
 import { ChannelBadge, channelStripe } from './channels.tsx';
 import { CHANNEL_LABELS, useOnlineConfig } from './online.ts';
@@ -43,7 +44,7 @@ export function Ods() {
       setView(v);
     }, setLive);
   }, [notify]);
-  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 15_000); return () => clearInterval(t); }, []); // countdowns
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []); // accept and preparation countdowns
 
   const channels = online ? (Object.keys(CHANNEL_LABELS) as Array<keyof typeof CHANNEL_LABELS>).filter((c) => online.channels[c]) : [];
   const link = view?.link;
@@ -106,6 +107,7 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
   const [busy, setBusy] = useState(false);
   const isNew = (o.state === 'SENT_TO_STORE' || o.state === 'RECEIVED') && !o.billInvoiceId;
   const left = d.acceptBy ? Math.max(0, Math.round((d.acceptBy - Date.now()) / 1000)) : null;
+  const clock = prepClock(o.state, d.etaAt, Date.now());
   const act = async (fn: () => Promise<unknown>, ok?: string) => { setBusy(true); try { await fn(); if (ok) notify('success', ok); } catch (e) { fail(e); } finally { setBusy(false); } };
   // Bill and KOT: the first print needs no approval; a reprint asks a manager (withApproval)
   const print = (what: 'bill' | 'kot') => {
@@ -118,7 +120,7 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
   const accept = (acceptPriceChange = false) => act(() => api.request('POST', `${BASE}/orders/${encodeURIComponent(o.id)}/accept`, { prepMinutes: prep, acceptPriceChange }, newKey()), `${o.number} accepted: bill and kitchen ticket sent to the printer.`);
 
   return (
-    <article className={`rounded-xl border border-l-4 p-3 text-sm ${isNew ? 'border-primary bg-accent/40' : 'border-border bg-background'} ${channelStripe(d.channel)}`} aria-label={`Order ${o.number} from ${d.channel}`}>
+    <article className={`rounded-xl border border-l-4 p-3 text-sm ${isNew ? 'border-primary bg-accent/40' : clock?.late ? 'border-destructive bg-destructive/5' : 'border-border bg-background'} ${channelStripe(d.channel)}`} aria-label={`Order ${o.number} from ${d.channel}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <ChannelBadge channel={d.channel} size="md" />
         <b className="text-base">{o.number}</b>
@@ -126,6 +128,7 @@ function OrderCard({ o, acceptMode }: { o: LocalOrder; acceptMode: 'manual' | 'a
         <span className="ml-auto text-xs text-muted-foreground">{ago(d.placedAt)}</span>
       </div>
       {isNew && left !== null && acceptMode === 'manual' && <p className={`mb-1 flex items-center gap-1 text-xs font-semibold ${left < 60 ? 'text-destructive' : 'text-primary'}`}><Clock className="h-3.5 w-3.5" />Accept within {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}</p>}
+      {clock && <p role={clock.late ? 'alert' : undefined} aria-label={`Preparation time for ${o.number}: ${clock.text}`} className={`mb-1 flex w-fit items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-bold tabular-nums ${clock.late ? 'animate-pulse bg-destructive text-white' : clock.soon ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}><AlarmClock className="h-4 w-4" />{clock.text}</p>}
       <p className="font-medium">{d.customer.name ?? 'Customer'} · {d.customer.mobile}{d.customer.verified ? ' ✓' : ''}</p>
       {d.address && <p className="text-xs text-muted-foreground">{d.address.line1}{d.address.landmark ? `, ${d.address.landmark}` : ''}, {d.address.city} {d.address.pincode}</p>}
       <ul className="my-2 space-y-0.5">

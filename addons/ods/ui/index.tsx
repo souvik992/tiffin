@@ -1,7 +1,7 @@
 // ODS add-on: registers its screens with the POS (window.__POS__.register).
-import { BellRing, BellOff, Globe, MapPinned, MonitorPlay } from 'lucide-react';
+import { AlarmClock, BellRing, BellOff, Globe, MapPinned, MonitorPlay } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { dismissRecent, silence, startBuzzer, useBuzzer } from './buzzer.ts';
+import { dismissRecent, silence, silenceLate, startBuzzer, useBuzzer } from './buzzer.ts';
 import { host } from './host.ts';
 import { onlineEnabled, useOnlineConfig } from './online.ts';
 import { OnlineSettings } from './OnlineSettings.tsx';
@@ -38,10 +38,10 @@ function StatusDot() {
   );
 }
 
-/** On any screen but the ODS: a banner while online orders wait to be accepted (the buzzer rings meanwhile), or for a
- * while after new ones were accepted automatically. */
+/** On any screen but the ODS: a banner while online orders wait to be accepted (the buzzer rings meanwhile), for a
+ * while after new ones were accepted automatically, or while orders in the kitchen are past their ready time. */
 function OrderAlert() {
-  const { waiting, silenced, soundOn, recent } = useBuzzer();
+  const { waiting, silenced, soundOn, recent, late, lateSilenced } = useBuzzer();
   const [route, setRoute] = useState(() => window.location.hash);
   useEffect(() => { const f = () => setRoute(window.location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
   if (/^#\/?ods/.test(route)) return null;
@@ -55,6 +55,19 @@ function OrderAlert() {
         </div>
         <button className="btn-ghost h-10 shrink-0 px-3" onClick={dismissRecent}>OK</button>
         <a className="btn-primary h-10 shrink-0 px-4" href="#/ods" onClick={dismissRecent}>Open ODS</a>
+      </div>
+    );
+  }
+  if (!waiting.length && late.length) {
+    return (
+      <div role="alert" className="fixed left-1/2 top-3 z-[2000] flex w-[min(92vw,560px)] -translate-x-1/2 items-center gap-3 rounded-2xl border-2 border-destructive bg-card p-3 shadow-2xl">
+        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-destructive text-white ${lateSilenced || !soundOn ? '' : 'animate-pulse'}`}><AlarmClock className="h-6 w-6" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">Running late: {late.map((o) => o.number).slice(0, 3).join(', ')}{late.length > 3 ? ` (+${late.length - 3} more)` : ''}</p>
+          <p className="text-xs text-muted-foreground">{lateSilenced ? 'Alarm silenced. ' : !soundOn ? 'Sound is off on the ODS. ' : ''}The promised ready time has passed. Mark it Ready on the ODS when it is done.</p>
+        </div>
+        {!lateSilenced && soundOn && <button className="btn-ghost h-10 shrink-0 px-3" onClick={silenceLate} aria-label="Silence the late alarm"><BellOff className="h-4 w-4" />Silence</button>}
+        <a className="btn-primary h-10 shrink-0 px-4" href="#/ods">Open ODS</a>
       </div>
     );
   }

@@ -417,7 +417,7 @@ export class Connector {
       print: { receipt: printOnAccept.bill, kot: printOnAccept.kot }, // POS 0.3.11; older POS print both
     });
     this.host.db.tx(() => {
-      setState(this.host, orderId, 'ACCEPTED', { billInvoiceId: bill.invoiceId, billNo: bill.invoiceNo, billTotal: bill.grandTotal, alert: price.differs ? `Billed at the POS price Rs ${(bill.grandTotal / 100).toFixed(2)} (customer was shown Rs ${(o.total / 100).toFixed(2)}).` : null, patch: { prepMinutes: prep, posBillNo: bill.invoiceNo } });
+      setState(this.host, orderId, 'ACCEPTED', { billInvoiceId: bill.invoiceId, billNo: bill.invoiceNo, billTotal: bill.grandTotal, alert: price.differs ? `Billed at the POS price Rs ${(bill.grandTotal / 100).toFixed(2)} (customer was shown Rs ${(o.total / 100).toFixed(2)}).` : null, patch: { prepMinutes: prep, etaAt: this.host.ctx.clock.now() + prep * 60_000, posBillNo: bill.invoiceNo } }); // etaAt: the ODS preparation clock (the hub works out its own)
       enqueue(this.host, orderId, 'accept', { prepMinutes: prep, posBillNo: bill.invoiceNo }, `acc-${orderId}`);
     });
     this.bus.emit('change');
