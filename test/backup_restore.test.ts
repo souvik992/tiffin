@@ -13,10 +13,10 @@ import { serverUrl, uploadIfDue } from '../src/services/cloudBackup.ts';
 import { setSetting, getSetting } from '../src/services/settings.ts';
 import { setItemImage } from '../src/services/images.ts';
 import { startBackend } from '../src/app.ts';
-import { Hub } from '../hub/src/hub.ts';
-import { createHubServer } from '../hub/src/http.ts';
+import { NO_HUB, loadCloudHub } from './cloudHub.ts';
 import { makeEnv, quickBill, rid, startShift } from './helpers.ts';
 
+const { Hub, createHubServer } = await loadCloudHub(); // the real backup server (PosiNext Cloud)
 const png = (fill: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(400, fill)]);
 const count = (ctx: { db: Parameters<typeof get>[0] }, sql: string) => get<{ n: number }>(ctx.db, sql)!.n;
 
@@ -145,7 +145,7 @@ test('Settings > Backups: only the owner, with the PIN again; the POS restarts i
   } finally { await p.b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('online backup: pair with the Tiffin backup server, upload (photos too), then restore from it on a POS that lost its photos', async () => {
+test('online backup: pair with the Tiffin backup server, upload (photos too), then restore from it on a POS that lost its photos', { skip: NO_HUB }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pos-cloud-'));
   const hub = new Hub({ dbPath: join(dir, 'hub.db') });
   const hs: Server = createHubServer(hub, { adminKey: 'k' });
@@ -196,7 +196,7 @@ test('online backup: pair with the Tiffin backup server, upload (photos too), th
   }
 });
 
-test('online backup schedule: uploads the newest backup only when on, new, and older than the chosen interval', async () => {
+test('online backup schedule: uploads the newest backup only when on, new, and older than the chosen interval', { skip: NO_HUB }, async () => {
   const env = makeEnv();
   const hubDir = mkdtempSync(join(tmpdir(), 'hub-sched-'));
   const hub = new Hub({ dbPath: join(hubDir, 'hub.db') });

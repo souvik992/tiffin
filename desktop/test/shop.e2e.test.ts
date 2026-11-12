@@ -19,6 +19,8 @@ import { parseEscPos } from '../../src/services/printing/virtual.ts';
 
 const here = join(import.meta.dirname, '..');
 const repo = join(here, '..');
+// the order hub is PosiNext Cloud's (repository posinext-cloud next to this one, or POSINEXT_CLOUD_DIR)
+const cloudHub = join(process.env.POSINEXT_CLOUD_DIR ?? join(repo, '..', 'posinext-cloud'), 'hub');
 const electronExe = createRequire(import.meta.url)('electron') as string;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -61,7 +63,7 @@ test('shop rehearsal: online orders, buzzer, bill + KOT with notes, preparation 
   const hubDir = mkdtempSync(join(tmpdir(), 'hub-shop-'));
   const hubPort = await freePort();
   const HUB = `http://localhost:${hubPort}`;
-  const hubProc = spawn(process.execPath, [join(repo, 'hub', 'scripts', 'dev.ts')], { cwd: join(repo, 'hub'), env: { ...process.env, HUB_DATA_DIR: hubDir, HUB_PORT: String(hubPort), HUB_ADMIN_KEY: 'shop-test' } });
+  const hubProc = spawn(process.execPath, [join(cloudHub, 'scripts', 'dev.ts')], { cwd: cloudHub, env: { ...process.env, HUB_DATA_DIR: hubDir, HUB_PORT: String(hubPort), HUB_ADMIN_KEY: 'shop-test' } });
   let hubOut = '';
   hubProc.stdout.on('data', (d) => { hubOut += d; });
   hubProc.stderr.on('data', (d) => { hubOut += d; });
@@ -125,16 +127,16 @@ test('shop rehearsal: online orders, buzzer, bill + KOT with notes, preparation 
     await page.reload(); // the buzzer starts once online orders are on
     await signedIn();
 
-    let store = await hub('GET', '/v1/stores/demo?channel=website');
-    await until(async () => { store = await hub('GET', '/v1/stores/demo?channel=website'); return store.json.open === true && store.json.menu?.items?.length > 0; }, 'menu published, store open');
+    let store = await hub('GET', '/v1/stores/sample?channel=website');
+    await until(async () => { store = await hub('GET', '/v1/stores/sample?channel=website'); return store.json.open === true && store.json.menu?.items?.length > 0; }, 'menu published, store open');
     const items = store.json.menu.items as Array<{ id: string; name: string }>;
     const burger = items.find((i) => i.name === 'Cheese Burger')!, brownie = items.find((i) => i.name === 'Brownie')!;
     const place = async (mobile: string, burgerNote: string | null, note: string | null) => {
       const { json: s } = await hub('POST', '/v1/otp/send', { mobile });
       const { json: v } = await hub('POST', '/v1/otp/verify', { mobile, otp: s.devCode });
       const lines = [{ itemId: burger.id, qtyMilli: 2000, modifierIds: [], note: burgerNote }, { itemId: brownie.id, qtyMilli: 1000, modifierIds: [], note: null }];
-      const q = await hub('POST', '/v1/stores/demo/quote', { fulfilment: 'PICKUP', lines, channel: 'website' });
-      const r = await hub('POST', '/v1/stores/demo/orders', { fulfilment: 'PICKUP', payment: 'COD', customer: { name: 'Shop Test', mobile }, otpToken: v.otpToken, location: null, address: null, lines, note, menuVersion: store.json.menu.version, expectedTotal: q.json.total, channel: 'website' });
+      const q = await hub('POST', '/v1/stores/sample/quote', { fulfilment: 'PICKUP', lines, channel: 'website' });
+      const r = await hub('POST', '/v1/stores/sample/orders', { fulfilment: 'PICKUP', payment: 'COD', customer: { name: 'Shop Test', mobile }, otpToken: v.otpToken, location: null, address: null, lines, note, menuVersion: store.json.menu.version, expectedTotal: q.json.total, channel: 'website' });
       assert.equal(r.status, 201, JSON.stringify(r.json));
       return r.json as { order: { id: string; number: string } };
     };
@@ -199,7 +201,7 @@ test('shop rehearsal: online orders, buzzer, bill + KOT with notes, preparation 
     const at = reversed.map((c) => shown.indexOf(c.name));
     assert.ok(at.every((p, i) => p >= 0 && (i === 0 || p > at[i - 1]!)), 'Billing shows the new category order');
     await until(async () => {
-      const m = (await hub('GET', '/v1/stores/demo?channel=website')).json.menu as { categories: Array<{ name: string; sort: number }> };
+      const m = (await hub('GET', '/v1/stores/sample?channel=website')).json.menu as { categories: Array<{ name: string; sort: number }> };
       return JSON.stringify([...m.categories].sort((a, b) => a.sort - b.sort).map((c) => c.name)) === JSON.stringify(reversed.map((c) => c.name));
     }, 'online menu follows the category order', 40_000);
 

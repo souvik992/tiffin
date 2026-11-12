@@ -42,8 +42,6 @@ jobs:
           npm ci
           npm run typecheck
           npm test
-      - name: Order hub
-        run: node --test --test-concurrency=1 "hub/test/*.test.ts"
       - name: ODS add-on
         working-directory: addons/ods
         run: |

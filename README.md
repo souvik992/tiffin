@@ -43,7 +43,7 @@ src/startup.ts  integrity check, queue recovery, journal repair/compaction, back
 test/           228 tests, including child-process kill tests and multi-process concurrency
 scripts/bench.ts
 addons/         separately installed signed modules (docs/ADDONS.md): ods (online orders, serviceability, live ODS)
-hub/            the online order hub (hub/README.md)
+(the online order hub is PosiNext Cloud, repository posinext-cloud)
 desktop/        Windows desktop app (Electron host, installer, auto-update): see desktop/README.md
 ui/             React billing UI (see ui/README.md): talks to the local API, never calculates money
 docs/           API.md, DECISIONS.md, HARDWARE_TEST_PLAN.md, RECEIPT_TEMPLATES.md (bill design files)

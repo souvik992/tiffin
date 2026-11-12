@@ -8,9 +8,7 @@ import { get } from '../../../src/store/db.ts';
 import { applyAddonMigrations, makeHost } from '../../../src/addons/host.ts';
 import type { AddonRoute } from '../../../src/addons/host.ts';
 import { makeEnv, rid, startShift } from '../../../test/helpers.ts';
-import { Hub } from '../../../hub/src/hub.ts';
-import { createHubServer } from '../../../hub/src/http.ts';
-import { UrbanPiper } from '../../../hub/src/urbanpiper.ts';
+import { NO_HUB, loadCloudHub } from '../../../test/cloudHub.ts';
 import { register } from '../backend/index.ts';
 import { saveOnlineConfig } from '../backend/onlineConfig.ts';
 import { saveServiceability } from '../backend/serviceability.ts';
@@ -20,6 +18,10 @@ import { parseEscPos } from '../../../src/services/printing/virtual.ts';
 import { all } from '../../../src/store/db.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 import type { Hours } from '../../../contract/src/serviceability.ts';
+
+// the real order hub (PosiNext Cloud); every test here needs it
+const { Hub, createHubServer, UrbanPiper } = await loadCloudHub();
+const hubTest = NO_HUB ? test.skip : test;
 
 const allDay = Object.fromEntries(['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ open: '00:00', close: '23:59' }]])) as Hours;
 const until = async (fn: () => boolean | Promise<boolean>, what: string, ms = 5000) => {
@@ -32,7 +34,7 @@ async function setup() {
   const hub = new Hub({ dbPath: join(dir, 'hub.db'), devOtp: true });
   // a stand-in UrbanPiper: the hub's calls to it are recorded, never sent
   const upCalls: Array<{ path: string; body: any }> = [];
-  const up = new UrbanPiper(hub, { kick: false, fetch: async (url, init) => { upCalls.push({ path: url, body: init.body ? JSON.parse(init.body) : null }); return { status: 200, text: async () => '{"status":"success"}' }; } });
+  const up = new UrbanPiper(hub, { kick: false, fetch: async (url: string, init: { body?: string }) => { upCalls.push({ path: url, body: init.body ? JSON.parse(init.body) : null }); return { status: 200, text: async () => '{"status":"success"}' }; } });
   const server: Server = createHubServer(hub, { adminKey: 'k', heartbeatMs: 100, urbanpiper: up });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -46,7 +48,7 @@ async function setup() {
     return { status: r.status, json: await r.json().catch(() => null) as any };
   };
   // the store on the hub, and the POS settings an owner would make
-  const store = hub.createStore('demo', 'Demo');
+  const store = hub.createStore('sample', 'Demo');
   const five = get<{ id: string }>(env.ctx.db, 'SELECT id FROM tax_group WHERE rate_bp = 500 LIMIT 1')!.id;
   saveFeeTaxGroup(host, five);
   saveServiceability(host, env.owner, rid(), { ...DEFAULT_SERVICEABILITY, location: { lat: 13.0213, lng: 77.646, label: 'Store' }, hours: allDay, roadFactor: 1 });
@@ -60,8 +62,8 @@ async function setup() {
     const fulfilment = o.fulfilment ?? 'PICKUP';
     const lines = [{ itemId: burger, qtyMilli: (o.qty ?? 2) * 1000 }];
     const location = fulfilment === 'DELIVERY' ? { lat: 13.03, lng: 77.646 } : null;
-    const q = (await call('POST', '/v1/stores/demo/quote', { fulfilment, location, lines })).json;
-    const r = await call('POST', '/v1/stores/demo/orders', { fulfilment, payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, location, menuVersion: 1, expectedTotal: q.total,
+    const q = (await call('POST', '/v1/stores/sample/quote', { fulfilment, location, lines })).json;
+    const r = await call('POST', '/v1/stores/sample/orders', { fulfilment, payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, location, menuVersion: 1, expectedTotal: q.total,
       address: fulfilment === 'DELIVERY' ? { line1: '12, 4th Cross', city: 'Bengaluru', pincode: '560043' } : null }, { 'idempotency-key': rid() });
     assert.equal(r.status, 201, JSON.stringify(r.json));
     return r.json as { order: { id: string; number: string; total: number }; accessToken: string };
@@ -71,11 +73,11 @@ async function setup() {
   return { env, host, conn, hub, call, order, hubState, close, burger, sink, base, up, upCalls };
 }
 
-test('ODS connector: pairs, publishes, receives orders live, bills on accept (GST bill + KOT), and moves them through to collected', async () => {
+hubTest('ODS connector: pairs, publishes, receives orders live, bills on accept (GST bill + KOT), and moves them through to collected', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
-    const page = (await s.call('GET', '/v1/stores/demo')).json;
+    const page = (await s.call('GET', '/v1/stores/sample')).json;
     assert.deepEqual([page.open, page.name], [true, 'Demo Burger Hub']); // published menu, store name from the POS, accepting (shift open)
     const placed = await s.order('9000000101');
     await until(() => getOrder(s.host, placed.order.id) !== null, 'order arrives');
@@ -96,7 +98,7 @@ test('ODS connector: pairs, publishes, receives orders live, bills on accept (GS
   } finally { await s.close(); }
 });
 
-test('ODS connector: automatic accepting bills on arrival; orders placed while the POS was disconnected arrive when it reconnects', async () => {
+hubTest('ODS connector: automatic accepting bills on arrival; orders placed while the POS was disconnected arrive when it reconnects', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -117,7 +119,7 @@ test('ODS connector: automatic accepting bills on arrival; orders placed while t
   } finally { await s.close(); }
 });
 
-test('ODS connector: a customer cancel that beats the accept (F11) and a price change since ordering (F5) are flagged, not billed silently', async () => {
+hubTest('ODS connector: a customer cancel that beats the accept (F11) and a price change since ordering (F5) are flagged, not billed silently', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -144,7 +146,7 @@ test('ODS connector: a customer cancel that beats the accept (F11) and a price c
   } finally { await s.close(); }
 });
 
-test('ODS connector: pairing needs a secure (https) hub address, except a hub on this PC', async () => {
+hubTest('ODS connector: pairing needs a secure (https) hub address, except a hub on this PC', async () => {
   const t = await setup();
   try {
     await assert.rejects(t.conn.pair(t.env.owner, 'http://orders.example.in', 'ABCD-EFGH'), /https:\/\//);
@@ -153,18 +155,18 @@ test('ODS connector: pairing needs a secure (https) hub address, except a hub on
   } finally { await t.close(); }
 });
 
-test('ODS connector: one connection link from the hub admin page (address + pairing code) connects the POS', async () => {
+hubTest('ODS connector: one connection link from the hub admin page (address + pairing code) connects the POS', async () => {
   const t = await setup();
   try {
-    const code = t.hub.pairingCodeForSlug('demo');
+    const code = t.hub.pairingCodeForSlug('sample');
     await assert.rejects(t.conn.pair(t.env.owner, 'http://orders.example.in/connect/ABCD-EFGH', ''), /https:\/\//); // the same https rule
     await assert.rejects(t.conn.pair(t.env.owner, `${t.base}/somewhere/else`, ''), /connection link/);
     const l = await t.conn.pair(t.env.owner, `  ${t.base}/connect/${code.toLowerCase()}/  `, '');
-    assert.deepEqual([l.paired, l.hubUrl, l.store?.slug], [true, t.base, 'demo']);
+    assert.deepEqual([l.paired, l.hubUrl, l.store?.slug], [true, t.base, 'sample']);
   } finally { await t.close(); }
 });
 
-test('ODS connector: a POS that stops right after billing sends the accept on restart (F3); replayed events change nothing (F4); online orders cannot be switched off while orders are open (F15)', async () => {
+hubTest('ODS connector: a POS that stops right after billing sends the accept on restart (F3); replayed events change nothing (F4); online orders cannot be switched off while orders are open (F15)', async () => {
   const s = await setup();
   let second: Awaited<ReturnType<typeof register>> | null = null;
   try {
@@ -193,16 +195,16 @@ test('ODS connector: a POS that stops right after billing sends the accept on re
   } finally { await second?.stop(); await s.close(); }
 });
 
-test('ODS connector: menu photos go to the hub once (checked against their content name) and show on the ordering page; removed photos go away', async () => {
+hubTest('ODS connector: menu photos go to the hub once (checked against their content name) and show on the ordering page; removed photos go away', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
     const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
     await s.conn.publish();
-    const page = (await s.call('GET', '/v1/stores/demo')).json;
+    const page = (await s.call('GET', '/v1/stores/sample')).json;
     assert.equal(page.menu.items.find((i: { id: string }) => i.id === s.burger).image, imageFile);
-    const r = await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`);
+    const r = await fetch(`${s.base}/v1/stores/sample/images/${imageFile}`);
     assert.equal(r.status, 200);
     assert.equal(r.headers.get('content-type'), 'image/png');
     assert.deepEqual(Buffer.from(await r.arrayBuffer()), Buffer.from(PNG1, 'base64'));
@@ -215,11 +217,11 @@ test('ODS connector: menu photos go to the hub once (checked against their conte
     assert.deepEqual((await s.call('GET', '/v1/pos/images', undefined, { authorization: `Bearer ${key}` })).json, { names: [imageFile] });
     removeItemImage(s.env.ctx, s.env.owner, rid(), s.burger);
     await s.conn.publish();
-    assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 404);
+    assert.equal((await fetch(`${s.base}/v1/stores/sample/images/${imageFile}`)).status, 404);
   } finally { await s.close(); }
 });
 
-test('ODS connector: after connecting to another hub (e.g. from a test hub to the live one), the photos go to the new hub too', async () => {
+hubTest('ODS connector: after connecting to another hub (e.g. from a test hub to the live one), the photos go to the new hub too', async () => {
   const s = await setup();
   const dir2 = mkdtempSync(join(tmpdir(), 'ods-conn2-'));
   const hub2 = new Hub({ dbPath: join(dir2, 'hub.db'), devOtp: true });
@@ -231,7 +233,7 @@ test('ODS connector: after connecting to another hub (e.g. from a test hub to th
     const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
     await s.conn.publish();
-    assert.equal((await fetch(`${s.base}/v1/stores/demo/images/${imageFile}`)).status, 200, 'on the first hub');
+    assert.equal((await fetch(`${s.base}/v1/stores/sample/images/${imageFile}`)).status, 200, 'on the first hub');
     // the same POS, same photos, now connected to another hub
     const store2 = hub2.createStore('live', 'Live');
     await s.conn.pair(s.env.owner, base2, store2.pairingCode);
@@ -248,14 +250,14 @@ test('ODS connector: after connecting to another hub (e.g. from a test hub to th
   }
 });
 
-test('ODS Menu sync > Sync now sends the menu and every photo again, even ones the POS thinks the hub has; it says how many', async () => {
+hubTest('ODS Menu sync > Sync now sends the menu and every photo again, even ones the POS thinks the hub has; it says how many', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
     const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const { imageFile } = setItemImage(s.env.ctx, s.env.owner, rid(), s.burger, PNG1);
     await s.conn.publish();
-    const photo = () => fetch(`${s.base}/v1/stores/demo/images/${imageFile}`).then((r) => r.status);
+    const photo = () => fetch(`${s.base}/v1/stores/sample/images/${imageFile}`).then((r) => r.status);
     assert.equal(await photo(), 200);
     s.hub.db.prepare('DELETE FROM image').run(); // the hub lost its photos (restored, rebuilt)
     await s.conn.publish();
@@ -270,7 +272,7 @@ test('ODS Menu sync > Sync now sends the menu and every photo again, even ones t
   } finally { await s.close(); }
 });
 
-test('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
+hubTest('ODS menu sync: each channel lists its own items at its own prices; descriptions travel; orders are billed at the channel price', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -284,23 +286,23 @@ test('ODS menu sync: each channel lists its own items at its own prices; descrip
     assert.throws(() => saveMenuSync(s.host, s.env.manager, 'app', { mode: 'all' }), /permission|allowed|owner/i);
     assert.throws(() => saveMenuSync(s.host, s.env.owner, 'app', { mode: 'include', items: [] }), /at least one/);
     await s.conn.publish(true);
-    const web = (await s.call('GET', '/v1/stores/demo')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
-    const app = (await s.call('GET', '/v1/stores/demo?channel=app')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
+    const web = (await s.call('GET', '/v1/stores/sample')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
+    const app = (await s.call('GET', '/v1/stores/sample?channel=app')).json.menu.items as Array<{ id: string; price: number; description?: string }>;
     assert.ok(!web.some((i) => i.id === brownie) && web.some((i) => i.id === s.burger));
     assert.deepEqual(app.map((i) => [i.id, i.price]).sort(), [[brownie, 9900], [s.burger, 14200]].sort()); // 129 + 10% = 141.90 -> 142
     assert.equal(app.find((i) => i.id === brownie)!.description, 'Warm, with chocolate sauce');
     assert.ok(!('prices' in app[0]!) && !('channels' in app[0]!), 'customers see only their price');
     // ordering the excluded brownie on the website is refused
-    const q = await s.call('POST', '/v1/stores/demo/quote', { fulfilment: 'PICKUP', lines: [{ itemId: brownie, qtyMilli: 1000 }] });
+    const q = await s.call('POST', '/v1/stores/sample/quote', { fulfilment: 'PICKUP', lines: [{ itemId: brownie, qtyMilli: 1000 }] });
     assert.equal(q.status, 409);
     // an app order is priced and billed at the app price
     const mobile = '9000000501';
     const code = (await s.call('POST', '/v1/otp/send', { mobile })).json.devCode;
     const { otpToken } = (await s.call('POST', '/v1/otp/verify', { mobile, otp: code })).json;
     const lines = [{ itemId: s.burger, qtyMilli: 2000 }];
-    const aq = (await s.call('POST', '/v1/stores/demo/quote', { fulfilment: 'PICKUP', lines, channel: 'app' })).json;
+    const aq = (await s.call('POST', '/v1/stores/sample/quote', { fulfilment: 'PICKUP', lines, channel: 'app' })).json;
     assert.equal(aq.itemsTotal, 28400);
-    const placed = await s.call('POST', '/v1/stores/demo/orders', { fulfilment: 'PICKUP', payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, menuVersion: 1, expectedTotal: aq.total, channel: 'app' }, { 'idempotency-key': rid() });
+    const placed = await s.call('POST', '/v1/stores/sample/orders', { fulfilment: 'PICKUP', payment: 'COD', customer: { name: 'Asha', mobile }, otpToken, lines, menuVersion: 1, expectedTotal: aq.total, channel: 'app' }, { 'idempotency-key': rid() });
     assert.equal(placed.status, 201, JSON.stringify(placed.json));
     await until(() => getOrder(s.host, placed.json.order.id) !== null, 'arrives');
     const acc = s.conn.accept(s.env.cashier, placed.json.order.id, 10, rid());
@@ -308,7 +310,7 @@ test('ODS menu sync: each channel lists its own items at its own prices; descrip
   } finally { await s.close(); }
 });
 
-test('ODS connector: what prints on accepting (bill and/or KOT) is the owner\'s choice; Bill and KOT buttons print once freely, then reprints need a manager', async () => {
+hubTest('ODS connector: what prints on accepting (bill and/or KOT) is the owner\'s choice; Bill and KOT buttons print once freely, then reprints need a manager', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -334,7 +336,7 @@ test('ODS connector: what prints on accepting (bill and/or KOT) is the owner\'s 
   } finally { await s.close(); }
 });
 
-test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy price with its packaging charge, paid by Swiggy; its rider and its cancellation reach the ODS', async () => {
+hubTest('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy price with its packaging charge, paid by Swiggy; its rider and its cancellation reach the ODS', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -342,7 +344,7 @@ test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy pric
     saveMenuSync(s.host, s.env.owner, 'swiggy', { mode: 'all', items: [], pricing: 'custom', markupBp: 1000, prices: {} });
     await s.conn.publish(true);
     s.up.saveAccount({ username: 'u', apiKey: 'secret-key-1', bizId: '42' }, s.base);
-    s.up.saveLink('demo', { locationRef: 'DEMO-1', city: 'Bengaluru', platforms: ['swiggy'] });
+    s.up.saveLink('sample', { locationRef: 'DEMO-1', city: 'Bengaluru', platforms: ['swiggy'] });
     const token = (s.hub.db.prepare('SELECT webhook_token FROM up_account').get() as { webhook_token: string }).webhook_token;
     const hook = (event: string, body: unknown) => s.call('POST', '/v1/urbanpiper/42', body, { 'x-tiffin-token': token, 'x-upr-event-type': event });
     const relay = {
@@ -387,7 +389,7 @@ test('ODS connector: a Swiggy order from UrbanPiper is billed at the Swiggy pric
   } finally { await s.close(); }
 });
 
-test('ODS connector: a delivery order on the ODS: on the way (rider) and delivered reach the hub', async () => {
+hubTest('ODS connector: a delivery order on the ODS: on the way (rider) and delivered reach the hub', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
@@ -406,17 +408,17 @@ test('ODS connector: a delivery order on the ODS: on the way (rider) and deliver
   } finally { await s.close(); }
 });
 
-test('ODS connector: when the hub holds a higher menu version (a restored backup, the store published from before), the POS catches up and its new settings arrive', async () => {
+hubTest('ODS connector: when the hub holds a higher menu version (a restored backup, the store published from before), the POS catches up and its new settings arrive', async () => {
   const s = await setup();
   try {
     await until(() => s.conn.link().state === 'connected', 'connected');
     await s.conn.publish();
     // the hub has version 50 from before, saved just now: the hub would call version 2 from this POS stale
-    s.hub.db.prepare("UPDATE store SET menu_version = 50, menu_at = ? WHERE slug = 'demo'").run(Date.now());
+    s.hub.db.prepare("UPDATE store SET menu_version = 50, menu_at = ? WHERE slug = 'sample'").run(Date.now());
     const evening = Object.fromEntries(['0', '1', '2', '3', '4', '5', '6'].map((d) => [d, [{ open: '12:00', close: '23:59' }]])) as Hours;
     saveServiceability(s.host, s.env.owner, rid(), { ...DEFAULT_SERVICEABILITY, location: { lat: 13.0213, lng: 77.646, label: 'Store' }, hours: evening, roadFactor: 1 });
     await s.conn.publish();
-    const m = s.hub.menu(s.hub.store({ slug: 'demo' }))!;
+    const m = s.hub.menu(s.hub.store({ slug: 'sample' }))!;
     assert.deepEqual(m.serviceability.hours['0'], [{ open: '12:00', close: '23:59' }], 'the new opening times reached the hub');
     assert.equal(m.version, 51);
     assert.equal(s.host.getSetting('ods_menu_version'), '51');
