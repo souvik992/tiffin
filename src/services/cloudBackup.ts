@@ -12,7 +12,7 @@ import { imagesDir, IMAGE_FILE } from './images.ts';
 import { newStage } from './restore.ts';
 
 /**
- * Online backups to the Tiffin backup server (the order hub, hub/src/backups.ts). Off until the owner connects this
+ * Online backups to the Tiffin backup server (the order hub, PosiNext Cloud: posinext-cloud hub/src/backups.ts). Off until the owner connects this
  * POS with a pairing code and switches it on: nothing connects out before that (offline is the default).
  * Each upload is the newest verified local backup, gzipped, with its SHA-256; the menu photos it uses go first, only
  * those the server does not have. Settings: cloud_backup_url, cloud_backup_key (a secret: "_key" settings never leave

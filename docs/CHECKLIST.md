@@ -257,3 +257,5 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Online dine-in orders (no DINE_IN fulfilment; the hub refuses it), and an "already paid at the counter" online order that does not bill again: waiting for how the customer's dine-in orders arrive
 - [ ] KOT on a real kitchen printer (and with the bill on a real receipt printer); table numbers / dine-in on the KOT (the POS has no tables)
 
+
+- [x] 2026-11-12: the order hub moved out of this repository into PosiNext Cloud (repository posinext-cloud), merged with DinePOS Cloud; hub/ removed here. Moving the live Tiffin hub: posinext-cloud hub/deploy/merge-tiffin.sh (dry run, copies of both databases; the old address and UrbanPiper token keep working)
