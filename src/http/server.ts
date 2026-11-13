@@ -29,6 +29,7 @@ import type { PrintQueue } from '../services/printing/queue.ts';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { BACKUP_FILE, copyDirOf, copyToFolder, listBackups, runBackup, backupStatus } from '../services/backup.ts';
+import { salesSyncStatus, setSalesSync, syncSales } from '../services/salesSync.ts';
 import { backupOnlineNow, cloudStatus, deviceName, disconnectCloud, downloadToStage, listOnline, pairCloud, setCloudOptions, EVERY_HOURS } from '../services/cloudBackup.ts';
 import { dismissLastRestore, lastRestore, stageRestore } from '../services/restore.ts';
 import { getSetting } from '../services/settings.ts';
@@ -360,6 +361,15 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('PATCH', '/api/backup/cloud', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); setCloudOptions(c.ctx, body(c, obj({ on: opt(bool), everyHours: opt(int({ min: 1, max: 24 })) }))); return backupOverview(c); });
   add('DELETE', '/api/backup/cloud', { idem: false }, (c) => { assertPerm(c.actor, 'backup.run'); disconnectCloud(c.ctx); audit(c.ctx, c.actor.userId, 'backup.cloud_disconnect', 'settings'); return backupOverview(c); });
   add('POST', '/api/backup/cloud/now', { idem: false }, async (c) => { assertPerm(c.actor, 'backup.run'); await backupOnlineNow(c.ctx); return backupOverview(c); });
+  // sales to the owner's portal (src/services/salesSync.ts): its state, switching it off or on, and sending now
+  add('GET', '/api/sales-sync', {}, (c) => { assertPerm(c.actor, 'backup.run'); return salesSyncStatus(c.ctx); });
+  add('PATCH', '/api/sales-sync', { idem: false }, (c) => {
+    assertPerm(c.actor, 'backup.run');
+    const st = setSalesSync(c.ctx, body(c, obj({ on: bool })).on);
+    audit(c.ctx, c.actor.userId, 'sales_sync.switch', 'settings', undefined, { on: st.on });
+    return st;
+  });
+  add('POST', '/api/sales-sync/now', { idem: false }, async (c) => { assertPerm(c.actor, 'backup.run'); await syncSales(c.ctx); return salesSyncStatus(c.ctx); });
   add('GET', '/api/backup/cloud/list', {}, async (c) => { assertPerm(c.actor, 'backup.run'); return { backups: await listOnline(c.ctx) }; });
   // Restore: the owner's PIN again, the backup is checked and staged, then the POS restarts itself and applies it.
   add('POST', '/api/restore', { idem: false }, async (c) => {
