@@ -19,7 +19,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (228 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (230 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
 | `android/` | `node android/scripts/prepare.ts` (after `cd ui && npm run build`), then in `android/`: `gradlew.bat assembleDebug` (or `assembleRelease`, signed with the key in `%USERPROFILE%\.tiffinpos\android-signing`) with `JAVA_HOME` = Android Studio's `jbr`. `node android/scripts/github-secrets.ts` writes the 4 GitHub secrets for signed CI builds into a file next to the key. Emulator AVD `Pixel_10_Pro_XL` (x86_64); start it with `-memory 4096 -cores 4` (2 GB freezes its System UI). |
@@ -67,4 +67,4 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 4. Raster text for ₹ and Hindi.
 5. Online orders phase 2+ (docs/ONLINE_ORDERS_PLAN.md): customer web app, SMS OTP, payment gateway, hosting the hub; human review of the add-on loader. Swiggy/Zomato through UrbanPiper is built (on main since 0.3.12): test against the pos-int account, then certification.
 6. LAN multi-device.
-7. Opt-in cloud sync (the outbox table is already written).
+7. Cloud sync: sales go up for the portal's Analytics page (`src/services/salesSync.ts`, built 2026-11-14; on once the POS is linked with the cloud, `sales_sync_on` = 0 switches it off; no screen for the switch yet, only `/api/sales-sync`). Menu and stock sync down are not built.

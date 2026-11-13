@@ -6,6 +6,7 @@ import { createServer, listen } from './http/server.ts';
 import { defaultQueue, scheduleBackups, startupChecks } from './startup.ts';
 import { runBackup } from './services/backup.ts';
 import { scheduleCloudBackups } from './services/cloudBackup.ts';
+import { scheduleSalesSync } from './services/salesSync.ts';
 import { applyPendingRestore } from './services/restore.ts';
 import { EMPTY_ADDONS, loadAddons } from './addons/host.ts';
 import { DEFAULT_CLOUD_URL, renew, TRUSTED_KEYS, type LicenceConfig } from './licence/service.ts';
@@ -74,6 +75,8 @@ async function boot(o: BackendOptions, wantPort: number, restart: () => void): P
   queue.start(1000);
   const stopBackups = o.scheduleBackups === false ? () => {} : scheduleBackups(ctx);
   const stopCloud = o.scheduleBackups === false ? () => {} : scheduleCloudBackups(ctx);
+  // bills to the owner's portal (Analytics): quiet until this POS is linked with the cloud (src/services/salesSync.ts)
+  const stopSales = o.scheduleBackups === false ? () => {} : scheduleSalesSync(ctx);
   const licence: LicenceConfig = { enforced: o.licence?.enforced === true, hardwareId: hardwareId(), cloudUrl: o.licence?.cloudUrl ?? DEFAULT_CLOUD_URL, trusted: TRUSTED_KEYS };
   // renewals and paid keys from DinePOS Cloud: soon after start, then every hour (quiet when offline or not linked)
   const renewNow = () => void renew(ctx, licence).catch((e) => ctx.logger.warn('licence renewal failed', String(e)));
@@ -87,7 +90,7 @@ async function boot(o: BackendOptions, wantPort: number, restart: () => void): P
   let closing: Promise<void> | null = null;
   const shutdown = (reason: string) => closing ??= (async () => {
     ctx.logger.info(`${reason}: shutting down`);
-    queue.stop(); stopBackups(); stopCloud();
+    queue.stop(); stopBackups(); stopCloud(); stopSales();
     if (firstRenew) clearTimeout(firstRenew);
     if (renewTimer) clearInterval(renewTimer);
     await addons.stop();
