@@ -178,6 +178,7 @@ Order follows the project plan in `CLAUDE.md`.
 - [ ] Reports follow-ups: GSTR-1 B2B/B2CS JSON export, XLSX download, profit report (needs recipe costing), scheduled email of the daily report, reports for a single shift (X-report)
 - [x] Settings screen for backups (Settings > Backups, owner only)
 - [x] Sales sync to PosiNext Cloud for the portal's Analytics page (`src/services/salesSync.ts`): each bill, cancellation and credit note once, in order; kept while offline; a restored POS or cloud starts a new stream. Tested against the real hub
+- [x] Purchases and the stock list go up too, for the portal's Purchases & stock page: each purchase and void once (never the supplier's GSTIN); the whole stock list when it changed, at most every 5 minutes, with what each day's sales used and wasted at last cost
 - [ ] Sales sync follow-ups: a switch and status on a Settings screen (today only `/api/sales-sync`); payment mode corrections made after billing are not sent; not tried in the installed desktop app or on Android
 - [ ] Backups follow-ups: restore from a USB stick or SD card inside the Android app (today: online or this device's backups; the USB copy works), hosting the backup server, optional encryption of online backups, an admin view of stores' online backups
 - [x] Settings > Online orders: master switch (off = offline mode, the default) and sales channels App, Website, Swiggy, Zomato; ODS appears in the side menu only when on; online/offline dot at the bottom of the side menu

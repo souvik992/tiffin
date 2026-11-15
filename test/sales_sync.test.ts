@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { all, get } from '../src/store/db.ts';
 import { cancelInvoice, createCreditNote } from '../src/services/invoices.ts';
+import { adjustStock, createPurchase, createStockItem, voidPurchase } from '../src/services/stock.ts';
 import { getSetting, setSetting } from '../src/services/settings.ts';
 import { salesSyncStatus, setSalesSync, syncSales } from '../src/services/salesSync.ts';
 import { NO_HUB, loadCloudHub } from './cloudHub.ts';
@@ -109,5 +110,38 @@ test('sales sync: no internet keeps the bills for later; a lost answer or a rest
     quickBill(env, [[item]]);
     assert.equal(await syncSales(env.ctx), 0);
     assert.match(salesSyncStatus(env.ctx).error!, /no longer linked/);
+  } finally { await c.close(); env.cleanup(); }
+});
+
+test('sales sync: purchases go up once with supplier and materials (voids too), and the stock list whenever it changed', { skip: NO_HUB }, async () => {
+  const env = makeEnv(), c = await cloud();
+  try {
+    const paneer = createStockItem(env.ctx, env.manager, rid(), { name: 'Paneer', unit: 'kg', reorderLevelMilli: 2000, openingQtyMilli: 1000, openingUnitCost: 30_000 });
+    const oil = createStockItem(env.ctx, env.manager, rid(), { name: 'Oil', unit: 'l' });
+    const buy = (supplierName: string) => createPurchase(env.ctx, env.manager, rid(), { supplierName, supplierGstin: '29ABCDE1234F1Z5', billNo: 'FD-101', lines: [{ stockItemId: paneer.id, qtyMilli: 2500, unitCost: 32_000 }, { stockItemId: oil.id, qtyMilli: 1000, unitCost: 15_000 }] });
+    const kept = buy('Fresh Dairy'), wrong = buy('Wrong Supplier');
+    voidPurchase(env.ctx, env.manager, rid(), { purchaseId: wrong.purchase.id, reason: 'Entered twice' });
+    adjustStock(env.ctx, env.manager, rid(), { stockItemId: paneer.id, kind: 'WASTAGE', qtyMilli: 500, reason: 'Spoiled' });
+    setSetting(env.ctx, 'cloud_backup_url', c.url);
+    setSetting(env.ctx, 'cloud_backup_key', c.key);
+
+    assert.equal(await syncSales(env.ctx, { stockEveryMs: 0 }), 3, 'two purchases and one void');
+    const q = (sql: string) => c.hub.db.prepare(sql).all() as Array<Record<string, unknown>>;
+    const up = q('SELECT purchase_id, supplier, bill_no, total, voided, lines_json FROM inv_purchase ORDER BY voided');
+    assert.deepEqual(up.map((p) => [p.purchase_id, p.supplier, p.bill_no, p.total, p.voided]), [[kept.purchase.id, 'Fresh Dairy', 'FD-101', 95_000, 0], [wrong.purchase.id, 'Wrong Supplier', 'FD-101', 95_000, 1]]);
+    assert.deepEqual(JSON.parse(up[0]!.lines_json as string), [{ name: 'Paneer', unit: 'kg', qtyMilli: 2500, amount: 80_000 }, { name: 'Oil', unit: 'l', qtyMilli: 1000, amount: 15_000 }]);
+    assert.doesNotMatch(JSON.stringify(q('SELECT payload_json FROM sync_event')), /29ABCDE1234F1Z5/, "the supplier's GSTIN stays in the POS");
+
+    // the stock list: 1 + 2.5 - 0.5 kg of paneer at the last cost, and today's wastage valued at it
+    assert.deepEqual(q('SELECT name, unit, on_hand_milli, reorder_milli, unit_cost FROM inv_stock ORDER BY name').map((s) => Object.values(s)), [['Oil', 'l', 1000, 0, 15_000], ['Paneer', 'kg', 3000, 2000, 32_000]]);
+    assert.deepEqual(q('SELECT used, waste FROM inv_usage').map((u) => Object.values(u)), [[0, 16_000]]);
+    const lists = () => (q('SELECT received_at FROM inv_stock_at')[0]!.received_at as number);
+    const first = lists();
+    env.clock.advance(60_000);
+    await syncSales(env.ctx, { stockEveryMs: 0 });
+    assert.equal(lists(), first, 'unchanged: not sent again');
+    adjustStock(env.ctx, env.manager, rid(), { stockItemId: oil.id, kind: 'WASTAGE', qtyMilli: 250, reason: 'Spilt' });
+    await syncSales(env.ctx, { stockEveryMs: 0 });
+    assert.equal(q("SELECT on_hand_milli FROM inv_stock WHERE name = 'Oil'")[0]!.on_hand_milli, 750);
   } finally { await c.close(); env.cleanup(); }
 });

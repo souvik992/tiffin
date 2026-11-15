@@ -6,14 +6,17 @@ import { getSetting, setSetting } from './settings.ts';
 import type { InvoiceRecord, LineRecord, PaymentRecord } from './invoiceStore.ts';
 
 /**
- * Sales sync: sends each bill up to PosiNext Cloud (POST /v1/pos/sync/batches) for the owner's portal (Analytics).
+ * Sales sync: sends each bill and each purchase up to PosiNext Cloud (POST /v1/pos/sync/batches) for the owner's portal
+ * (Analytics, Purchases & stock), and the stock list as it is now (PUT /v1/pos/inventory) whenever it changed.
  * Billing never waits for it and never needs it: this only reads the outbox that billing already writes, after the
  * bill is committed, and keeps its own place in a setting. Nothing is sent until this POS is linked with the cloud:
  * the owner signed in to their account on this PC (Settings > Licence), or connected online orders or online backups.
  * It can be switched off (setting sales_sync_on = 0).
  *
  * What is sent per bill: number, time, totals, tax, discount, the items with their category, the payment modes, the
- * sales channel and the billing counter's name. No customer phone, name or GSTIN.
+ * sales channel and the billing counter's name. No customer phone, name or GSTIN. Per purchase: supplier name, bill
+ * number, materials and amounts (not the supplier's GSTIN). The stock list: each material's quantity, reorder level and
+ * last cost, and what each recent day's sales used and wasted at that cost.
  *
  * Failure handling:
  *  - No internet or the cloud is down: the error is recorded and the next run (a minute later) carries on from the same bill.
@@ -27,9 +30,9 @@ const BATCH_ROWS = 100, MAX_BATCHES = 200;
 
 interface State { stream: string; /** the last outbox row sent */ cursor: number; /** the last event number the cloud holds */ seq: number }
 interface Event { seq: number; kind: string; payload: unknown; createdAt: string }
-interface OutboxRow { seq: number; entity_id: string; op: string; payload: string; created_at: number }
+interface OutboxRow { seq: number; entity: string; entity_id: string; op: string; payload: string; created_at: number }
 export interface SalesSyncStatus { linked: boolean; on: boolean; pending: number; lastAt: number | null; error: string | null }
-export interface SalesSyncOptions { fetch?: typeof fetch }
+export interface SalesSyncOptions { fetch?: typeof fetch; /** the stock list goes up when it changed, at most this often (ms; default 5 minutes) */ stockEveryMs?: number }
 
 const newState = (): State => ({ stream: randomBytes(16).toString('hex'), cursor: 0, seq: 0 });
 function readState(ctx: Ctx): State {
@@ -51,7 +54,7 @@ function link(ctx: Ctx): { url: string; key: string } | null {
   return null;
 }
 
-const pendingRows = (ctx: Ctx, cursor: number) => get<{ n: number }>(ctx.db, "SELECT count(*) AS n FROM outbox WHERE entity = 'invoice' AND seq > ?", cursor)!.n;
+const pendingRows = (ctx: Ctx, cursor: number) => get<{ n: number }>(ctx.db, "SELECT count(*) AS n FROM outbox WHERE entity IN ('invoice', 'purchase') AND seq > ?", cursor)!.n;
 
 export function salesSyncStatus(ctx: Ctx): SalesSyncStatus {
   return { linked: link(ctx) !== null, on: getSetting(ctx, ON) !== '0', pending: pendingRows(ctx, readState(ctx).cursor), lastAt: Number(getSetting(ctx, LAST)) || null, error: getSetting(ctx, ERROR) || null };
@@ -65,6 +68,16 @@ const CHANNEL: Record<string, string> = { COUNTER: 'pos', APP: 'app', WEBSITE: '
 
 /** One outbox row as the cloud's sync events (hub/src/analytics.ts in posinext-cloud reads these fields). */
 function toEvents(ctx: Ctx, row: OutboxRow): Array<Omit<Event, 'seq'>> {
+  if (row.entity === 'purchase') {
+    const createdAt = new Date(row.created_at).toISOString();
+    if (row.op === 'void') return [{ kind: 'purchase.voided', createdAt, payload: { purchaseId: row.entity_id } }];
+    const f = JSON.parse(row.payload) as { purchase: { id: string; supplierName: string; billNo: string | null; total: number; createdAt: number }; lines: Array<{ stockItemId: string; qtyMilli: number; amount: number }> };
+    const material = (id: string) => get<{ name: string; unit: string }>(ctx.db, 'SELECT name, unit FROM stock_item WHERE id = ?', id) ?? { name: 'Unknown material', unit: 'pcs' };
+    return [{ kind: 'purchase.recorded', createdAt: new Date(f.purchase.createdAt).toISOString(), payload: {
+      purchaseId: f.purchase.id, supplier: f.purchase.supplierName, billNo: f.purchase.billNo, businessDate: istDay(f.purchase.createdAt), totalPaise: f.purchase.total,
+      lines: f.lines.map((l) => ({ ...material(l.stockItemId), qtyMilli: l.qtyMilli, amountPaise: l.amount })),
+    } }];
+  }
   if (row.op === 'cancel') {
     const iv = get<{ issued_at: number; grand_total: number }>(ctx.db, 'SELECT issued_at, grand_total FROM invoice WHERE id = ?', row.entity_id);
     return [{ kind: 'bill.voided', createdAt: new Date(row.created_at).toISOString(), payload: { billId: row.entity_id, totalPaise: iv?.grand_total ?? 0, businessDate: istDay(iv?.issued_at ?? row.created_at) } }];
@@ -91,6 +104,40 @@ function toEvents(ctx: Ctx, row: OutboxRow): Array<Omit<Event, 'seq'>> {
   ];
 }
 
+/** The stock as it is now, and what each of the last 35 days' sales used and wasted at each material's last cost. */
+function stockSnapshot(ctx: Ctx) {
+  const since = ctx.clock.now() - 35 * 86_400_000;
+  return {
+    items: all<{ id: string; name: string; unit: string; onHandMilli: number; reorderMilli: number; unitCostPaise: number | null }>(ctx.db,
+      'SELECT id, name, unit, on_hand_milli AS onHandMilli, reorder_level_milli AS reorderMilli, last_unit_cost AS unitCostPaise FROM stock_item WHERE deleted_at IS NULL ORDER BY id'),
+    usage: all<{ date: string; usedPaise: number; wastePaise: number }>(ctx.db, `SELECT date((m.created_at + 19800000) / 1000, 'unixepoch') AS date,
+        max(0, sum(CASE WHEN m.kind IN ('SALE', 'SALE_REVERSAL') THEN -m.delta_milli * COALESCE(s.last_unit_cost, 0) ELSE 0 END) / 1000) AS usedPaise,
+        max(0, sum(CASE WHEN m.kind = 'WASTAGE' THEN -m.delta_milli * COALESCE(s.last_unit_cost, 0) ELSE 0 END) / 1000) AS wastePaise
+      FROM stock_movement m JOIN stock_item s ON s.id = m.stock_item_id WHERE m.created_at >= ? AND m.kind IN ('SALE', 'SALE_REVERSAL', 'WASTAGE') GROUP BY 1 ORDER BY 1`, since),
+  };
+}
+
+/** The stock list last sent and when (in memory: after a restart it goes up once more, which does no harm). */
+const stockSent = new WeakMap<Ctx, { text: string; at: number }>();
+
+/**
+ * Sends the whole stock list when it changed. The cloud keeps only the latest list, so a lost or repeated send needs
+ * no bookkeeping. A shop that keeps no stock sends nothing. Throws like fetch does; syncSales records it.
+ */
+async function sendStock(ctx: Ctx, to: { url: string; key: string }, o: SalesSyncOptions): Promise<void> {
+  const last = stockSent.get(ctx), now = ctx.clock.now();
+  if (last && now - last.at < (o.stockEveryMs ?? 300_000)) return;
+  const snap = stockSnapshot(ctx), text = JSON.stringify(snap);
+  if (text === last?.text || (snap.items.length === 0 && !last)) return;
+  const res = await (o.fetch ?? fetch)(`${to.url.replace(/\/+$/, '')}/v1/pos/inventory`, {
+    method: 'PUT', signal: AbortSignal.timeout(60_000),
+    headers: { authorization: `Bearer ${to.key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ at: now, ...snap }),
+  });
+  if (res.ok) stockSent.set(ctx, { text, at: now });
+  else if (res.status !== 404 && res.status !== 401) throw new Error(`The cloud did not take the stock list (${res.status}). The POS will try again.`); // 404: a cloud from before this
+}
+
 const running = new WeakSet<Ctx>();
 
 /** Sends every bill not sent yet. Returns how many outbox rows went up. Never throws: problems are recorded for the screen. */
@@ -104,7 +151,7 @@ export async function syncSales(ctx: Ctx, o: SalesSyncOptions = {}): Promise<num
     if (!getSetting(ctx, STATE)) setSetting(ctx, STATE, JSON.stringify(newState()));
     for (let n = 0; n < MAX_BATCHES; n++) {
       const st = readState(ctx);
-      const rows = all<OutboxRow>(ctx.db, "SELECT seq, entity_id, op, payload, created_at FROM outbox WHERE entity = 'invoice' AND seq > ? ORDER BY seq LIMIT ?", st.cursor, BATCH_ROWS);
+      const rows = all<OutboxRow>(ctx.db, "SELECT seq, entity, entity_id, op, payload, created_at FROM outbox WHERE entity IN ('invoice', 'purchase') AND seq > ? ORDER BY seq LIMIT ?", st.cursor, BATCH_ROWS);
       if (rows.length === 0) break;
       const events: Event[] = rows.flatMap((r) => toEvents(ctx, r)).map((e, i) => ({ seq: st.seq + 1 + i, ...e }));
       const res = await (o.fetch ?? fetch)(`${to.url.replace(/\/+$/, '')}/v1/pos/sync/batches`, {
@@ -125,6 +172,7 @@ export async function syncSales(ctx: Ctx, o: SalesSyncOptions = {}): Promise<num
       setSetting(ctx, STATE, JSON.stringify({ stream: st.stream, cursor: rows[rows.length - 1]!.seq, seq: last } satisfies State)); // one write: the place moves on whole or not at all
       sent += rows.length;
     }
+    await sendStock(ctx, to, o);
     if (sent > 0) setSetting(ctx, LAST, String(ctx.clock.now()));
     if (getSetting(ctx, ERROR)) setSetting(ctx, ERROR, '');
   } catch (e) {
