@@ -33,6 +33,9 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Bundler (esbuild, from the desktop app's packages)
+        working-directory: desktop
+        run: npm ci --ignore-scripts # no Electron download needed here
       - uses: actions/cache@v4
         with:
           path: ios/.cache

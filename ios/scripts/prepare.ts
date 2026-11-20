@@ -1,4 +1,4 @@
-// Prepares the iOS project for a build (run from the repo root after `cd ui && npm run build`: `node ios/scripts/prepare.ts`).
+// Prepares the iOS project for a build (run from the repo root after `cd ui && npm run build` and `npm ci` in desktop/: `node ios/scripts/prepare.ts`).
 //  1. Node 24 for iOS (NodeMobile.xcframework, pinned with SHA-256 in ios/node-runtime.json) into ios/Frameworks/.
 //  2. The POS backend (ios/backend/main.ts with src/, contract/, android/backend/front.ts) bundled into one plain
 //     JavaScript file: Node for iOS has no JIT, so the phone should not strip TypeScript at every start.
@@ -48,12 +48,12 @@ async function runtime() {
 }
 
 async function bundle() {
-  // esbuild comes with the UI's (vite) or the desktop app's packages; the backend itself has no dependencies
-  const from = [join(ROOT, 'ui', 'package.json'), join(ROOT, 'desktop', 'package.json')];
+  // esbuild comes with the desktop app's packages (npm ci in desktop/); the backend itself has no dependencies
+  const from = [join(ROOT, 'desktop', 'package.json'), join(ROOT, 'ui', 'package.json')];
   type Esbuild = { build(o: Record<string, unknown>): Promise<unknown> };
   const load = (p: string): Esbuild | null => { try { return createRequire(p)('esbuild') as Esbuild; } catch { return null; } };
   const esbuild = from.map(load).find((e) => e !== null);
-  if (!esbuild) throw new Error('esbuild not found: run npm install in ui/ first');
+  if (!esbuild) throw new Error('esbuild not found: run npm install in desktop/ first');
   if (!existsSync(join(ROOT, 'ui', 'dist', 'index.html'))) throw new Error('Build the screens first: cd ui && npm run build');
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
