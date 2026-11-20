@@ -240,6 +240,8 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Android app (Java, no libraries): unpacks the POS once per version, starts it, gatekeeper with a private cookie, file picker (single and multiple), screen kept on; APKs for arm64-v8a, armeabi-v7a, x86_64 (33-38 MB)
 - [x] Started on the emulator: backend start-up checks pass, the Set up this shop screen appears and takes input
 - [x] Every push builds the Windows installer and the Android APKs on GitHub after all tests pass
+- [x] Mac app (2026-11-20): .dmg for Apple chips and Intel (`npm run dist:mac`, built on GitHub's Mac machines, ad-hoc signed), Mac menu bar (copy/paste/quit), data in ~/Library/Application Support/TiffinPOS, licence id from the Mac's hardware UUID; CI opens the built app and bills an order. Not yet on a real Mac (docs/HARDWARE_TEST_PLAN.md)
+- [ ] Mac: Apple Developer ID signing and notarisation (no "Open Anyway"), auto-update, USB/Bluetooth printers (CUPS), rupee sign and Indian scripts on printed bills; DinePOS's copy of licence/hardware.ts still lacks the Mac branch
 - [x] Android printers: Bluetooth (paired) including the built-in printer of Sunmi-type machines ("InnerPrinter"), USB printers through Android's USB host API (asks once to allow), shown in Printer setup and plug-and-play; LAN printers as on Windows (database step 10, transport `android`)
 - [x] Android: downloads saved to the Download folder; Print / PDF through Android's print screen; backup copies to a USB stick or SD card (Settings > This device); foreground service keeps the POS running in the background
 - [x] Android release signing key (outside the repo) and signed release APKs; GitHub builds signed releases once the key secrets are added

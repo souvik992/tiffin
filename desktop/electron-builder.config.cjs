@@ -1,4 +1,5 @@
-// Windows installer (NSIS) for the desktop app. Build: npm run dist (in desktop/).
+// Windows installer (NSIS) and Mac disk image (DMG) for the desktop app. Build: npm run dist (Windows) or
+// npm run dist:mac (only on a Mac; CI builds it on GitHub's Mac machines).
 // Optional, from the environment at build time:
 //   POS_UPDATE_URL   where the auto-updater looks for latest.yml (an HTTPS folder you upload release files to)
 //   CSC_LINK, CSC_KEY_PASSWORD   the code-signing certificate (.pfx) and its password; without them the build is unsigned
@@ -23,6 +24,20 @@ module.exports = {
     icon: 'build/icon.png',
     executableName: 'TiffinPOS',
     ...(process.env.POS_PUBLISHER ? { signtoolOptions: { publisherName: [process.env.POS_PUBLISHER] } } : {}),
+  },
+  // Mac: one disk image per chip (Apple M1/M2/M3/M4 = arm64, older Intel Macs = x64); drag the app to Applications.
+  // Without an Apple Developer ID certificate (CSC_LINK) the app is ad-hoc signed: Apple chips refuse unsigned apps,
+  // and the shop opens it once with System Settings > Privacy & Security > Open Anyway. Hardened runtime is only
+  // needed for Apple's notarisation, which needs that certificate too.
+  mac: {
+    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }],
+    icon: 'build/icon.png',
+    category: 'public.app-category.business',
+    ...(process.env.CSC_LINK ? {} : { identity: '-', hardenedRuntime: false }),
+  },
+  dmg: {
+    artifactName: 'TiffinPOS-${version}-mac-${arch}.${ext}',
+    title: 'Tiffin POS ${version}',
   },
   nsis: {
     oneClick: false,

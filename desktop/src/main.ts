@@ -11,6 +11,7 @@ import { startUpdates } from './updates.ts';
 
 const PRODUCT = 'Tiffin POS';
 // Local (not roaming) AppData: the database must never sync across a domain profile. Kept on uninstall.
+// Mac: ~/Library/Application Support/TiffinPOS (kept when the app is dragged to the Bin).
 const home = process.env.POS_HOME ?? join(process.env.LOCALAPPDATA ?? app.getPath('appData'), 'TiffinPOS'); // POS_HOME: tests use a temporary folder
 app.setPath('userData', join(home, 'electron'));
 const dataDir = process.env.POS_DATA_DIR ?? join(home, 'data');
@@ -146,7 +147,9 @@ function createWindow() {
 }
 
 async function start() {
-  Menu.setApplicationMenu(null);
+  // Windows: no menu bar. Mac: the app, Edit and Window menus only, because on a Mac copy, paste and quit
+  // (Cmd+C, Cmd+V, Cmd+Q) work only through the menu.
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   lockDown();
   protocol.handle(SCHEME, serve);
   log(`starting ${PRODUCT} ${app.getVersion()} data=${dataDir}`);
