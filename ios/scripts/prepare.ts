@@ -70,5 +70,12 @@ async function bundle() {
   console.log(`backend bundle and screens: ready (version ${version}, build ${build})`);
 }
 
-await bundle();
-if (!process.argv.includes('--bundle-only')) await runtime();
+try {
+  await bundle();
+  if (!process.argv.includes('--bundle-only')) await runtime();
+} catch (e) {
+  const m = e instanceof Error ? (e.stack ?? e.message) : String(e);
+  console.error(m);
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=iOS prepare::${m.replace(/\r?\n/g, '%0A')}`); // shown on the run page
+  process.exit(1);
+}

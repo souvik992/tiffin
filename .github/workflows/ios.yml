@@ -54,9 +54,12 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/xcodebuild-sim.txt" | grep -E "error:|warning: .*TiffinPOS/|BUILD (SUCCEEDED|FAILED)" || true
           test -d build/sim/Build/Products/Debug-iphonesimulator/TiffinPOS.app
-      - name: Show why the build failed
+      - name: Show why the build failed (as annotations on the run page)
         if: failure()
-        run: grep -B2 -A8 -E "error:" "$RUNNER_TEMP/xcodebuild-sim.txt" | head -150 || true
+        run: |
+          [ -f "$RUNNER_TEMP/xcodebuild-sim.txt" ] || exit 0
+          grep -E "error:" "$RUNNER_TEMP/xcodebuild-sim.txt" | sort -u | head -40 | while IFS= read -r line; do echo "::error title=Xcode::$line"; done
+          echo "::error title=Xcode (end of log)::$(tail -40 "$RUNNER_TEMP/xcodebuild-sim.txt" | awk '{printf "%s%%0A", $0}')"
       - name: Test in the iPhone and iPad simulators (start, bill, screenshots)
         run: node ios/scripts/simulator-test.ts ios/build/sim/Build/Products/Debug-iphonesimulator/TiffinPOS.app "$RUNNER_TEMP/ios-test"
       - uses: actions/upload-artifact@v4

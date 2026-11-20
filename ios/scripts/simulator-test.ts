@@ -61,6 +61,7 @@ for (const type of devices) {
   } catch (e) {
     failed = true;
     console.error(`${type.name}: FAILED ${e instanceof Error ? e.message : String(e)}`);
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=iOS simulator test (${type.name})::${(e instanceof Error ? e.message : String(e)).replace(/\r?\n/g, '%0A')}`);
     try { simctl('io', udid, 'screenshot', join(out, `${tag}-failed.png`)); } catch { /* no screen */ }
   } finally {
     try {

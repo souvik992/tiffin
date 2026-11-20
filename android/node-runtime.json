@@ -10,9 +10,9 @@
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.11.05",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
-        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
+        "version": "1:2026.11.05-1",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05-1_all.deb",
+        "sha256": "12fc350fc5ad638338b06b04835bce897615f8c93f96d30ac396cdb39b850c6b"
       },
       {
         "name": "libc++",
@@ -22,9 +22,9 @@
       },
       {
         "name": "libicu",
-        "version": "78.3",
-        "filename": "pool/main/libi/libicu/libicu_78.3_aarch64.deb",
-        "sha256": "f536403f65a08fe0df6e7304184e902d54def77d5c3bd5edfd9109d57601d276"
+        "version": "79.1",
+        "filename": "pool/main/libi/libicu/libicu_79.1_aarch64.deb",
+        "sha256": "83c980a010e957738e3567127801d66a1b9bd7e404a4fda98788048ee57d606c"
       },
       {
         "name": "libsqlite",
@@ -34,9 +34,9 @@
       },
       {
         "name": "nodejs-lts",
-        "version": "24.22.2",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_aarch64.deb",
-        "sha256": "150d7dd382e92587808d96813b9538fe5c6c41fa33f1a1033daa4e30c6ff2695"
+        "version": "24.22.3",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.3_aarch64.deb",
+        "sha256": "80edcc73db025db0baa09be27e3d65a16e6f2a72ab925f1873a1b808ab857c28"
       },
       {
         "name": "openssl",
@@ -66,9 +66,9 @@
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.11.05",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
-        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
+        "version": "1:2026.11.05-1",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05-1_all.deb",
+        "sha256": "12fc350fc5ad638338b06b04835bce897615f8c93f96d30ac396cdb39b850c6b"
       },
       {
         "name": "libc++",
@@ -78,9 +78,9 @@
       },
       {
         "name": "libicu",
-        "version": "78.3",
-        "filename": "pool/main/libi/libicu/libicu_78.3_arm.deb",
-        "sha256": "3ddca664e8cbe4cc775f585dc6457c65b3de454f5ca10bede412dfffbbbab8a8"
+        "version": "79.1",
+        "filename": "pool/main/libi/libicu/libicu_79.1_arm.deb",
+        "sha256": "0cd8ea9a4719da20e8ddeb05a3901c510880c56536ce7ea80b10609fb2933c7b"
       },
       {
         "name": "libsqlite",
@@ -90,9 +90,9 @@
       },
       {
         "name": "nodejs-lts",
-        "version": "24.22.2",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_arm.deb",
-        "sha256": "7cf02b900b6f6555e80a5aa014ea15dcb4d1951edb0eced463cd744d645c1485"
+        "version": "24.22.3",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.3_arm.deb",
+        "sha256": "e7a65deb94edf1fe1a369cee48081de987d4e1d400ed38f7cc115e5739416383"
       },
       {
         "name": "openssl",
@@ -122,9 +122,9 @@
       },
       {
         "name": "ca-certificates",
-        "version": "1:2026.11.05",
-        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05_all.deb",
-        "sha256": "4cf292d604e14ed2878847eec2acea7c24ba10f598a5c5cd75dfc5e3750717da"
+        "version": "1:2026.11.05-1",
+        "filename": "pool/main/c/ca-certificates/ca-certificates_1:2026.11.05-1_all.deb",
+        "sha256": "12fc350fc5ad638338b06b04835bce897615f8c93f96d30ac396cdb39b850c6b"
       },
       {
         "name": "libc++",
@@ -134,9 +134,9 @@
       },
       {
         "name": "libicu",
-        "version": "78.3",
-        "filename": "pool/main/libi/libicu/libicu_78.3_x86_64.deb",
-        "sha256": "19fa8c4d828719f465d523983b1e0d833e4130bb22790104638965d97e27fe60"
+        "version": "79.1",
+        "filename": "pool/main/libi/libicu/libicu_79.1_x86_64.deb",
+        "sha256": "541410d7b425ebde5d4027c86218081925b15dc1e5cffaa45449bdc4b2256251"
       },
       {
         "name": "libsqlite",
@@ -146,9 +146,9 @@
       },
       {
         "name": "nodejs-lts",
-        "version": "24.22.2",
-        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.2_x86_64.deb",
-        "sha256": "0dbbc99d03af8093ce2b8029930fcf80b201372ed2cf2275722decdb8f974fbe"
+        "version": "24.22.3",
+        "filename": "pool/main/n/nodejs-lts/nodejs-lts_24.22.3_x86_64.deb",
+        "sha256": "d73ab1303aa1a8ecca188795f536279c7ef196c4e3f72b645e443501b03247e4"
       },
       {
         "name": "openssl",

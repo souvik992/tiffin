@@ -26,7 +26,11 @@ child.stdout.on('data', (c: Buffer) => { log += c.toString(); });
 child.stderr.on('data', (c: Buffer) => { log += c.toString(); });
 const exited = new Promise<void>((r) => child.on('exit', () => r()));
 const cleanup = async () => { child.kill(); await exited; rmSync(home, { recursive: true, force: true }); };
-const fail = async (why: string): Promise<never> => { console.error(`iOS backend smoke test FAILED: ${why}\n--- backend output ---\n${log}`); await cleanup(); process.exit(1); };
+const fail = async (why: string): Promise<never> => {
+  console.error(`iOS backend smoke test FAILED: ${why}\n--- backend output ---\n${log}`);
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=iOS backend smoke test::${`${why}\n${log.slice(-3000)}`.replace(/\r?\n/g, '%0A')}`); // shown on the run page
+  await cleanup(); process.exit(1);
+};
 
 let port = 0;
 for (let i = 0; i < 600 && !port; i++) {
