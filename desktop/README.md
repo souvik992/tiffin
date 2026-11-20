@@ -1,4 +1,4 @@
-# Tiffin POS for Windows (desktop app)
+# Tiffin POS for Windows and Mac (desktop app)
 
 An Electron app that wraps the POS: one window showing the billing UI, with the backend running inside it.
 No Node.js, browser or command line is needed on the shop PC: the shop runs the installer and opens **Tiffin POS** from the desktop.
@@ -18,13 +18,14 @@ Then, in `desktop/`:
 |---|---|
 | `npm start` | builds, then opens the app (development; dev tools on Ctrl+Shift+I) |
 | `npm run dist` | builds the installer: `release/TiffinPOS-Setup-<version>.exe` (about 130 MB; packed for fast installs on low-end PCs, see below) |
+| `npm run dist:mac` | **on a Mac only**: `release/TiffinPOS-<version>-mac-arm64.dmg` (Apple M1 and newer) and `-mac-x64.dmg` (Intel Macs). GitHub builds both on every push (Actions > the run > Artifacts > TiffinPOS-Mac) and opens the built app on a Mac to bill a test order |
 | `npm run dist:dir` | builds the unpacked app only: `release/win-unpacked/TiffinPOS.exe` (fast, for testing) |
 | `npm test` | unit tests (URL mapping, secret header, navigation rules) |
 | `npm run test:e2e` | builds, then drives the real app: sign-in, a bill with live print status, reports, lockdown, crash restart, single copy, clean close |
 | `npm run typecheck` | strict TypeScript |
 | `npm run icon` | redraws `build/icon.png` (the orange "T") |
 
-To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` and run `node --test test/app.e2e.test.ts`.
+To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` (Mac: `Tiffin POS.app/Contents/MacOS/Tiffin POS`) and run `node --test test/app.e2e.test.ts`: a packaged build always checks the licence, so with no key it only checks that the app opens on the licence screen and closes cleanly.
 The test uses a temporary data folder (`POS_HOME`) with virtual printers only.
 
 To ship a new version, raise `version` in `desktop/package.json`, then run `npm run dist`.
@@ -64,6 +65,34 @@ TiffinPOS.exe
 
 **Uninstalling never deletes the data folder.** To move a shop to a new PC, copy `%LOCALAPPDATA%\TiffinPOS\data`.
 `POS_DATA_DIR` (data folder) and `POS_HOME` (data, logs and Electron profile) override these locations.
+
+## Mac
+
+The same app, screens, data and rules as on Windows; only the installer and the printer choices differ.
+
+**Install:** open the `.dmg` for the Mac's chip (Apple menu > About This Mac: "Apple M…" = arm64, "Intel" = x64), drag
+**Tiffin POS** to **Applications**, open it from Applications. The app is not yet signed with an Apple Developer ID, so
+the first time macOS says it cannot check it: click **Done**, then **System Settings > Privacy & Security**, scroll down,
+**Open Anyway**, and confirm. After that it opens normally.
+
+| What | Where on a Mac |
+|---|---|
+| App | `/Applications/Tiffin POS.app` |
+| Bills database, backups, menu photos | `~/Library/Application Support/TiffinPOS/data` (kept when the app is moved to the Bin) |
+| Log | `~/Library/Application Support/TiffinPOS/logs/pos.log` |
+
+**Differences from Windows**
+- Printers: Wi-Fi / LAN receipt and kitchen printers work. USB, Bluetooth/COM and "Windows printer" connections are Windows (and Android) only for now.
+- The rupee sign and Hindi/other Indian scripts print as "Rs" / "?" (Windows draws them as pictures with a Windows-only helper).
+- Add-ons: install them in the app, **Settings > Add-ons > Install from file** (owner), with the same `.tiffinaddon` files as Android
+  (`TiffinPOS-ODS-<ver>.tiffinaddon`, `TiffinPOS-PaymentMachines-<ver>.tiffinaddon`), then restart the POS. The `.exe` add-on installers are Windows only.
+- Payment machines: wireless works; a Paytm machine on a USB cable is Windows only. The Tiffin Data Manager is Windows only.
+- Licence: the Mac's id comes from its hardware UUID, so a key stays valid across reinstalls on the same Mac.
+- Menu bar: Tiffin POS (About, Quit), Edit (copy and paste) and Window. F11 still switches full screen.
+- Auto-update is not set up for the Mac (it needs the Apple Developer ID and a .zip build); install a new `.dmg` over the old app.
+
+To sign and notarise (removes the warning): an Apple Developer ID Application certificate (Apple Developer Program,
+yearly fee) as `CSC_LINK` / `CSC_KEY_PASSWORD`, plus notarisation credentials; the build then signs with hardened runtime.
 
 ## Code signing (needed before giving it to shops)
 

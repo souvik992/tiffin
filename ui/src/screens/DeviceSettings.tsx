@@ -3,6 +3,7 @@ import { FolderOpen, HardDriveDownload, PackagePlus, Trash2 } from 'lucide-react
 import type { AddonInfo } from '../lib/api.ts';
 import { useSession } from '../lib/session.tsx';
 import { androidApp, backupCopyStatus } from '../lib/android.ts';
+import { onDesktop } from '../lib/desktop.ts';
 import type { BackupCopyStatus } from '../lib/android.ts';
 
 const when = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -50,20 +51,38 @@ export function AndroidBackupCopies() {
   );
 }
 
-/** Settings > This device (Android app only): add-ons. Backup copies are on Settings > Backups. */
+/** Settings > This device (Android app) / Add-ons (Windows and Mac app): add-ons. Backup copies are on Settings > Backups. */
 export function DeviceSettings() {
-  const { api, user } = useSession();
+  const { api, user, notify } = useSession();
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [installed, setInstalled] = useState<string | null>(null);
   useEffect(() => { api.addons().then(setAddons).catch(() => setAddons([])); }, [api]);
   const a = androidApp();
-  if (!a) return <p className="text-sm text-muted-foreground">This page is for the Android app.</p>;
+  const desktop = !a && onDesktop();
+  if (!a && !desktop) return <p className="text-sm text-muted-foreground">This page is for the Android, Windows and Mac apps.</p>;
+
+  // Desktop: the app unpacks the file into its add-ons folder and then offers "Restart now / Later" itself.
+  const install = async () => {
+    if (a) { a.installAddon(); return; }
+    setBusy(true);
+    try {
+      const r = await api.installAddonFromFile();
+      if (r.installed) { setInstalled(`${r.installed.name} ${r.installed.version}`); notify('success', `${r.installed.name} ${r.installed.version} installed. Restart the POS to use it.`); }
+    } catch (e) { notify('error', e instanceof Error ? e.message : 'The add-on could not be installed.'); } finally { setBusy(false); }
+  };
+  const remove = async (x: AddonInfo) => {
+    if (!window.confirm(`Remove ${x.name}? Its settings and data stay in the POS.`)) return;
+    if (a) { a.removeAddon(x.id); return; }
+    try { await api.removeAddonFiles(x.id); notify('success', `${x.name} removed. Restart the POS to finish.`); } catch (e) { notify('error', e instanceof Error ? e.message : 'The add-on could not be removed.'); }
+  };
 
   return (
     <>
-      <h2 className="mb-4 font-display text-2xl">This device</h2>
+      <h2 className="mb-4 font-display text-2xl">{desktop ? 'Add-ons' : 'This device'}</h2>
       <section className="max-w-2xl rounded-2xl border border-border bg-card p-4" aria-label="Add-ons">
         <h3 className="mb-1 flex items-center gap-2 font-semibold"><PackagePlus className="h-4 w-4 text-primary" />Add-ons</h3>
-        <p className="mb-3 text-sm text-muted-foreground">Extra modules such as ODS (online orders and serviceability), installed from a <b>.tiffinaddon</b> file. The POS checks each add-on's signature before using it, as on Windows.</p>
+        <p className="mb-3 text-sm text-muted-foreground">Extra modules such as ODS (online orders and serviceability), installed from a <b>.tiffinaddon</b> file. The POS checks each add-on's signature before using it.</p>
         {addons?.length === 0 && <p className="text-sm text-muted-foreground">No add-ons installed.</p>}
         <ul className="space-y-2">
           {addons?.map((x) => (
@@ -71,12 +90,12 @@ export function DeviceSettings() {
               <b>{x.name}</b><span className="text-muted-foreground">{x.version}</span>
               <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${x.status === 'active' ? 'bg-primary/15 text-primary' : 'bg-destructive/15 text-destructive'}`}>{x.status === 'active' ? 'Working' : 'Switched off'}</span>
               {x.reason && <span className="w-full text-xs text-destructive">{x.reason}</span>}
-              {user?.role === 'owner' && <button className="btn-ghost ml-auto h-8 px-3 text-xs" onClick={() => { if (window.confirm(`Remove ${x.name}? Its settings and data stay in the POS.`)) a.removeAddon(x.id); }}><Trash2 className="h-3.5 w-3.5" />Remove</button>}
+              {user?.role === 'owner' && <button className="btn-ghost ml-auto h-8 px-3 text-xs" onClick={() => void remove(x)}><Trash2 className="h-3.5 w-3.5" />Remove</button>}
             </li>
           ))}
         </ul>
         {user?.role === 'owner'
-          ? <button className="btn-primary mt-3" onClick={() => a.installAddon()}><PackagePlus className="h-4 w-4" />Install from file</button>
+          ? <><button className="btn-primary mt-3" disabled={busy} onClick={() => void install()}><PackagePlus className="h-4 w-4" />{busy ? 'Installing…' : 'Install from file'}</button>{installed && <p role="status" className="mt-2 text-sm">{installed} is installed. Restart the POS to use it (close it and open it again, or choose Restart now).</p>}</>
           : <p className="mt-3 text-xs text-muted-foreground">Only the owner can install or remove add-ons.</p>}
       </section>
     </>

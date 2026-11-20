@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,7 +21,24 @@ function envFor(home: string): Record<string, string> {
   return { ...env, POS_HOME: home };
 }
 
-test('desktop app: opens the POS, talks to its backend, stays locked down, restarts a crashed backend, closes cleanly', { timeout: 180_000 }, async () => {
+// A packaged build always checks the licence (main.ts), so with no key it opens on the licence screen: check that much.
+test('packaged app: opens on the licence screen without a key, backend up, closes cleanly', { skip: !packaged, timeout: 120_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pos-desktop-'));
+  const app = await _electron.launch({ executablePath: electronExe, args: appArgs, cwd: here, env: envFor(home) });
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
+    assert.equal(page.url(), 'app://pos/index.html');
+    await page.getByRole('button', { name: 'Start 30-day free trial' }).waitFor({ timeout: 60_000 });
+    assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
+  } finally {
+    await app.close();
+  }
+  assert.match(readFileSync(join(home, 'logs', 'pos.log'), 'utf8'), /POS backend listening[\s\S]*backend exited with code 0/);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('desktop app: opens the POS, talks to its backend, stays locked down, restarts a crashed backend, closes cleanly', { skip: !!packaged && 'a packaged build needs a licence key: run without POS_E2E_EXE', timeout: 180_000 }, async () => {
   assert.ok(packaged ? existsSync(packaged) : existsSync(join(here, 'dist', 'main.cjs')), 'run npm run build first');
   const home = mkdtempSync(join(tmpdir(), 'pos-desktop-'));
   const dataDir = join(home, 'data');
@@ -99,5 +116,58 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
   // closing stops the backend cleanly: a closing backup exists
   assert.ok(readdirSync(join(dataDir, 'backups')).some((f) => f.startsWith('close-')), 'closing backup taken');
   assert.match(readFileSync(join(home, 'logs', 'pos.log'), 'utf8'), /POS backend listening/);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('desktop app: the owner installs an add-on from a .tiffinaddon file and removes it (Settings > Add-ons)', { skip: !!packaged && 'needs a licence key', timeout: 180_000 }, async () => {
+  assert.ok(existsSync(join(here, 'dist', 'main.cjs')), 'run npm run build first');
+  const home = mkdtempSync(join(tmpdir(), 'pos-desktop-'));
+  execFileSync(process.execPath, [join(here, '..', 'src', 'seed.ts')], { env: { ...process.env, POS_DATA_DIR: join(home, 'data') }, stdio: 'ignore' });
+  // an unsigned package: it installs, then the POS switches it off for its signature (as it would a tampered one)
+  const { zip } = await import('../../addons/ods/scripts/zip.mjs' as string) as { zip: (f: Array<[string, Buffer]>) => Buffer };
+  const file = join(home, 'TiffinPOS-Demo-1.0.0.tiffinaddon');
+  writeFileSync(file, zip([['manifest.json', Buffer.from(JSON.stringify({ id: 'demo', name: 'Demo add-on', version: '1.0.0' }))], ['backend.cjs', Buffer.from('exports.register = () => {};')]]));
+
+  const app = await _electron.launch({ executablePath: electronExe, args: appArgs, cwd: here, env: envFor(home) });
+  try {
+    // the file picker answers with our file; the "restart now?" question answers Later
+    await app.evaluate(({ dialog }, f) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [f] })) as typeof dialog.showOpenDialog;
+      dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox;
+    }, file);
+    const page = await app.firstWindow();
+    await page.getByLabel('Mobile number').fill('9000000001'); // demo owner
+    await page.locator('h1').click();
+    await page.keyboard.type('1234');
+    await page.keyboard.press('Enter');
+    await page.getByRole('link', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: /^Add-ons/ }).click();
+    await page.getByText('No add-ons installed.').waitFor();
+    await page.getByRole('button', { name: 'Install from file' }).click();
+    await page.getByText('Demo add-on 1.0.0 is installed. Restart the POS to use it').waitFor();
+    assert.deepEqual(readdirSync(join(home, 'addons', 'demo')).sort(), ['backend.cjs', 'manifest.json']);
+
+    // the page's own fetch carries no sign-in: refused
+    assert.equal(await page.evaluate(async () => (await fetch('/__desktop/remove-addon?id=demo', { method: 'POST' })).status), 403);
+  } finally {
+    await app.close();
+  }
+
+  // after a restart the POS lists it, switched off (not signed); the owner removes it
+  const again = await _electron.launch({ executablePath: electronExe, args: appArgs, cwd: here, env: envFor(home) });
+  try {
+    await again.evaluate(({ dialog }) => { dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox; });
+    const page = await again.firstWindow();
+    await page.getByRole('link', { name: 'Settings' }).click(); // still signed in after a restart
+    await page.evaluate(() => { window.confirm = () => true; }); // Electron's confirm box is native: answer "OK"
+    await page.getByRole('button', { name: /^Add-ons/ }).click();
+    const row = page.locator('li', { hasText: 'Demo add-on' });
+    await row.getByText('Switched off').waitFor();
+    await row.getByRole('button', { name: 'Remove' }).click();
+    await page.getByText('Demo add-on removed. Restart the POS to finish.').waitFor();
+    assert.equal(existsSync(join(home, 'addons', 'demo')), false);
+  } finally {
+    await again.close();
+  }
   rmSync(home, { recursive: true, force: true });
 });

@@ -1,8 +1,8 @@
-# Every push: run all tests, then build the Windows installer and the Android apps from the same commit.
+# Every push: run all tests, then build the Windows installer, the Mac disk images and the Android apps from the same commit.
 # Downloads for testing: the run's page on GitHub > Artifacts. What customers download from the portal is built on the
 # vendor's PC and uploaded to DinePOS Cloud with `npm run release` (scripts/release.mjs, fine-dine P8-11), including the
 # signed ODS add-on, so no signing key is needed here.
-name: Build Windows and Android
+name: Build Windows, Mac and Android
 
 on:
   push:
@@ -90,6 +90,47 @@ jobs:
           name: TiffinDataManager-Windows
           path: desktop/release-manager/*.exe
           if-no-files-found: error
+
+  mac:
+    name: Mac installer
+    needs: test
+    runs-on: macos-latest # Apple chip; electron-builder also builds the Intel (x64) image here
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+        working-directory: ui
+      - run: npm ci
+        working-directory: desktop
+      - name: Build disk images (ad-hoc signed until an Apple Developer ID certificate is added as a secret)
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          node scripts/build.mjs
+          npx electron-builder --mac --config electron-builder.config.cjs --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiffinPOS-Mac
+          path: desktop/release/*.dmg
+          if-no-files-found: error
+      - name: On a Mac, bill an order in the app (temporary data folder, virtual printer)
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          node --test test/app.e2e.test.ts 2>&1 | tee "$RUNNER_TEMP/e2e.txt"
+      - name: Open the built Mac app (no licence key, so it shows the licence screen)
+        working-directory: desktop
+        env:
+          POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/Tiffin POS.app/Contents/MacOS/Tiffin POS
+        run: |
+          set -o pipefail
+          node --test test/app.e2e.test.ts 2>&1 | tee "$RUNNER_TEMP/e2e.txt"
+      - name: Show why the Mac test failed (as annotations on the run page)
+        if: failure()
+        working-directory: desktop
+        run: node scripts/ci-report.mjs "$RUNNER_TEMP/e2e.txt"
 
   android:
     name: Android apps

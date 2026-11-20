@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  Banknote, Bluetooth, KeyRound, DatabaseBackup, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
+  Banknote, Bluetooth, PackagePlus, KeyRound, DatabaseBackup, CheckCircle2, CircleAlert, FileText, Monitor, Pencil, Plus, Power, Printer as PrinterIcon, ReceiptText, RefreshCw, RotateCw, Search, Smartphone, Store, Ticket, Trash2, Usb, Users, Wifi,
 } from 'lucide-react';
 import { ApiError, newKey } from '../lib/api.ts';
 import type { Printer, PrinterInput, ReceiptDesign, ReceiptDesignPreview, SerialPortInfo, Transport, UsbDevice, WindowsPrinter } from '../lib/api.ts';
@@ -15,6 +15,7 @@ import { CouponsSettings } from './CouponsSettings.tsx';
 import { DeviceSettings } from './DeviceSettings.tsx';
 import { BackupSettings } from './BackupSettings.tsx';
 import { onAndroid } from '../lib/android.ts';
+import { onDesktop } from '../lib/desktop.ts';
 import { useAddons } from '../lib/addons.ts';
 import { LicencePanel, useLicence } from './Licence.tsx';
 
@@ -55,6 +56,7 @@ export function Settings() {
     ...(user?.role === 'owner' ? [['backups', 'Backups', DatabaseBackup, 'USB drive and online copies, restore'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(user?.role === 'owner' ? [['licence', 'Licence', KeyRound, 'Trial, plan, licence key for this PC'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
     ...(onAndroid() ? [['device', 'This device', Smartphone, 'Add-ons'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
+    ...(!onAndroid() && onDesktop() && user?.role === 'owner' ? [['device', 'Add-ons', PackagePlus, 'Online orders, payment machines'] as [Section, string, ComponentType<{ className?: string }>, string]] : []),
   ];
   const wanted = section === 'receipt' ? 'store' : section; // Invoice / KOT is part of Store settings now
   const shown: Section = items.some(([k]) => k === wanted) ? wanted : 'printers';

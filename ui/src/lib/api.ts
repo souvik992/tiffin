@@ -200,7 +200,7 @@ export function createApi(o: ApiOptions) {
   }
 
   /** Sends the request (retrying on network failure) and turns an error response into an ApiError. */
-  async function send(method: string, path: string, body: unknown, key: string | undefined, accept: string): Promise<{ res: Response; text: string }> {
+  async function send(method: string, path: string, body: unknown, key: string | undefined, accept: string, prefix = '/api'): Promise<{ res: Response; text: string }> {
     const headers: Record<string, string> = { Accept: accept };
     const token = o.getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -210,7 +210,7 @@ export function createApi(o: ApiOptions) {
     let res: Response | null = null;
     for (let i = 0; i < attempts && !res; i++) {
       try {
-        res = await doFetch(`${base}/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        res = await doFetch(`${base}${prefix}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
       } catch {
         if (i + 1 < attempts) await new Promise((r) => setTimeout(r, delay * (i + 1)));
       }
@@ -274,6 +274,9 @@ export function createApi(o: ApiOptions) {
     usbDevices: (refresh = false) => get<{ scannedAt: number | null; devices: UsbDevice[] }>(`/printers/usb-devices${refresh ? '?refresh=1' : ''}`),
     sampleReceipt: (widthMm: 58 | 80) => get<{ widthMm: number; cols: number; lines: string[] }>(`/printers/sample-receipt?width=${widthMm}`),
     addons: () => get<AddonInfo[]>('/addons'),
+    /** Desktop app only: Settings > Add-ons (the app picks the file and unpacks it; owner only, checked with this sign-in). */
+    installAddonFromFile: async () => { const { text } = await send('POST', '/install-addon', {}, undefined, 'application/json', '/__desktop'); return JSON.parse(text) as { installed: { id: string; name: string; version: string } | null }; },
+    removeAddonFiles: async (id: string) => { await send('POST', `/remove-addon?id=${enc(id)}`, {}, undefined, 'application/json', '/__desktop'); },
     users: () => get<StaffUser[]>('/users'),
     createUser: (input: { name: string; role: Role; pin: string; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('POST', '/users', input, key),
     updateUser: (id: string, input: { name: string; role: Role; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('PATCH', '/users/' + enc(id), input, key),

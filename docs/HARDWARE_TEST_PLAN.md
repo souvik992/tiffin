@@ -102,6 +102,19 @@ Done on the dev PC (Windows 11, standard user, no admin): install, run, uninstal
 | CSV download (save dialog) and Print / PDF (Windows print dialog) from the installed app | |
 | Windows sign-out and shutdown with the app open: closing backup taken | |
 
+## Desktop app (Mac)
+Built and tested only on GitHub's Mac machines (build, then the end-to-end test opens the built Apple-chip app: sign-in, a bill, reports, crash restart, single copy, clean close). Not yet tried on a real Mac:
+
+| Check | Result |
+|---|---|
+| Install from the .dmg on an Apple-chip MacBook: Open Anyway, opens, bills; same on an Intel Mac with the x64 image | |
+| Licence: the Mac's hardware id stays the same after a restart, a reinstall and a macOS update; a key for it opens the POS | |
+| A Wi-Fi / LAN receipt printer from the Mac: bill, kitchen ticket, cash drawer | |
+| Settings > Backups: Mac folder picker, copy to a USB drive | |
+| Settings > Add-ons: install ODS and Payment machines from their .tiffinaddon files, restart, both Working; an online order arrives; a wireless Paytm/Pine Labs payment | |
+| Quit with Cmd+Q and with the red close button: closing backup taken; shutdown with the app open | |
+| Sleep and wake with the app open (MacBook lid) | |
+
 ## ODS add-on
 
 | Check | Result |

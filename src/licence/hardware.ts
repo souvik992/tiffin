@@ -36,12 +36,22 @@ const run = (file: string, args: string[]): string => {
   }
 };
 
+/** The IOPlatformUUID from `ioreg -rd1 -c IOPlatformExpertDevice` output, or "". */
+export function macPlatformUuid(ioreg: string): string {
+  return /"IOPlatformUUID"\s*=\s*"([0-9A-F-]+)"/i.exec(ioreg)?.[1]?.toUpperCase() ?? "";
+}
+
 /** This machine's raw identifiers. */
 export function machineIdentifiers(): string[] {
   if (platform() === "win32") {
     const guid = /MachineGuid\s+REG_SZ\s+(\S+)/i.exec(run("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"]))?.[1] ?? "";
     const serial = /([0-9A-F]{4}-[0-9A-F]{4})/i.exec(run("cmd", ["/c", "vol", process.env.SystemDrive ?? "C:"]))?.[1] ?? "";
     return [guid, serial];
+  }
+  if (platform() === "darwin") {
+    // The Mac's hardware UUID: survives reinstalls and macOS updates; the network name (hostname) does not.
+    const uuid = macPlatformUuid(run("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]));
+    if (uuid) return [uuid];
   }
   let machineId = "";
   try {

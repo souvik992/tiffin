@@ -181,3 +181,11 @@ test('licence: once it works, changing it needs an owner; the cloud\'s refusal i
     assert.equal((await dev.login('Owner', '1234')).status, 200);
   } finally { await dev.close(); }
 });
+
+test('licence: a Mac is identified by its hardware UUID (not its network name, which can change)', async () => {
+  const { macPlatformUuid, formatHardwareId, HARDWARE_ID_PATTERN } = await import('../src/licence/hardware.ts');
+  const ioreg = '+-o J316sAP  <class IOPlatformExpertDevice>\n    {\n      "IOPlatformSerialNumber" = "C02XYZ"\n      "IOPlatformUUID" = "4A1B2C3D-0000-1111-2222-333344445555"\n    }\n';
+  assert.equal(macPlatformUuid(ioreg), '4A1B2C3D-0000-1111-2222-333344445555');
+  assert.equal(macPlatformUuid(''), '');
+  assert.match(formatHardwareId([macPlatformUuid(ioreg)]), HARDWARE_ID_PATTERN);
+});
