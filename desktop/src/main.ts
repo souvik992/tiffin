@@ -8,6 +8,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, watch } 
 import { join } from 'node:path';
 import { CSP, SCHEME, START_URL, forwardHeaders, isAppUrl, resolveRequest } from './protocol.ts';
 import { startUpdates } from './updates.ts';
+import { installAddon, readAddonFile, removeAddon } from './addonFile.ts';
 
 const PRODUCT = 'Tiffin POS';
 // Local (not roaming) AppData: the database must never sync across a domain profile. Kept on uninstall.
@@ -93,6 +94,8 @@ async function serve(req: Request): Promise<Response> {
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return Response.json({ path: r.canceled ? null : r.filePaths[0] ?? null });
   }
+  if (req.method === 'POST' && new URL(req.url).pathname === '/__desktop/install-addon') return installAddonFromFile(req);
+  if (req.method === 'POST' && new URL(req.url).pathname === '/__desktop/remove-addon') return removeAddonById(req);
   const r = resolveRequest(req.url, uiDir);
   if (r.kind === 'api') {
     if (!port) return Response.json({ error: { code: 'NETWORK', message: 'The billing service is starting. Try again in a moment.' } }, { status: 503 });
@@ -108,6 +111,43 @@ async function serve(req: Request): Promise<Response> {
     } catch { /* fall through */ }
   }
   return new Response('Not found', { status: 404 });
+}
+
+// ---------------------------------------------------------------- Settings > Add-ons (owner only)
+const fail = (message: string, status = 400) => Response.json({ error: { code: 'ADDON', message } }, { status });
+
+/** The signed-in person behind this request, asked of the backend with the page's own sign-in. */
+async function isOwner(req: Request): Promise<boolean> {
+  if (!port) return false;
+  const me = await fetch(`http://127.0.0.1:${port}/api/me`, { headers: forwardHeaders(req.headers, secret) }).catch(() => null);
+  if (!me?.ok) return false;
+  return ((await me.json().catch(() => null)) as { role?: string } | null)?.role === 'owner';
+}
+
+/** Install from file: the person picks a .tiffinaddon; it is unpacked into the add-ons folder (the watcher then offers a restart). */
+async function installAddonFromFile(req: Request): Promise<Response> {
+  if (!(await isOwner(req))) return fail('Only the owner can install add-ons.', 403);
+  const opts = { title: 'Choose a Tiffin POS add-on file', properties: ['openFile'] as Array<'openFile'>, filters: [{ name: 'Tiffin POS add-on', extensions: ['tiffinaddon'] }] };
+  const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+  const file = r.canceled ? null : r.filePaths[0];
+  if (!file) return Response.json({ installed: null });
+  try {
+    const a = readAddonFile(readFileSync(file));
+    installAddon(addonsDir, a);
+    log(`add-on installed from file: ${a.id} ${a.version}`);
+    return Response.json({ installed: { id: a.id, name: a.name, version: a.version } });
+  } catch (e) {
+    log(`add-on install failed: ${String(e)}`);
+    return fail(e instanceof Error ? e.message : 'The add-on could not be installed.');
+  }
+}
+
+async function removeAddonById(req: Request): Promise<Response> {
+  if (!(await isOwner(req))) return fail('Only the owner can remove add-ons.', 403);
+  const id = new URL(req.url).searchParams.get('id') ?? '';
+  if (!removeAddon(addonsDir, id)) return fail('That add-on is not installed.', 404);
+  log(`add-on removed: ${id}`);
+  return Response.json({ removed: id });
 }
 
 function lockDown() {

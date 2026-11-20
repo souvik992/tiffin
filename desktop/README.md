@@ -84,7 +84,9 @@ the first time macOS says it cannot check it: click **Done**, then **System Sett
 **Differences from Windows**
 - Printers: Wi-Fi / LAN receipt and kitchen printers work. USB, Bluetooth/COM and "Windows printer" connections are Windows (and Android) only for now.
 - The rupee sign and Hindi/other Indian scripts print as "Rs" / "?" (Windows draws them as pictures with a Windows-only helper).
-- Payment machine add-on (edc) wired connections and the Tiffin Data Manager are Windows only. The ODS add-on's `.exe` installer is Windows only.
+- Add-ons: install them in the app, **Settings > Add-ons > Install from file** (owner), with the same `.tiffinaddon` files as Android
+  (`TiffinPOS-ODS-<ver>.tiffinaddon`, `TiffinPOS-PaymentMachines-<ver>.tiffinaddon`), then restart the POS. The `.exe` add-on installers are Windows only.
+- Payment machines: wireless works; a Paytm machine on a USB cable is Windows only. The Tiffin Data Manager is Windows only.
 - Licence: the Mac's id comes from its hardware UUID, so a key stays valid across reinstalls on the same Mac.
 - Menu bar: Tiffin POS (About, Quit), Edit (copy and paste) and Window. F11 still switches full screen.
 - Auto-update is not set up for the Mac (it needs the Apple Developer ID and a .zip build); install a new `.dmg` over the old app.

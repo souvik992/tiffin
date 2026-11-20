@@ -77,6 +77,10 @@ npm run installer    # -> addons/dist/installers/TiffinPOS-ODS-Setup-<version>.e
 * **Android:** `npm run build` also writes `addons/dist/installers/TiffinPOS-ODS-<version>.tiffinaddon` (the three signed
   files, zipped). In the Android app: Settings > This device > Add-ons > Install from file (owner). The app only unpacks
   it into its `pos-addons` folder and restarts the POS; the loader checks signature, fingerprints and version as on Windows.
+* **Windows and Mac app:** Settings > Add-ons > Install from file (owner) takes the same `.tiffinaddon` file
+  (`desktop/src/addonFile.ts`, the same rules as Android's AddonInstaller) and unpacks it into the add-ons folder
+  (Mac: `~/Library/Application Support/TiffinPOS/addons`); the app then offers a restart. The owner check is the backend's
+  `/api/me` with the page's own sign-in. This is the only way on a Mac; on Windows the `.exe` installers still work.
 * `npm run dev` in the repo root loads add-ons from `addons/dist/packages`.
 * Loader tests: `test/addons.test.ts` (signature, changed files, versions, failures, database steps).
 

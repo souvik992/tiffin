@@ -10,7 +10,7 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && node scripts/electron.mjs .",
     "icon": "node scripts/electron.mjs scripts/make-icon.cjs",
-    "test": "node --test test/protocol.test.ts",
+    "test": "node --test test/protocol.test.ts test/addonFile.test.ts",
     "typecheck": "tsc -p .",
     "dist": "node scripts/build.mjs && electron-builder --win --config electron-builder.config.cjs",
     "dist:dir": "node scripts/build.mjs && electron-builder --win dir --config electron-builder.config.cjs",

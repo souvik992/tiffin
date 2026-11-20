@@ -111,6 +111,7 @@ Built and tested only on GitHub's Mac machines (build, then the end-to-end test 
 | Licence: the Mac's hardware id stays the same after a restart, a reinstall and a macOS update; a key for it opens the POS | |
 | A Wi-Fi / LAN receipt printer from the Mac: bill, kitchen ticket, cash drawer | |
 | Settings > Backups: Mac folder picker, copy to a USB drive | |
+| Settings > Add-ons: install ODS and Payment machines from their .tiffinaddon files, restart, both Working; an online order arrives; a wireless Paytm/Pine Labs payment | |
 | Quit with Cmd+Q and with the red close button: closing backup taken; shutdown with the app open | |
 | Sleep and wake with the app open (MacBook lid) | |
 
