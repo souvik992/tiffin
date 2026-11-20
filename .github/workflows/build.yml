@@ -110,16 +110,22 @@ jobs:
         run: |
           node scripts/build.mjs
           npx electron-builder --mac --config electron-builder.config.cjs --publish never
-      - name: Open the built Mac app and bill an order (temporary data folder, virtual printer)
-        working-directory: desktop
-        env:
-          POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/Tiffin POS.app/Contents/MacOS/Tiffin POS
-        run: node --test test/app.e2e.test.ts
       - uses: actions/upload-artifact@v4
         with:
           name: TiffinPOS-Mac
           path: desktop/release/*.dmg
           if-no-files-found: error
+      - name: Open the built Mac app and bill an order (temporary data folder, virtual printer)
+        working-directory: desktop
+        env:
+          POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/Tiffin POS.app/Contents/MacOS/Tiffin POS
+        run: |
+          set -o pipefail
+          node --test test/app.e2e.test.ts 2>&1 | tee "$RUNNER_TEMP/e2e.txt"
+      - name: Show why the Mac test failed (as annotations on the run page)
+        if: failure()
+        working-directory: desktop
+        run: node scripts/ci-report.mjs "$RUNNER_TEMP/e2e.txt"
 
   android:
     name: Android apps
