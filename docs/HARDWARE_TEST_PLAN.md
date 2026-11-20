@@ -154,6 +154,22 @@ Earlier: packaged POS 0.2.0 loads the signed add-on and refuses an altered one; 
 
 Done on the dev PC (2026-10-17): x86_64 emulator (Android 16 type, 16 KB pages). Node 24 runs; 177/184 backend tests pass (the 2 failures are timing on the slow emulator); the app starts the POS and shows the setup screen.
 
+## iPhone and iPad
+
+| Check | Result |
+|---|---|
+| Install the signed .ipa (Ad Hoc or TestFlight) on an iPhone and an iPad; first start time; shop setup | |
+| A day of billing on an iPhone (portrait) and an iPad (landscape): speed per tap without a JIT | |
+| App swiped away during a bill: the bill is complete or not there, numbering has no gap | |
+| Leave the app in the background for an hour, come back: the POS still answers (if not, the app says to reopen it) | |
+| A Bluetooth LE thermal printer: found in Printer setup without pairing, test page, bill, KOT, cash drawer kick; Hindi and ₹ lines | |
+| A Wi-Fi printer on port 9100 (allow Local Network once) | |
+| Reports: Download CSV (share sheet, Save to Files) and Print / PDF (AirPrint) | |
+| Settings > Backups: choose an iCloud Drive folder, Copy now; restore one on Windows | |
+| ODS add-on from a .tiffinaddon file, online order while the app is open | |
+
+Done on CI (Mac, simulator only): see the TiffinPOS-iOS-Test artifact of the iOS workflow.
+
 ## Bill designs
 
 | Check | Result |

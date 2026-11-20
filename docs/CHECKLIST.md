@@ -248,9 +248,19 @@ Order follows the project plan in `CLAUDE.md`.
 - [x] Android release signing key (outside the repo) and signed release APKs; GitHub builds signed releases once the key secrets are added
 - [x] Android add-ons: the ODS build also makes a `.tiffinaddon` file; Settings > This device > Add-ons > Install from file / Remove (owner); the POS checks signature and fingerprints as on Windows
 - [x] GitHub signed Android builds: `android/scripts/github-secrets.ts` prepares the four secrets (outside the repo)
+- [x] Android runtime pins refreshed 2026-11-20 (Termux dropped Node 24.22.2): Node 24.22.3, ICU 79.1; the APK starts and shows shop setup on the emulator (portrait phone layout checked)
 - [ ] Android: printers that need a vendor SDK (PAX, some iMin)
 - [ ] Android: printing on a real Bluetooth / USB / Sunmi built-in printer, and the backup copy to a real USB stick (emulator: the print reached the app's printer service, which answered correctly; folder picker needs a person)
 - [ ] Android: tried on a real POS machine (speed, printer, power cut during a bill)
+
+## iPhone and iPad (standalone, 2026-11-20)
+- [x] Same backend and screens on Node 24 for iOS inside the app (pinned third-party pre-release, SHA-256); backend bundled to one .cjs; `ios/scripts/smoke.ts` bills an order with `--jitless` (about 1 s start on a PC)
+- [x] Swift app: web view in the safe area with the private cookie, no zoom on tap, screen kept on, alerts/confirm, share sheet for downloads, AirPrint for Print / PDF, backup copies to a Files folder (iCloud Drive, USB drive), add-ons from a file (owner; POS restarts in place via Backend.restart)
+- [x] Printers on iOS: Wi-Fi/LAN as everywhere; Bluetooth LE printers through the app (same protocol as Android, address ble:<id>), ₹/Hindi drawn with iOS fonts; Printer setup hides USB on iOS
+- [x] GitHub Mac build: simulator app tested in iPhone and iPad simulators (POS starts in the app, shop set up and a bill made through it, screenshots); unsigned .ipa, signed when the Apple secrets are set
+- [ ] iOS: Apple Developer account, signing, TestFlight / App Store (owner); App Store rules on add-ons (guideline 2.5.2)
+- [ ] iOS: Node for iOS built by us from source instead of the pinned third-party pre-release
+- [ ] iOS: a real iPhone/iPad, a real Bluetooth LE printer, the app after hours in the background (iOS freezes background apps: online orders only while open)
 
 ## Kitchen tickets (KOT), POS 0.3.11 / ODS 1.0.9
 - [x] Prep stations (Menu creation > Prep stations): create, rename, remove; a station gets categories and single items (the item's own station wins); printers list station ids or All stations (old free-text kitchen stations became stations in migration 14)
