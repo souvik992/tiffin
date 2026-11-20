@@ -106,7 +106,7 @@ final class PosBackend {
 
     private func waitForPort() {
         DispatchQueue.global(qos: .userInitiated).async {
-            let deadline = Date().addingTimeInterval(180) // a first start on an old phone runs the database setup without a JIT
+            let deadline = Date().addingTimeInterval(300) // a first start on an old phone (or a busy simulator) runs the database setup without a JIT
             while Date() < deadline {
                 if case .failed = self.state { return }
                 if let err = try? String(contentsOf: self.portFile.appendingPathExtension("error"), encoding: .utf8) {

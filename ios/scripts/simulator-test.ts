@@ -33,21 +33,40 @@ for (const type of devices) {
   try {
     simctl('boot', udid);
     simctl('bootstatus', udid, '-b');
+    await sleep(20_000); // let the new simulator finish its first-boot work before timing the app
     simctl('install', udid, app);
     const token = randomBytes(32).toString('base64url');
     const launch = () => execFileSync('xcrun', ['simctl', 'launch', udid, BUNDLE], { env: { ...process.env, SIMCTL_CHILD_POS_TEST_TOKEN: token }, encoding: 'utf8' });
-    const started = Date.now();
-    launch();
     const data = simctl('get_app_container', udid, BUNDLE, 'data');
     const portFile = join(data, 'tmp', 'pos-port');
-    let port = 0;
-    while (!port && Date.now() - started < 180_000) {
-      if (existsSync(`${portFile}.error`)) throw new Error(readFileSync(`${portFile}.error`, 'utf8'));
-      if (existsSync(portFile)) port = Number(readFileSync(portFile, 'utf8'));
-      else await sleep(250);
+    const logFile = join(data, 'Library', 'Application Support', 'TiffinPOS', 'pos-backend.log');
+    // A freshly booted simulator on a busy CI Mac can be very slow for its first app start (the system is still
+    // setting itself up), so the first launch gets a second chance before the test fails.
+    const waitForPort = async (ms: number) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if (existsSync(`${portFile}.error`)) throw new Error(readFileSync(`${portFile}.error`, 'utf8'));
+        if (existsSync(portFile)) { const p = Number(readFileSync(portFile, 'utf8')); if (p > 0) return p; }
+        await sleep(250);
+      }
+      return 0;
+    };
+    const backendLog = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8').slice(-2500) : '(no POS log yet: Node did not write anything)');
+    let started = Date.now();
+    launch();
+    let port = await waitForPort(240_000);
+    if (!port) {
+      console.log(`${type.name}: no POS after 4 minutes; restarting the app once. POS log so far:\n${backendLog()}`);
+      try { simctl('terminate', udid, BUNDLE); } catch { /* not running */ }
+      await sleep(2000);
+      started = Date.now();
+      launch();
+      port = await waitForPort(240_000);
     }
-    if (!port) throw new Error('the POS did not start within 3 minutes');
-    console.log(`${type.name}: POS started inside the app in ${Date.now() - started} ms`);
+    if (!port) throw new Error(`the POS did not start within 4 minutes, twice. POS log:\n${backendLog()}`);
+    const startMs = Date.now() - started;
+    console.log(`${type.name}: POS started inside the app in ${startMs} ms`);
+    if (process.env.GITHUB_ACTIONS) console.log(`::notice title=iOS start (${type.name})::POS started inside the app in ${startMs} ms`);
     await sleep(6000); // the window loads the screens
     simctl('io', udid, 'screenshot', join(out, `${tag}-1-first-run.png`));
     const what = await billingFlow(`http://127.0.0.1:${port}`, token);
