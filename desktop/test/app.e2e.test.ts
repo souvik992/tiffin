@@ -21,7 +21,24 @@ function envFor(home: string): Record<string, string> {
   return { ...env, POS_HOME: home };
 }
 
-test('desktop app: opens the POS, talks to its backend, stays locked down, restarts a crashed backend, closes cleanly', { timeout: 180_000 }, async () => {
+// A packaged build always checks the licence (main.ts), so with no key it opens on the licence screen: check that much.
+test('packaged app: opens on the licence screen without a key, backend up, closes cleanly', { skip: !packaged, timeout: 120_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pos-desktop-'));
+  const app = await _electron.launch({ executablePath: electronExe, args: appArgs, cwd: here, env: envFor(home) });
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
+    assert.equal(page.url(), 'app://pos/index.html');
+    await page.getByRole('button', { name: 'Start 30-day free trial' }).waitFor({ timeout: 60_000 });
+    assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
+  } finally {
+    await app.close();
+  }
+  assert.match(readFileSync(join(home, 'logs', 'pos.log'), 'utf8'), /POS backend listening[\s\S]*backend exited with code 0/);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('desktop app: opens the POS, talks to its backend, stays locked down, restarts a crashed backend, closes cleanly', { skip: !!packaged && 'a packaged build needs a licence key: run without POS_E2E_EXE', timeout: 180_000 }, async () => {
   assert.ok(packaged ? existsSync(packaged) : existsSync(join(here, 'dist', 'main.cjs')), 'run npm run build first');
   const home = mkdtempSync(join(tmpdir(), 'pos-desktop-'));
   const dataDir = join(home, 'data');

@@ -25,7 +25,7 @@ Then, in `desktop/`:
 | `npm run typecheck` | strict TypeScript |
 | `npm run icon` | redraws `build/icon.png` (the orange "T") |
 
-To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` and run `node --test test/app.e2e.test.ts`.
+To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` (Mac: `Tiffin POS.app/Contents/MacOS/Tiffin POS`) and run `node --test test/app.e2e.test.ts`: a packaged build always checks the licence, so with no key it only checks that the app opens on the licence screen and closes cleanly.
 The test uses a temporary data folder (`POS_HOME`) with virtual printers only.
 
 To ship a new version, raise `version` in `desktop/package.json`, then run `npm run dist`.

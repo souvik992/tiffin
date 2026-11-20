@@ -115,7 +115,12 @@ jobs:
           name: TiffinPOS-Mac
           path: desktop/release/*.dmg
           if-no-files-found: error
-      - name: Open the built Mac app and bill an order (temporary data folder, virtual printer)
+      - name: On a Mac, bill an order in the app (temporary data folder, virtual printer)
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          node --test test/app.e2e.test.ts 2>&1 | tee "$RUNNER_TEMP/e2e.txt"
+      - name: Open the built Mac app (no licence key, so it shows the licence screen)
         working-directory: desktop
         env:
           POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/Tiffin POS.app/Contents/MacOS/Tiffin POS
