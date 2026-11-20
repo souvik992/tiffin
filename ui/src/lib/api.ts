@@ -199,18 +199,19 @@ export function createApi(o: ApiOptions) {
     try { return (text ? JSON.parse(text) : null) as T; } catch { return null as T; }
   }
 
-  /** Sends the request (retrying on network failure) and turns an error response into an ApiError. */
+  /** Sends the request (retrying on network failure) and turns an error response into an ApiError. A Blob body is sent as is (a file). */
   async function send(method: string, path: string, body: unknown, key: string | undefined, accept: string, prefix = '/api'): Promise<{ res: Response; text: string }> {
     const headers: Record<string, string> = { Accept: accept };
     const token = o.getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     if (key) headers['Idempotency-Key'] = key;
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const file = typeof Blob !== 'undefined' && body instanceof Blob;
+    if (body !== undefined) headers['Content-Type'] = file ? 'application/octet-stream' : 'application/json';
     const attempts = method === 'GET' || key ? retries + 1 : 1;
     let res: Response | null = null;
     for (let i = 0; i < attempts && !res; i++) {
       try {
-        res = await doFetch(`${base}${prefix}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        res = await doFetch(`${base}${prefix}${path}`, { method, headers, body: body === undefined ? undefined : file ? (body as Blob) : JSON.stringify(body) });
       } catch {
         if (i + 1 < attempts) await new Promise((r) => setTimeout(r, delay * (i + 1)));
       }
@@ -277,6 +278,9 @@ export function createApi(o: ApiOptions) {
     /** Desktop app only: Settings > Add-ons (the app picks the file and unpacks it; owner only, checked with this sign-in). */
     installAddonFromFile: async () => { const { text } = await send('POST', '/install-addon', {}, undefined, 'application/json', '/__desktop'); return JSON.parse(text) as { installed: { id: string; name: string; version: string } | null }; },
     removeAddonFiles: async (id: string) => { await send('POST', `/remove-addon?id=${enc(id)}`, {}, undefined, 'application/json', '/__desktop'); },
+    // iPhone/iPad app (ios/backend/appRoutes.ts): the page picked the .tiffinaddon file; the POS restarts in place afterwards
+    installAddonFileIos: async (file: Blob) => { const { text } = await send('POST', '/install-addon', file, undefined, 'application/json', '/__ios'); return JSON.parse(text) as { installed: { id: string; name: string; version: string } }; },
+    removeAddonFilesIos: async (id: string) => { await send('POST', `/remove-addon?id=${enc(id)}`, undefined, undefined, 'application/json', '/__ios'); },
     users: () => get<StaffUser[]>('/users'),
     createUser: (input: { name: string; role: Role; pin: string; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('POST', '/users', input, key),
     updateUser: (id: string, input: { name: string; role: Role; mobile: string }, key?: string) => change<{ id: string; name: string; role: Role }>('PATCH', '/users/' + enc(id), input, key),

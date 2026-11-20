@@ -1,0 +1,90 @@
+# The iPhone and iPad app (ios/), on a Mac: the backend bundle is checked without a JIT (as Node for iOS runs it), the
+# app is built, tested in an iPhone and an iPad simulator, and packed for devices. Downloads: the run's page > Artifacts.
+#  - TiffinPOS-iOS-Simulator: the app for the iOS simulator (drag onto a running simulator to install).
+#  - TiffinPOS-iOS-Device: a signed .ipa when the Apple signing secrets are set (see ios/README.md), else an unsigned
+#    .ipa that must be signed before an iPhone accepts it.
+#  - TiffinPOS-iOS-Test: simulator screenshots and the POS log.
+name: Build iPhone and iPad app
+
+on:
+  push:
+    branches: [main, mobile-app]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iPhone and iPad app
+    runs-on: macos-latest # Apple chip: Node for iOS has simulator code for Apple chips only
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Build screens
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/cache@v4
+        with:
+          path: ios/.cache
+          key: ios-node-runtime-${{ hashFiles('ios/node-runtime.json') }}
+      - name: Node for iOS (pinned, checksum-checked), backend bundle and screens
+        run: node ios/scripts/prepare.ts
+      - name: The backend bundle bills an order without a JIT (as on an iPhone)
+        run: node ios/scripts/smoke.ts
+      - name: Make the Xcode project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Build for the simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project TiffinPOS.xcodeproj -scheme TiffinPOS -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/xcodebuild-sim.txt" | grep -E "error:|warning: .*TiffinPOS/|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/sim/Build/Products/Debug-iphonesimulator/TiffinPOS.app
+      - name: Show why the build failed
+        if: failure()
+        run: grep -B2 -A8 -E "error:" "$RUNNER_TEMP/xcodebuild-sim.txt" | head -150 || true
+      - name: Test in the iPhone and iPad simulators (start, bill, screenshots)
+        run: node ios/scripts/simulator-test.ts ios/build/sim/Build/Products/Debug-iphonesimulator/TiffinPOS.app "$RUNNER_TEMP/ios-test"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TiffinPOS-iOS-Test
+          path: ${{ runner.temp }}/ios-test
+          if-no-files-found: ignore
+      - name: Pack the simulator app
+        run: |
+          cd ios/build/sim/Build/Products/Debug-iphonesimulator
+          ditto -c -k --keepParent TiffinPOS.app "$GITHUB_WORKSPACE/TiffinPOS-iOS-Simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiffinPOS-iOS-Simulator
+          path: TiffinPOS-iOS-Simulator.zip
+          if-no-files-found: error
+      - name: Build for iPhones and iPads (signed when the signing secrets are set)
+        working-directory: ios
+        env:
+          CERT_P12_B64: ${{ secrets.POS_IOS_CERT_P12_B64 }}
+          CERT_PASSWORD: ${{ secrets.POS_IOS_CERT_PASSWORD }}
+          PROFILE_B64: ${{ secrets.POS_IOS_PROFILE_B64 }}
+          TEAM_ID: ${{ secrets.POS_IOS_TEAM_ID }}
+          EXPORT_METHOD: ${{ secrets.POS_IOS_EXPORT_METHOD }}
+        run: bash scripts/build-device.sh "$GITHUB_WORKSPACE/ios-device"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiffinPOS-iOS-Device
+          path: ios-device/*.ipa
+          if-no-files-found: error

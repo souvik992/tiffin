@@ -20,7 +20,8 @@
     "start:manager": "node scripts/build-manager.mjs && node scripts/electron.mjs dist-manager/main.cjs",
     "dist:manager": "node scripts/build-manager.mjs && electron-builder --win --config electron-builder.manager.cjs",
     "test:e2e:manager": "node scripts/build-manager.mjs && node --test test/manager.e2e.test.ts",
-    "icon:manager": "node -e \"process.env.ICON_LETTER='D';process.env.ICON_BG='oklch(35% .06 50)';process.env.ICON_OUT='manager-icon.png';require('child_process').spawnSync(process.execPath,['scripts/electron.mjs','scripts/make-icon.cjs'],{stdio:'inherit',env:process.env})\""
+    "icon:manager": "node -e \"process.env.ICON_LETTER='D';process.env.ICON_BG='oklch(35% .06 50)';process.env.ICON_OUT='manager-icon.png';require('child_process').spawnSync(process.execPath,['scripts/electron.mjs','scripts/make-icon.cjs'],{stdio:'inherit',env:process.env})\"",
+    "icon:ios": "node scripts/electron.mjs scripts/make-icon.cjs --ios"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

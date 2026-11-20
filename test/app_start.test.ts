@@ -33,3 +33,14 @@ test('startBackend without a secret behaves as before (npm start, the browser UI
     assert.equal((await fetch(`http://127.0.0.1:${b.port}/api/ping`)).status, 200);
   } finally { await b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('startBackend: restart() starts it again in place on the same port (the iOS app after installing an add-on)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pos-app-'));
+  const b = await startBackend({ dataDir: dir, port: 0, logger: silent, scheduleBackups: false });
+  try {
+    const before = b.server;
+    await b.restart('add-on installed');
+    assert.notEqual(b.server, before, 'a new server');
+    assert.equal((await fetch(`http://127.0.0.1:${b.port}/api/ping`)).status, 200, 'same port');
+  } finally { await b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
+});

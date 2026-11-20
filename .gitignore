@@ -27,3 +27,11 @@ Thumbs.db
 
 # order hub local data
 hub-data/
+
+# iOS build inputs made by ios/scripts/prepare.ts and xcodegen (see ios/README.md)
+ios/.cache/
+ios/Frameworks/
+ios/TiffinPOS/pos/
+ios/Version.xcconfig
+ios/TiffinPOS.xcodeproj/
+ios/build/

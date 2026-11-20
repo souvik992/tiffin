@@ -32,7 +32,11 @@ export interface BackendOptions {
   licence?: { enforced: boolean; cloudUrl?: string };
 }
 
-export interface Backend { port: number; readonly server: Server; shutdown: (reason: string) => Promise<void> }
+export interface Backend {
+  port: number; readonly server: Server; shutdown: (reason: string) => Promise<void>;
+  /** Stops and starts it again in place, on the same port (the iOS app after an add-on is installed or removed). */
+  restart: (reason: string) => Promise<void>;
+}
 
 /**
  * Opens the database, runs the startup checks, starts the print queue, backups and the HTTP API. Used by `npm start`,
@@ -43,10 +47,10 @@ export interface Backend { port: number; readonly server: Server; shutdown: (rea
 export async function startBackend(o: BackendOptions): Promise<Backend> {
   const log = o.logger ?? consoleLogger;
   let restarting: Promise<void> | null = null;
-  const restart = () => {
+  const restart = (reason = 'restoring a backup'): Promise<void> => {
     restarting ??= (async () => {
       try {
-        await cur.shutdown('restoring a backup');
+        await cur.shutdown(reason);
         cur = await boot(o, port, restart);
       } catch (e) {
         // Nothing listens any more: exit, so the desktop or Android app starts the POS again (it opens normally).
@@ -54,17 +58,19 @@ export async function startBackend(o: BackendOptions): Promise<Backend> {
         process.exit(1);
       }
     })().finally(() => { restarting = null; });
+    return restarting;
   };
-  let cur = await boot(o, o.port, restart);
+  let cur = await boot(o, o.port, () => { void restart(); });
   const port = cur.port;
   return {
     port,
     get server() { return cur.server; },
     shutdown: async (reason) => { await restarting; await cur.shutdown(reason); },
+    restart: (reason) => restart(reason),
   };
 }
 
-async function boot(o: BackendOptions, wantPort: number, restart: () => void): Promise<Backend> {
+async function boot(o: BackendOptions, wantPort: number, restart: () => void): Promise<Omit<Backend, 'restart'>> {
   applyPendingRestore(o.dataDir, o.logger ?? consoleLogger);
   const ctx = createCtx({ dataDir: o.dataDir, logger: o.logger });
   const queue = defaultQueue(ctx);

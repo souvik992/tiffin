@@ -47,10 +47,10 @@ test('Android printers: listed through the app (bad addresses dropped), bytes se
     const t = new AndroidTransport(b.env);
     await t.send(row('bt:00:11:22:33:44:55', 'slow_buffer'), Uint8Array.from([0x1b, 0x40, 0x41, 0x0a]));
     assert.deepEqual(b.printed.map((p) => [p.address, p.slow, [...p.bytes]]), [['bt:00:11:22:33:44:55', true, [0x1b, 0x40, 0x41, 0x0a]]]);
-    await assert.rejects(t.send(row('../../etc'), Uint8Array.from([1])), /Unknown Android printer address/);
+    await assert.rejects(t.send(row('../../etc'), Uint8Array.from([1])), /Unknown printer address/);
     await assert.rejects(new AndroidTransport({ POS_ANDROID_BRIDGE: `${b.env.POS_ANDROID_BRIDGE.split(':')[0]}:${'x'.repeat(32)}` }).send(row('usb:0416:5011'), Uint8Array.from([1])), /Not allowed/);
     assert.equal(b.badToken(), true);
-    await assert.rejects(new AndroidTransport({}).send(row('usb:0416:5011'), Uint8Array.from([1])), /only in the Tiffin POS Android app/);
+    await assert.rejects(new AndroidTransport({}).send(row('usb:0416:5011'), Uint8Array.from([1])), /only in the Tiffin POS app/);
   } finally { await b.close(); }
   const f = await fakeBridge({ fail: 'Allow the USB printer on the screen, then print again.' });
   try { await assert.rejects(new AndroidTransport(f.env).send(row('usb:0416:5011'), Uint8Array.from([1])), /Allow the USB printer/); } finally { await f.close(); }
@@ -73,5 +73,17 @@ test('Android printers: addresses are checked when saved; found printers appear 
     const added = quickAddPrinter(env.ctx, env.owner, rid(), { key: 'android:bt:00:11:22:33:44:55' });
     assert.equal(added.name, 'Built-in printer');
     assert.equal(get<{ t: string; a: string }>(env.ctx.db, 'SELECT transport t, address a FROM printer WHERE id = ?', added.printerId)!.a, 'bt:00:11:22:33:44:55');
+  } finally { env.cleanup(); }
+});
+
+test('iPhone and iPad printers: Bluetooth LE printers (ble:<id>) go through the iOS app with the same protocol', async () => {
+  const env = makeEnv(); try {
+    const code = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as AppError).code; } return 'NO_ERROR'; };
+    assert.equal(code(() => createPrinter(env.ctx, env.owner, rid(), { name: 'X', transport: 'android', address: 'ble:not-a-uuid' })), 'VALIDATION');
+    assert.ok(createPrinter(env.ctx, env.owner, rid(), { name: 'BLE 58', transport: 'android', address: 'ble:6E400001-B5A3-F393-E0A9-E50E24DCCA9E' }));
+    const scan = async () => ({ usb: [], windows: [], android: [{ address: 'ble:6E400001-B5A3-F393-E0A9-E50E24DCCA9E', name: 'MTP-II', detail: 'Bluetooth LE', builtin: false }] });
+    resetDetectCache(env.ctx);
+    const r = await listUsbDevices(env.ctx, { scan, platform: 'ios' });
+    assert.deepEqual(r.devices.map((d) => [d.key, d.printerName]), [['android:ble:6E400001-B5A3-F393-E0A9-E50E24DCCA9E', 'BLE 58']]);
   } finally { env.cleanup(); }
 });

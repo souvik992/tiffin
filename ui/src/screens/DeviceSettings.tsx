@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { FolderOpen, HardDriveDownload, PackagePlus, Trash2 } from 'lucide-react';
 import type { AddonInfo } from '../lib/api.ts';
 import { useSession } from '../lib/session.tsx';
-import { androidApp, backupCopyStatus } from '../lib/android.ts';
+import { androidApp, backupCopyStatus, onIos } from '../lib/android.ts';
 import { onDesktop } from '../lib/desktop.ts';
 import type { BackupCopyStatus } from '../lib/android.ts';
 
 const when = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-/** Settings > Backups on Android: backup copies on a USB stick or SD card (the app copies them; the folder picker is Android's). */
+/** Settings > Backups on Android and iOS: backup copies on a USB stick or SD card, or (iOS) any folder in Files such as
+ * iCloud Drive (the app copies them; the folder picker is the phone's). */
 export function AndroidBackupCopies() {
   const { notify } = useSession();
   const [st, setSt] = useState<BackupCopyStatus | null>(backupCopyStatus);
@@ -17,18 +18,20 @@ export function AndroidBackupCopies() {
   const a = androidApp();
   if (!a) return null;
 
+  const ios = onIos();
   const copy = () => {
     setBusy(true);
     setTimeout(() => { // let the button show "Copying…" first: the copy runs while this waits
-      const n = a.copyBackupsNow();
-      setBusy(false); setSt(backupCopyStatus());
-      notify(n < 0 ? 'error' : 'success', n < 0 ? 'The backups could not be copied. Is the USB stick or SD card still in?' : n === 0 ? 'The folder already has every backup.' : `${n} backup file(s) copied.`);
+      void Promise.resolve(a.copyBackupsNow()).catch(() => -1).then((n) => {
+        setBusy(false); setSt(backupCopyStatus());
+        notify(n < 0 ? 'error' : 'success', n < 0 ? (ios ? 'The backups could not be copied. Is the folder still there (USB drive plugged in, iCloud Drive on)?' : 'The backups could not be copied. Is the USB stick or SD card still in?') : n === 0 ? 'The folder already has every backup.' : `${n} backup file(s) copied.`);
+      });
     }, 50);
   };
 
   return (
       <section className="max-w-2xl rounded-2xl border border-border bg-card p-4" aria-label="Backup copies">
-        <h3 className="mb-2 flex items-center gap-2 font-semibold"><HardDriveDownload className="h-4 w-4 text-primary" />Backup copies on a USB stick or SD card</h3>
+        <h3 className="mb-2 flex items-center gap-2 font-semibold"><HardDriveDownload className="h-4 w-4 text-primary" />{ios ? 'Backup copies in Files (iCloud Drive or a USB drive)' : 'Backup copies on a USB stick or SD card'}</h3>
         {st?.folder ? (
           <>
             <p className="text-sm">Folder: <b>{st.folder}</b> (in it: <b>TiffinPOS-backups</b>)</p>
@@ -42,7 +45,7 @@ export function AndroidBackupCopies() {
           </>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">Insert the USB stick (with an OTG cable) or SD card, then choose a folder on it.</p>
+            <p className="text-sm text-muted-foreground">{ios ? 'Choose a folder in Files: on iCloud Drive (copies leave the shop by themselves) or on a USB drive or SD card plugged into this iPhone or iPad.' : 'Insert the USB stick (with an OTG cable) or SD card, then choose a folder on it.'}</p>
             <button className="btn-primary mt-3" onClick={() => a.chooseBackupFolder()}><FolderOpen className="h-4 w-4" />Choose folder</button>
           </>
         )}
@@ -59,11 +62,28 @@ export function DeviceSettings() {
   const [installed, setInstalled] = useState<string | null>(null);
   useEffect(() => { api.addons().then(setAddons).catch(() => setAddons([])); }, [api]);
   const a = androidApp();
+  const ios = onIos();
   const desktop = !a && onDesktop();
-  if (!a && !desktop) return <p className="text-sm text-muted-foreground">This page is for the Android, Windows and Mac apps.</p>;
+  if (!a && !desktop) return <p className="text-sm text-muted-foreground">This page is for the Android, iPhone, iPad, Windows and Mac apps.</p>;
 
+  // iOS: the page picks the file (the iOS file picker), the app unpacks it and restarts the POS in place; the screens reload.
+  const installIos = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      setBusy(true);
+      void api.installAddonFileIos(f)
+        .then((r) => { notify('success', `${r.installed.name} ${r.installed.version} installed. The POS is restarting to use it.`); setTimeout(() => window.location.reload(), 4000); })
+        .catch((e: unknown) => notify('error', e instanceof Error ? e.message : 'The add-on could not be installed.'))
+        .finally(() => setBusy(false));
+    };
+    input.click();
+  };
   // Desktop: the app unpacks the file into its add-ons folder and then offers "Restart now / Later" itself.
   const install = async () => {
+    if (ios) { installIos(); return; }
     if (a) { a.installAddon(); return; }
     setBusy(true);
     try {
@@ -73,6 +93,10 @@ export function DeviceSettings() {
   };
   const remove = async (x: AddonInfo) => {
     if (!window.confirm(`Remove ${x.name}? Its settings and data stay in the POS.`)) return;
+    if (ios) {
+      try { await api.removeAddonFilesIos(x.id); notify('success', `${x.name} removed. The POS is restarting.`); setTimeout(() => window.location.reload(), 4000); } catch (e) { notify('error', e instanceof Error ? e.message : 'The add-on could not be removed.'); }
+      return;
+    }
     if (a) { a.removeAddon(x.id); return; }
     try { await api.removeAddonFiles(x.id); notify('success', `${x.name} removed. Restart the POS to finish.`); } catch (e) { notify('error', e instanceof Error ? e.message : 'The add-on could not be removed.'); }
   };

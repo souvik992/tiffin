@@ -1,20 +1,23 @@
-// What the Android app offers the screens (window.PosAndroid, android/app/.../MainActivity.java). On Windows and in a
-// browser it is absent and the usual browser ways are used.
+// What the phone and tablet apps offer the screens (window.PosAndroid): the Android app (android/app/.../MainActivity.java)
+// and the iPhone/iPad app (ios/TiffinPOS/PosIOS.js, which offers the same object; there saving a file and copying
+// backups answer later, as a Promise, and window.PosIOS is set). On Windows and in a browser it is absent and the usual
+// browser ways are used. onAndroid() means "in a phone or tablet app" (Android or iOS); onIos() only the iPhone/iPad app.
 
 interface PosAndroid {
-  saveFile(name: string, mime: string, base64: string): string;
+  saveFile(name: string, mime: string, base64: string): string | Promise<string>;
   print(title: string): void;
   chooseBackupFolder(): void;
   backupStatus(): string;
-  copyBackupsNow(): number;
+  copyBackupsNow(): number | Promise<number>;
   forgetBackupFolder(): void;
   installAddon(): void;
   removeAddon(id: string): boolean;
 }
-declare global { interface Window { PosAndroid?: PosAndroid } }
+declare global { interface Window { PosAndroid?: PosAndroid; PosIOS?: boolean } }
 
 export const androidApp = (): PosAndroid | null => (typeof window !== 'undefined' && window.PosAndroid) || null;
 export const onAndroid = (): boolean => androidApp() !== null;
+export const onIos = (): boolean => typeof window !== 'undefined' && window.PosIOS === true && androidApp() !== null;
 
 const toBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
   const r = new FileReader();
@@ -23,11 +26,11 @@ const toBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
   r.readAsDataURL(blob);
 });
 
-/** Saves a file: the Downloads folder on Android, the browser's download elsewhere. Returns a message for the person. */
+/** Saves a file: the Downloads folder on Android, the share sheet (Save to Files) on iOS, the browser's download elsewhere. Returns a message for the person. */
 export async function saveFile(name: string, blob: Blob): Promise<string> {
   const a = androidApp();
   if (a) {
-    const r = a.saveFile(name, blob.type, await toBase64(blob));
+    const r = await a.saveFile(name, blob.type, await toBase64(blob));
     if (r === 'error') throw new Error('The file could not be saved.');
     return r;
   }
@@ -39,7 +42,7 @@ export async function saveFile(name: string, blob: Blob): Promise<string> {
   return `Downloaded ${name}`;
 }
 
-/** Print / PDF of the page: Android's print screen (with Save as PDF) in the app, the browser's print elsewhere. */
+/** Print / PDF of the page: the phone's print screen (Android: with Save as PDF; iOS: AirPrint, share as PDF) in the app, the browser's print elsewhere. */
 export function printPage(title = 'Tiffin POS'): void {
   const a = androidApp();
   if (a) a.print(title); else window.print();

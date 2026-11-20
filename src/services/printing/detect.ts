@@ -35,12 +35,13 @@ const IGNORE_KEY = 'printer_detect_ignored';
 export function resetDetectCache(ctx: Ctx): void { cache.delete(ctx); }
 
 async function defaultScan(): Promise<Scan> {
-  if (process.platform === 'android') return { usb: [], windows: [], android: await listAndroidPrinters().catch(() => []) };
+  const platform: string = process.platform; // 'ios' in the iPhone/iPad app (Node for iOS), not in Node's own list
+  if (platform === 'android' || platform === 'ios') return { usb: [], windows: [], android: await listAndroidPrinters().catch(() => []) };
   const [usb, windows] = await Promise.all([listUsbPrinters().catch(() => []), listWindowsPrinters().catch(() => [])]);
   return { usb, windows };
 }
-/** Platforms where printers can be found: Windows, and Android inside the Tiffin POS app. */
-const canScan = (platform: string) => platform === 'win32' || platform === 'android';
+/** Platforms where printers can be found: Windows, and Android, iPhone and iPad inside the Tiffin POS app. */
+const canScan = (platform: string) => platform === 'win32' || platform === 'android' || platform === 'ios';
 
 const guessWidth = (s: string): 58 | 80 => (/(^|\D)58(\D|$)|58\s?mm/i.test(s) ? 58 : 80);
 const ignored = (ctx: Ctx): Set<string> => { try { return new Set(JSON.parse(getSetting(ctx, IGNORE_KEY) || '[]') as string[]); } catch { return new Set(); } };

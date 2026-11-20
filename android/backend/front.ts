@@ -1,4 +1,4 @@
-// The Android app's gatekeeper, inside the same Node process as the POS backend. The app's window loads
+// The Android and iOS apps' gatekeeper, inside the same Node process as the POS backend. The app's window loads
 // http://127.0.0.1:<port>/: this serves the UI files and forwards /api to the backend with the launch secret, like the
 // desktop app's app:// protocol (desktop/src/protocol.ts). Other apps on the device can reach loopback ports too, so every
 // request must carry the app's private cookie (set by the app in its own WebView cookie jar, never readable by others).
@@ -7,7 +7,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 
-export interface FrontOptions { uiDir: string; backendPort: number; secret: string; token: string; port?: number }
+/** Extra routes of the app around it (iOS: add-on files); answers and returns true when the request is one of them. */
+export type AppRoutes = (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => boolean;
+export interface FrontOptions { uiDir: string; backendPort: number; secret: string; token: string; port?: number; app?: AppRoutes }
 export interface Front { port: number; close(): Promise<void> }
 
 const TYPES: Record<string, string> = {
@@ -45,6 +47,7 @@ export async function startFront(o: FrontOptions): Promise<Front> {
     if (host !== '127.0.0.1' && host !== 'localhost') return deny(403, 'Unexpected Host header.');
     if (!same(cookieOf(req.headers.cookie), o.token)) return deny(403, 'Open Tiffin POS from its app.');
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (o.app?.(req, res, url)) return;
 
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       const headers: http.OutgoingHttpHeaders = {};

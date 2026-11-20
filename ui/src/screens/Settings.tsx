@@ -14,7 +14,7 @@ import { UsersSettings } from './UsersSettings.tsx';
 import { CouponsSettings } from './CouponsSettings.tsx';
 import { DeviceSettings } from './DeviceSettings.tsx';
 import { BackupSettings } from './BackupSettings.tsx';
-import { onAndroid } from '../lib/android.ts';
+import { onAndroid, onIos } from '../lib/android.ts';
 import { onDesktop } from '../lib/desktop.ts';
 import { useAddons } from '../lib/addons.ts';
 import { LicencePanel, useLicence } from './Licence.tsx';
@@ -35,7 +35,12 @@ const ANDROID_KINDS: Partial<Record<Kind, { transport: Transport; hint: string }
   usb: { transport: 'android', hint: 'Printer plugged into this device with a USB (OTG) cable' },
   bluetooth: { transport: 'android', hint: 'The built-in printer of this POS machine, or a printer paired over Bluetooth' },
 };
-const kindsHere = () => (onAndroid() ? KINDS.map((k) => ({ ...k, ...(ANDROID_KINDS[k.kind] ?? {}) })) : KINDS);
+/** iPhone/iPad: no USB printers for apps; Bluetooth LE printers through the app (address ble:…), no pairing needed. */
+const IOS_KINDS: Partial<Record<Kind, { transport: Transport; hint: string }>> = {
+  bluetooth: { transport: 'android', hint: 'A Bluetooth printer near this iPhone or iPad (Bluetooth LE; no pairing needed)' },
+};
+const kindsHere = () => (onIos() ? KINDS.filter((k) => k.kind !== 'usb').map((k) => ({ ...k, ...(IOS_KINDS[k.kind] ?? {}) }))
+  : onAndroid() ? KINDS.map((k) => ({ ...k, ...(ANDROID_KINDS[k.kind] ?? {}) })) : KINDS);
 const kindOf = (t: Transport, address?: string | null): Kind => (t === 'android' ? ((address ?? '').startsWith('usb:') ? 'usb' : 'bluetooth') : t === 'spooler' || t === 'usb' ? 'usb' : t === 'tcp' ? 'wifi' : t === 'serial' ? 'bluetooth' : 'screen');
 const connLabel = (p: { transport: Transport; address?: string | null }) => (p.transport === 'android' ? ((p.address ?? '').startsWith('usb:') ? 'USB (this device)' : 'Bluetooth / built-in') : p.transport === 'usb' ? 'USB (no driver needed)' : p.transport === 'spooler' ? 'USB (Windows printer)' : KINDS.find((k) => k.kind === kindOf(p.transport))!.label);
 const when = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -257,7 +262,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
   const { api } = useSession();
   const key = useRef(newKey());
   const startTransport = printer?.transport ?? prefill?.transport ?? 'spooler';
-  const [kind, setKind] = useState<Kind>(kindOf(startTransport, printer?.address ?? prefill?.address));
+  const [kind, setKind] = useState<Kind>(() => { const k = kindOf(startTransport, printer?.address ?? prefill?.address); return k === 'usb' && onIos() ? 'wifi' : k; }); // iOS has no USB printers
   const android = onAndroid();
   const [name, setName] = useState(printer?.name ?? prefill?.name ?? '');
   const [address, setAddress] = useState(printer?.address ?? prefill?.address ?? '');
@@ -270,7 +275,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const directUsb = startTransport === 'usb' && kind === 'usb'; // plug-and-play printer: keep its USB id
-  const transport: Transport = directUsb ? 'usb' : kindsHere().find((k) => k.kind === kind)!.transport;
+  const transport: Transport = directUsb ? 'usb' : (kindsHere().find((k) => k.kind === kind) ?? KINDS.find((k) => k.kind === kind)!).transport;
   const allStations = stations;
 
   const pick = (addr: string, suggestedName?: string) => { setAddress(addr); if (!name.trim() && suggestedName) setName(suggestedName); };
@@ -292,7 +297,7 @@ function PrinterDialog({ printer, prefill, stations, hasReceipt, onClose, onSave
     <Modal title={printer ? `Edit ${printer.name}` : 'Add printer'} onClose={onClose} width="max-w-2xl">
       <div className="max-h-[75vh] overflow-y-auto pr-1">
         <Step n={1} title="How is the printer connected?">
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4" role="radiogroup" aria-label="Connection">
+          <div className={`grid grid-cols-2 gap-2 ${kindsHere().length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'}`} role="radiogroup" aria-label="Connection">
             {kindsHere().map(({ kind: k, label, hint, icon: Icon }) => (
               <button key={k} type="button" role="radio" aria-checked={kind === k} title={hint}
                 onClick={() => { if (k !== kind) { setKind(k); setAddress(k === kindOf(startTransport, printer?.address ?? prefill?.address) ? (printer?.address ?? prefill?.address ?? '') : ''); setError(''); } }}
@@ -455,19 +460,21 @@ function AndroidPicker({ kind, value, onPick }: { kind: 'usb' | 'bluetooth'; val
   const [list, setList] = useState<UsbDevice[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
-  const prefix = kind === 'usb' ? 'usb:' : 'bt:';
+  const ios = onIos();
+  const prefix = kind === 'usb' ? 'usb:' : ios ? 'ble:' : 'bt:';
   const load = useCallback(() => {
     setLoading(true); setErr('');
     api.usbDevices(true).then((r) => setList(r.devices.filter((d) => d.transport === 'android' && d.address.startsWith(prefix)))).catch((e) => setErr(messageOf(e))).finally(() => setLoading(false));
   }, [api, prefix]);
   useEffect(load, [load]);
   return (
-    <Picker title={kind === 'usb' ? 'USB printers on this device' : 'Built-in and Bluetooth printers'} loading={loading} onRefresh={load} refreshLabel="Refresh">
+    <Picker title={kind === 'usb' ? 'USB printers on this device' : ios ? 'Bluetooth printers nearby' : 'Built-in and Bluetooth printers'} loading={loading} onRefresh={load} refreshLabel="Refresh">
       <p className="mb-2 text-xs text-muted-foreground">{kind === 'usb'
         ? 'Plug the printer in with a USB (OTG) cable. The first print asks you to allow it: tap OK.'
+        : ios ? 'Switch the printer on and keep it near this iPhone or iPad, then press Refresh. Do not pair it in iOS Settings; allow Bluetooth for Tiffin POS when asked. Printers that only have classic Bluetooth (no Bluetooth LE) cannot work with an iPhone: use a Wi-Fi printer instead.'
         : 'A POS machine with a printer shows "Built-in printer". For another printer, pair it first in Android Settings, Bluetooth (PIN often 0000 or 1234), and allow Nearby devices for Tiffin POS.'}</p>
       {err && <p className="text-sm text-destructive">{err}</p>}
-      {list?.length === 0 && <p className="text-sm text-muted-foreground">{kind === 'usb' ? 'No USB printer is plugged in.' : 'No printer found. Pair it in Android Settings, then press Refresh.'}</p>}
+      {list?.length === 0 && <p className="text-sm text-muted-foreground">{kind === 'usb' ? 'No USB printer is plugged in.' : ios ? 'No Bluetooth printer found nearby. Is it switched on, and is Bluetooth allowed for Tiffin POS (iOS Settings, Tiffin POS)?' : 'No printer found. Pair it in Android Settings, then press Refresh.'}</p>}
       <ul className="max-h-48 space-y-1 overflow-y-auto">
         {list?.map((d) => (
           <li key={d.key}><button type="button" aria-pressed={value === d.address} onClick={() => onPick(d.address, d.name)}

@@ -1,0 +1,78 @@
+# The Xcode project is made from this file by XcodeGen (`xcodegen generate` in ios/, on a Mac; CI does it), so no
+# hand-edited .xcodeproj lives in the repository. See ios/README.md.
+name: TiffinPOS
+options:
+  bundleIdPrefix: com.tiffinpos
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Version.xcconfig
+  Release: Version.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2" # iPhone and iPad
+    ENABLE_BITCODE: NO
+    DEAD_CODE_STRIPPING: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: "${POS_IOS_TEAM_ID}"
+targets:
+  TiffinPOS:
+    type: application
+    platform: iOS
+    scheme: {} # a shared scheme, so xcodebuild can build and archive it
+    sources:
+      - path: TiffinPOS
+        excludes:
+          - "pos/**"
+      - path: TiffinPOS/pos
+        type: folder # the backend bundle and the screens, copied as one folder
+        buildPhase: resources
+    dependencies:
+      - framework: Frameworks/NodeMobile.xcframework
+        embed: true
+        codeSign: true
+    info:
+      path: TiffinPOS/Info.plist
+      properties:
+        CFBundleDisplayName: Tiffin POS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIRequiresFullScreen: false
+        UIStatusBarStyle: UIStatusBarStyleDarkContent
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        # The window loads the POS from http://127.0.0.1 (this app's own backend); nothing else may use plain http.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSBluetoothAlwaysUsageDescription: Tiffin POS prints bills and kitchen tickets on Bluetooth printers near this device.
+        NSLocalNetworkUsageDescription: Tiffin POS prints bills and kitchen tickets on Wi-Fi and network printers in the shop.
+        UIFileSharingEnabled: false
+        UIBackgroundModes: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiffinpos.pos
+        PRODUCT_NAME: TiffinPOS
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
