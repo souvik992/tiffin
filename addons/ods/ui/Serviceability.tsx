@@ -139,7 +139,7 @@ export function Serviceability() {
             {err('pickup')}
             <label className="text-sm font-medium sm:col-span-2">GST on delivery and packaging charges
               <select className="field mt-1 w-full" disabled={ro} value={form.feeTaxGroupId} onChange={(e) => set({ feeTaxGroupId: e.target.value })} aria-label="GST on fees">
-                <option value="">Not chosen (delivery and packaging fees cannot be charged)</option>
+                {!form.feeTaxGroupId && <option value="">Not chosen (delivery and packaging fees cannot be charged)</option>}
                 {taxGroups.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.rateBp / 100}%)</option>)}
               </select>
               {err('feeTaxGroupId')}

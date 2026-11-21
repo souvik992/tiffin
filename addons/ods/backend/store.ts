@@ -58,7 +58,15 @@ export const outboxFailed = (host: HostApi, id: number, error: string) => host.d
 
 // ---- small settings
 const FEE_TAX = 'ods_fee_tax_group';
-export const readFeeTaxGroup = (host: HostApi): string | null => host.getSetting(FEE_TAX) || null;
+/**
+ * The GST rate on delivery and packaging fees: the one the owner chose, else the POS's 0% rate (the owner's default,
+ * 2026-11-21; every POS gets "GST 0%" at first setup). null only when neither exists.
+ */
+export function readFeeTaxGroup(host: HostApi): string | null {
+  const saved = host.getSetting(FEE_TAX);
+  if (saved && host.db.get('SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', saved)) return saved;
+  return host.db.get<{ id: string }>('SELECT id FROM tax_group WHERE rate_bp = 0 AND cess_bp = 0 AND deleted_at IS NULL ORDER BY updated_at, id LIMIT 1')?.id ?? null;
+}
 
 /** What prints when an online order is accepted (by staff or automatically): the bill, the kitchen tickets. Default: both. */
 export interface PrintOnAccept { bill: boolean; kot: boolean }

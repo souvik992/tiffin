@@ -15,6 +15,7 @@ import { mapAttribution } from '../backend/maps.ts';
 import { makePlaces } from '../backend/places.ts';
 import type { Fetcher } from '../backend/maps.ts';
 import { register } from '../backend/index.ts';
+import { readFeeTaxGroup, saveFeeTaxGroup } from '../backend/store.ts';
 import { DEFAULT_SERVICEABILITY } from '../../../contract/src/serviceability.ts';
 
 const code = async (fn: () => unknown): Promise<string> => { try { await fn(); } catch (e) { if (e instanceof AppError) return e.code; throw e; } return 'NO_ERROR'; };
@@ -58,6 +59,24 @@ test('serviceability: defaults until saved; owner saves a checked configuration;
     assert.deepEqual([saved.location?.label, saved.packagingFee], ['Kalyan Nagar', 1000]);
     assert.deepEqual(readServiceability(host).location, cfg.location);
     assert.ok(get(env.ctx.db, "SELECT 1 FROM audit_log WHERE action = 'online.serviceability'"));
+  } finally { env.cleanup(); }
+});
+
+test('GST on delivery and packaging fees: 0% until the owner chooses another rate (also after "not chosen" or a removed rate)', async () => {
+  const env = makeEnv(); try {
+    const { host } = hostFor(env);
+    const rate = (bp: number) => get<{ id: string }>(env.ctx.db, 'SELECT id FROM tax_group WHERE rate_bp = ? AND deleted_at IS NULL LIMIT 1', bp)?.id;
+    const zero = rate(0) ?? (env.ctx.db.prepare("INSERT INTO tax_group(id, name, rate_bp, cess_bp, price_includes_tax, updated_at) VALUES ('tg0', 'GST 0%', 0, 0, 1, 0)").run(), 'tg0');
+    assert.equal(readFeeTaxGroup(host), zero, 'nothing chosen yet: 0%');
+    saveFeeTaxGroup(host, rate(500)!);
+    assert.equal(readFeeTaxGroup(host), rate(500));
+    saveFeeTaxGroup(host, null);
+    assert.equal(readFeeTaxGroup(host), zero);
+    saveFeeTaxGroup(host, rate(500)!);
+    env.ctx.db.prepare('UPDATE tax_group SET deleted_at = 1 WHERE id = ?').run(rate(500)!);
+    assert.equal(readFeeTaxGroup(host), zero, 'the chosen rate was removed');
+    env.ctx.db.prepare('UPDATE tax_group SET deleted_at = 1 WHERE rate_bp = 0').run();
+    assert.equal(readFeeTaxGroup(host), null, 'no 0% rate at all: not chosen');
   } finally { env.cleanup(); }
 });
 
