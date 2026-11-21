@@ -61,7 +61,7 @@ export function dailyMatch(host: HostApi, ctx: Ctx, from: string, to: string) {
 }
 
 export function register(host: HostApi): void {
-  if (!host.billing.order || !host.billing.finalize || !host.requireApproval) throw new host.AppError('POS_TOO_OLD', 'Payment machines need Tiffin POS 0.3.8 or newer.', 409);
+  if (!host.billing.order || !host.billing.finalize || !host.requireApproval) throw new host.AppError('POS_TOO_OLD', 'Payment machines need quickPOS 0.3.8 or newer.', 409);
   bindHost(host);
   host.migrations(MIGRATIONS);
   const ctx = host.ctx;

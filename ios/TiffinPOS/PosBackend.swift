@@ -79,7 +79,7 @@ final class PosBackend {
             freopen(log, "a", stderr)
             setvbuf(stdout, nil, _IOLBF, 0)
             let code = PosBackend.runNode(["node", main])
-            self.set(.failed("The POS stopped (code \(code)). Close Tiffin POS completely and open it again. Your bills are safe."))
+            self.set(.failed("The POS stopped (code \(code)). Close quickPOS completely and open it again. Your bills are safe."))
         }
         thread.name = "pos-node"
         thread.stackSize = 16 * 1024 * 1024 // V8 without a JIT uses more stack than the default 512 KB of a thread
@@ -110,7 +110,7 @@ final class PosBackend {
             while Date() < deadline {
                 if case .failed = self.state { return }
                 if let err = try? String(contentsOf: self.portFile.appendingPathExtension("error"), encoding: .utf8) {
-                    self.set(.failed("Tiffin POS could not start: \(err.replacingOccurrences(of: "FAILED ", with: ""))"))
+                    self.set(.failed("quickPOS could not start: \(err.replacingOccurrences(of: "FAILED ", with: ""))"))
                     return
                 }
                 if let s = try? String(contentsOf: self.portFile, encoding: .utf8), let port = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)), port > 0 {
@@ -119,7 +119,7 @@ final class PosBackend {
                 }
                 Thread.sleep(forTimeInterval: 0.1)
             }
-            self.set(.failed("Tiffin POS is taking too long to start. Close it completely and open it again."))
+            self.set(.failed("quickPOS is taking too long to start. Close it completely and open it again."))
         }
     }
 

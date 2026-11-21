@@ -1,7 +1,7 @@
-# Tiffin POS for Windows and Mac (desktop app)
+# quickPOS for Windows and Mac (desktop app)
 
 An Electron app that wraps the POS: one window showing the billing UI, with the backend running inside it.
-No Node.js, browser or command line is needed on the shop PC: the shop runs the installer and opens **Tiffin POS** from the desktop.
+No Node.js, browser or command line is needed on the shop PC: the shop runs the installer and opens **quickPOS** from the desktop.
 
 ## Build
 
@@ -17,15 +17,15 @@ Then, in `desktop/`:
 | Command | What it does |
 |---|---|
 | `npm start` | builds, then opens the app (development; dev tools on Ctrl+Shift+I) |
-| `npm run dist` | builds the installer: `release/TiffinPOS-Setup-<version>.exe` (about 130 MB; packed for fast installs on low-end PCs, see below) |
-| `npm run dist:mac` | **on a Mac only**: `release/TiffinPOS-<version>-mac-arm64.dmg` (Apple M1 and newer) and `-mac-x64.dmg` (Intel Macs). GitHub builds both on every push (Actions > the run > Artifacts > TiffinPOS-Mac) and opens the built app on a Mac to bill a test order |
+| `npm run dist` | builds the installer: `release/quickPOS-Setup-<version>.exe` (about 130 MB; packed for fast installs on low-end PCs, see below) |
+| `npm run dist:mac` | **on a Mac only**: `release/quickPOS-<version>-mac-arm64.dmg` (Apple M1 and newer) and `-mac-x64.dmg` (Intel Macs). GitHub builds both on every push (Actions > the run > Artifacts > TiffinPOS-Mac) and opens the built app on a Mac to bill a test order |
 | `npm run dist:dir` | builds the unpacked app only: `release/win-unpacked/TiffinPOS.exe` (fast, for testing) |
 | `npm test` | unit tests (URL mapping, secret header, navigation rules) |
 | `npm run test:e2e` | builds, then drives the real app: sign-in, a bill with live print status, reports, lockdown, crash restart, single copy, clean close |
 | `npm run typecheck` | strict TypeScript |
 | `npm run icon` | redraws `build/icon.png` (the orange "T") |
 
-To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` (Mac: `Tiffin POS.app/Contents/MacOS/Tiffin POS`) and run `node --test test/app.e2e.test.ts`: a packaged build always checks the licence, so with no key it only checks that the app opens on the licence screen and closes cleanly.
+To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` (Mac: `quickPOS.app/Contents/MacOS/quickPOS`) and run `node --test test/app.e2e.test.ts`: a packaged build always checks the licence, so with no key it only checks that the app opens on the licence screen and closes cleanly.
 The test uses a temporary data folder (`POS_HOME`) with virtual printers only.
 
 To ship a new version, raise `version` in `desktop/package.json`, then run `npm run dist`.
@@ -61,7 +61,7 @@ TiffinPOS.exe
 | App | `%LOCALAPPDATA%\Programs\TiffinPOS` (per-user install, **no administrator needed**) |
 | Bills database, journal, backups, menu photos | `%LOCALAPPDATA%\TiffinPOS\data` (local, not roaming: never synced by a domain profile) |
 | Log | `%LOCALAPPDATA%\TiffinPOS\logs\pos.log` (rotates at 5 MB) |
-| Shortcuts | Desktop and Start menu: "Tiffin POS" |
+| Shortcuts | Desktop and Start menu: "quickPOS" |
 
 **Uninstalling never deletes the data folder.** To move a shop to a new PC, copy `%LOCALAPPDATA%\TiffinPOS\data`.
 `POS_DATA_DIR` (data folder) and `POS_HOME` (data, logs and Electron profile) override these locations.
@@ -71,13 +71,13 @@ TiffinPOS.exe
 The same app, screens, data and rules as on Windows; only the installer and the printer choices differ.
 
 **Install:** open the `.dmg` for the Mac's chip (Apple menu > About This Mac: "Apple M…" = arm64, "Intel" = x64), drag
-**Tiffin POS** to **Applications**, open it from Applications. The app is not yet signed with an Apple Developer ID, so
+**quickPOS** to **Applications**, open it from Applications. The app is not yet signed with an Apple Developer ID, so
 the first time macOS says it cannot check it: click **Done**, then **System Settings > Privacy & Security**, scroll down,
 **Open Anyway**, and confirm. After that it opens normally.
 
 | What | Where on a Mac |
 |---|---|
-| App | `/Applications/Tiffin POS.app` |
+| App | `/Applications/quickPOS.app` |
 | Bills database, backups, menu photos | `~/Library/Application Support/TiffinPOS/data` (kept when the app is moved to the Bin) |
 | Log | `~/Library/Application Support/TiffinPOS/logs/pos.log` |
 
@@ -85,10 +85,10 @@ the first time macOS says it cannot check it: click **Done**, then **System Sett
 - Printers: Wi-Fi / LAN receipt and kitchen printers work. USB, Bluetooth/COM and "Windows printer" connections are Windows (and Android) only for now.
 - The rupee sign and Hindi/other Indian scripts print as "Rs" / "?" (Windows draws them as pictures with a Windows-only helper).
 - Add-ons: install them in the app, **Settings > Add-ons > Install from file** (owner), with the same `.tiffinaddon` files as Android
-  (`TiffinPOS-ODS-<ver>.tiffinaddon`, `TiffinPOS-PaymentMachines-<ver>.tiffinaddon`), then restart the POS. The `.exe` add-on installers are Windows only.
-- Payment machines: wireless works; a Paytm machine on a USB cable is Windows only. The Tiffin Data Manager is Windows only.
+  (`quickPOS-ODS-<ver>.tiffinaddon`, `quickPOS-PaymentMachines-<ver>.tiffinaddon`), then restart the POS. The `.exe` add-on installers are Windows only.
+- Payment machines: wireless works; a Paytm machine on a USB cable is Windows only. The quickPOS Data Manager is Windows only.
 - Licence: the Mac's id comes from its hardware UUID, so a key stays valid across reinstalls on the same Mac.
-- Menu bar: Tiffin POS (About, Quit), Edit (copy and paste) and Window. F11 still switches full screen.
+- Menu bar: quickPOS (About, Quit), Edit (copy and paste) and Window. F11 still switches full screen.
 - Auto-update is not set up for the Mac (it needs the Apple Developer ID and a .zip build); install a new `.dmg` over the old app.
 
 To sign and notarise (removes the warning): an Apple Developer ID Application certificate (Apple Developer Program,
@@ -105,7 +105,7 @@ The installer is **unsigned** today. Windows SmartScreen shows "Windows protecte
    $env:POS_PUBLISHER = "Your Company Pvt Ltd"   # the certificate's CN: updates signed by anyone else are refused
    npm run dist
    ```
-3. Check it: `Get-AuthenticodeSignature release\TiffinPOS-Setup-<version>.exe` should print `Valid`.
+3. Check it: `Get-AuthenticodeSignature release\quickPOS-Setup-<version>.exe` should print `Valid`.
 
 Never commit the certificate or its password.
 
@@ -116,7 +116,7 @@ Never commit the certificate or its password.
    ```powershell
    $env:POS_UPDATE_URL = "https://updates.example.in/pos/"; npm run dist
    ```
-3. Upload `release/latest.yml` and `TiffinPOS-Setup-<version>.exe` (and its `.blockmap` if one was built) to that folder.
+3. Upload `release/latest.yml` and `quickPOS-Setup-<version>.exe` (and its `.blockmap` if one was built) to that folder.
    Updates download the whole installer: it is packed as zip for installs about twice as fast on low-end PCs,
    which rules out downloading only the changed parts (docs/DECISIONS.md).
 
@@ -128,11 +128,11 @@ How shops receive it:
 
 A build without `POS_UPDATE_URL` never checks for updates.
 
-## Tiffin Data Manager (a separate app)
+## quickPOS Data Manager (a separate app)
 
 The owner's tool for the shop's data: a dashboard with charts, every table, changes to the menu, stock and staff, and
-backup and restore. It has its **own installer** (`release-manager/TiffinDataManager-Setup-<version>.exe`), its own desktop
-shortcut ("Tiffin Data Manager", a brown "D") and its own folder, so it works on a computer where the POS was never
+backup and restore. It has its **own installer** (`release-manager/quickPOS-DataManager-Setup-<version>.exe`), its own desktop
+shortcut ("quickPOS Data Manager", a brown "D") and its own folder, so it works on a computer where the POS was never
 installed or was uninstalled: it reads the POS data folder, a copied data folder or a backup file.
 
 | Command (in `desktop/`) | What it does |
@@ -149,7 +149,7 @@ How it behaves:
   details, staff, coupons), so they are checked and logged exactly as at the POS. **Bills, payments, shifts and printing are
   never changed here**: bills are immutable (RULES.md 5); cancellations and refunds are done at the POS.
 * **View only** (a copy taken with SQLite's backup API, in this app's folder, removed on close) when:
-  * Tiffin POS is open on this computer (checked every 3 seconds; the app switches back when the POS closes);
+  * quickPOS is open on this computer (checked every 3 seconds; the app switches back when the POS closes);
   * the data comes from an older POS (the shop's database is never upgraded behind an older POS);
   * a backup file is open.
 * **All data:** every table as stored (amounts in paise), search, CSV download. PIN hashes, sign-in tokens, keys and
@@ -160,7 +160,7 @@ How it behaves:
 
 | What | Where |
 |---|---|
-| App | `%LOCALAPPDATA%\Programs\TiffinDataManager` (per user, no administrator) |
+| App | `%LOCALAPPDATA%\Programs\TiffinData` (per user, no administrator; the folder follows the program file name, TiffinData.exe) |
 | Its own folder (window profile, log, temporary copies) | `%LOCALAPPDATA%\TiffinDataManager` (`MANAGER_HOME` overrides) |
 | The POS data it opens first | `%LOCALAPPDATA%\TiffinPOS\data` (`POS_DATA_DIR` or `POS_HOME` override) |
 

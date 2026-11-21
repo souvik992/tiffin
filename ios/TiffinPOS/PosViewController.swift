@@ -50,7 +50,7 @@ final class PosViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         status.textAlignment = .center
         status.font = .preferredFont(forTextStyle: .title3)
         status.textColor = UIColor(red: 0x1F / 255, green: 0x29 / 255, blue: 0x37 / 255, alpha: 1)
-        status.text = "Starting Tiffin POS…"
+        status.text = "Starting quickPOS…"
         let stack = UIStackView(arrangedSubviews: [spinner, status])
         stack.axis = .vertical
         stack.spacing = 16
@@ -69,7 +69,7 @@ final class PosViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private func show(_ s: PosBackend.State) {
         switch s {
         case .starting:
-            status.text = "Starting Tiffin POS…"
+            status.text = "Starting quickPOS…"
         case .failed(let message):
             spinner.stopAnimating()
             status.text = message
@@ -103,7 +103,7 @@ final class PosViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         URLSession.shared.dataTask(with: req) { [weak self] _, res, _ in
             guard (res as? HTTPURLResponse) == nil else { return }
             DispatchQueue.main.async {
-                self?.status.text = "Tiffin POS lost its connection while it was in the background. Close it completely (swipe it away) and open it again. Your bills are safe."
+                self?.status.text = "quickPOS lost its connection while it was in the background. Close it completely (swipe it away) and open it again. Your bills are safe."
                 self?.spinner.stopAnimating()
                 self?.status.superview?.isHidden = false
                 self?.web.isHidden = true
@@ -174,7 +174,7 @@ final class PosViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "saveFile":
             replyHandler(saveFile(name: body["name"] as? String ?? "", base64: body["base64"] as? String ?? ""), nil)
         case "print":
-            printPage(title: body["title"] as? String ?? "Tiffin POS")
+            printPage(title: body["title"] as? String ?? "quickPOS")
             replyHandler(true, nil)
         case "chooseBackupFolder":
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])

@@ -50,7 +50,7 @@ test('Android printers: listed through the app (bad addresses dropped), bytes se
     await assert.rejects(t.send(row('../../etc'), Uint8Array.from([1])), /Unknown printer address/);
     await assert.rejects(new AndroidTransport({ POS_ANDROID_BRIDGE: `${b.env.POS_ANDROID_BRIDGE.split(':')[0]}:${'x'.repeat(32)}` }).send(row('usb:0416:5011'), Uint8Array.from([1])), /Not allowed/);
     assert.equal(b.badToken(), true);
-    await assert.rejects(new AndroidTransport({}).send(row('usb:0416:5011'), Uint8Array.from([1])), /only in the Tiffin POS app/);
+    await assert.rejects(new AndroidTransport({}).send(row('usb:0416:5011'), Uint8Array.from([1])), /only in the quickPOS app/);
   } finally { await b.close(); }
   const f = await fakeBridge({ fail: 'Allow the USB printer on the screen, then print again.' });
   try { await assert.rejects(new AndroidTransport(f.env).send(row('usb:0416:5011'), Uint8Array.from([1])), /Allow the USB printer/); } finally { await f.close(); }

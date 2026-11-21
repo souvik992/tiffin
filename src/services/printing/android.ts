@@ -65,7 +65,7 @@ export class AndroidTransport implements Transport {
   constructor(env: NodeJS.ProcessEnv = process.env) { this.env = env; }
   async send(p: PrinterRow, bytes: Uint8Array): Promise<void> {
     const cfg = bridgeConfig(this.env);
-    if (!cfg) throw new Error('This printer works only in the Tiffin POS app on the phone or tablet it was set up on.');
+    if (!cfg) throw new Error('This printer works only in the quickPOS app on the phone or tablet it was set up on.');
     if (!ANDROID_ADDRESS.test(p.address ?? '')) throw new Error('Unknown printer address on this device.');
     const r = await call(cfg, { op: 'print', address: p.address, slow: p.profile === 'slow_buffer' }, bytes, 30_000);
     if (r.ok !== true) throw new Error(String(r.error ?? 'The printer did not print.'));

@@ -1,5 +1,5 @@
-// Tiffin Data Manager's backend, in Electron's utility process: src/manager/server.ts on a free loopback port,
-// guarded by a secret only the main process knows. It looks for a running Tiffin POS every 3 seconds.
+// quickPOS Data Manager's backend, in Electron's utility process: src/manager/server.ts on a free loopback port,
+// guarded by a secret only the main process knows. It looks for a running quickPOS every 3 seconds.
 import { startManager, windowsProcessRunning } from '../../../src/manager/server.ts';
 
 interface ParentPort { postMessage(m: unknown): void; on(ev: 'message', fn: (e: { data: unknown }) => void): void }

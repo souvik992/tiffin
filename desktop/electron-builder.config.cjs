@@ -9,7 +9,7 @@ const updateUrl = process.env.POS_UPDATE_URL;
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'co.palletnow.tiffinpos',
-  productName: 'Tiffin POS',
+  productName: 'quickPOS',
   copyright: 'Copyright © 2026',
   directories: { output: 'release', buildResources: 'build' },
   files: ['dist/**/*', '!dist/**/*.map', 'package.json'],
@@ -36,8 +36,8 @@ module.exports = {
     ...(process.env.CSC_LINK ? {} : { identity: '-', hardenedRuntime: false }),
   },
   dmg: {
-    artifactName: 'TiffinPOS-${version}-mac-${arch}.${ext}',
-    title: 'Tiffin POS ${version}',
+    artifactName: 'quickPOS-${version}-mac-${arch}.${ext}',
+    title: 'quickPOS ${version}',
   },
   nsis: {
     oneClick: false,
@@ -46,10 +46,10 @@ module.exports = {
     allowToChangeInstallationDirectory: false,
     createDesktopShortcut: 'always',
     createStartMenuShortcut: true,
-    shortcutName: 'Tiffin POS',
+    shortcutName: 'quickPOS',
     runAfterFinish: true,
     deleteAppDataOnUninstall: false, // bills and backups (in %LOCALAPPDATA%\TiffinPOS) are never deleted by uninstalling
-    artifactName: 'TiffinPOS-Setup-${version}.${ext}',
+    artifactName: 'quickPOS-Setup-${version}.${ext}',
     // zip (deflate) instead of LZMA: about twice as fast to install on one CPU core (measured 21-26 s against 41-53 s),
     // for a ~131 MB instead of ~112 MB installer. zip needs differentialPackage off, so updates download the whole
     // installer rather than only the changed blocks. See docs/DECISIONS.md.

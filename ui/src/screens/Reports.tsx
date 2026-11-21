@@ -66,7 +66,7 @@ export function Reports() {
     if (!printing) return;
     const done = () => setPrinting(false);
     window.addEventListener('afterprint', done);
-    const t = setTimeout(() => { printPage('Tiffin POS report'); if (onAndroid()) setTimeout(done, 60_000); }, 50); // let the print copy render first (Android: no afterprint event)
+    const t = setTimeout(() => { printPage('quickPOS report'); if (onAndroid()) setTimeout(done, 60_000); }, 50); // let the print copy render first (Android: no afterprint event)
     return () => { clearTimeout(t); window.removeEventListener('afterprint', done); };
   }, [printing]);
 

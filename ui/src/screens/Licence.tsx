@@ -1,4 +1,4 @@
-// P8-10: the licence. A lock screen when Tiffin POS has no usable licence (nothing else is reachable), a banner in its
+// P8-10: the licence. A lock screen when quickPOS has no usable licence (nothing else is reachable), a banner in its
 // last days, and Settings > Licence. Three ways in: sign in with the portal account (30-day trial, or the key the
 // account already has for this PC), Renew (the portal's plans page in the browser), or paste a licence key.
 import { useCallback, useEffect, useState } from 'react';
@@ -6,6 +6,7 @@ import { CreditCard, KeyRound, LogIn, ShieldAlert } from 'lucide-react';
 import { ApiError, LICENCE_EVENT } from '../lib/api.ts';
 import type { LicenceInfo } from '../lib/api.ts';
 import { useSession } from '../lib/session.tsx';
+import { BrandMark } from '../components/BrandMark.tsx';
 
 const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const errorText = (e: unknown) => (e instanceof ApiError ? e.message : 'Something went wrong. Please try again.');
@@ -93,16 +94,16 @@ export function LicencePanel({ licence, onChanged }: { licence: LicenceInfo; onC
   );
 }
 
-/** Nothing else is on screen (or reachable) while Tiffin POS has no usable licence. */
+/** Nothing else is on screen (or reachable) while quickPOS has no usable licence. */
 export function LicenceLock({ licence, onChanged }: { licence: LicenceInfo; onChanged: (l: LicenceInfo) => void }) {
   return (
     <div className="flex min-h-screen justify-center overflow-y-auto bg-background px-4 py-10">
       <div className="w-full max-w-2xl">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary font-display text-2xl text-primary-foreground">T</div>
+          <BrandMark className="h-12 w-12 shrink-0" />
           <div>
             <h1 className="flex items-center gap-2 font-display text-3xl"><ShieldAlert className="h-6 w-6 text-destructive" /> Licence needed</h1>
-            <p className="text-sm text-muted-foreground">Tiffin POS is locked until this PC has a licence. Your bills and data are safe.</p>
+            <p className="text-sm text-muted-foreground">quickPOS is locked until this PC has a licence. Your bills and data are safe.</p>
           </div>
         </div>
         <LicencePanel licence={licence} onChanged={onChanged} />

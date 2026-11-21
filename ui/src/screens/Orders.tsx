@@ -29,7 +29,7 @@ export function Orders() {
   const [statusKey, setStatusKey] = useState(0);
   const [correcting, setCorrecting] = useState<Payment | null>(null);
   const { addons } = useAddons();
-  const { manager } = useAppMode(); // Tiffin Data Manager: bills are view only
+  const { manager } = useAppMode(); // quickPOS Data Manager: bills are view only
   const panels = addons.flatMap((a) => (a.invoicePanels ?? []).map((P, i) => ({ key: `${a.id}:${i}`, P })));
 
   const load = useCallback(() => {

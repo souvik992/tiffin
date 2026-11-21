@@ -92,7 +92,7 @@ host.register({
   routes: { ods: () => (onlineEnabled() ? <Ods /> : null) },
   settings: [
     { key: 'online', label: 'Online orders', hint: 'Sales channels, payments, accepting (off = offline mode)', icon: Globe, component: OnlineSettings, roles: ['owner', 'manager'] },
-    { key: 'serviceability', label: 'Serviceability', hint: 'Delivery areas on a map (free or Google), fees, minimum order, hours', icon: MapPinned, component: Serviceability, roles: ['owner', 'manager'] },
+    { key: 'serviceability', label: 'Serviceability', hint: 'Delivery areas on a map, fees, minimum order, hours', icon: MapPinned, component: Serviceability, roles: ['owner', 'manager'] },
   ],
   railFooter: StatusDot,
 });

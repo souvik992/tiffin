@@ -223,7 +223,7 @@ final class PrinterBridge {
         }
         JSONObject res = ok();
         res.put("printers", arr);
-        if (bt != null && !canUseBluetooth()) res.put("note", "Allow Nearby devices for Tiffin POS to see Bluetooth printers.");
+        if (bt != null && !canUseBluetooth()) res.put("note", "Allow Nearby devices for quickPOS to see Bluetooth printers.");
         return res;
     }
 
@@ -241,7 +241,7 @@ final class PrinterBridge {
     private JSONObject printBluetooth(String mac, byte[] data, boolean slow) throws Exception {
         BluetoothAdapter bt = adapter();
         if (bt == null) return fail("This device has no Bluetooth.");
-        if (!canUseBluetooth()) return fail("Allow Nearby devices for Tiffin POS (Android Settings, Apps, Tiffin POS, Permissions), then print again.");
+        if (!canUseBluetooth()) return fail("Allow Nearby devices for quickPOS (Android Settings, Apps, quickPOS, Permissions), then print again.");
         if (!bt.isEnabled()) return fail("Turn on Bluetooth, then print again.");
         BluetoothDevice dev = bt.getRemoteDevice(mac);
         BluetoothSocket sock = null;

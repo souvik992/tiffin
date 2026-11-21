@@ -77,6 +77,6 @@ console.log(`Payment machines ${pkg.version} built and signed: ${out} (backend $
 // the same signed files as one file for the Android app (Settings > This device > Add-ons > Install from file)
 const installers = join(here, '..', 'dist', 'installers');
 mkdirSync(installers, { recursive: true });
-const addonFile = join(installers, `TiffinPOS-PaymentMachines-${pkg.version}.tiffinaddon`);
+const addonFile = join(installers, `quickPOS-PaymentMachines-${pkg.version}.tiffinaddon`);
 writeFileSync(addonFile, zip(['manifest.json', 'backend.cjs', 'ui.js'].map((n) => [n, readFileSync(join(out, n))])));
 console.log(`Android add-on file: ${addonFile}`);

@@ -18,7 +18,7 @@ import type { Source, Want } from './source.ts';
 import { listTables, readTable, tableCsv } from './tables.ts';
 
 /**
- * Tiffin Data Manager's backend: the POS's own API (same services, same rules, same checks) over the shop's data,
+ * quickPOS Data Manager's backend: the POS's own API (same services, same rules, same checks) over the shop's data,
  * plus its own /mgr routes (status, open another folder or a backup file, all tables, backup, restore).
  *
  * - Only an owner signs in. The sign-in follows the data: when the POS opens or closes and the data is reopened
@@ -224,7 +224,7 @@ export async function startManager(o: ManagerOptions): Promise<Manager> {
     await chain;
     await reopen(w);
     if (failure) throw failure;
-    logger.info('backup restored by Tiffin Data Manager', { file: basename(file) });
+    logger.info('backup restored by quickPOS Data Manager', { file: basename(file) });
     return report!;
   }
 
@@ -273,7 +273,7 @@ export async function startManager(o: ManagerOptions): Promise<Manager> {
       const pin = text(b.pin, 'PIN', 12);
       const r = typeof b.mobile === 'string' && b.mobile ? loginByMobile(s.ctx, b.mobile, pin)
         : typeof b.userId === 'string' && b.userId ? login(s.ctx, b.userId, pin) : (() => { throw new AppError('VALIDATION', 'Enter your mobile number.'); })();
-      if (r.user.role !== 'owner') { logout(s.ctx, r.token); throw new AppError('OWNER_ONLY', 'Only the owner can open Tiffin Data Manager.', 403); }
+      if (r.user.role !== 'owner') { logout(s.ctx, r.token); throw new AppError('OWNER_ONLY', 'Only the owner can open quickPOS Data Manager.', 403); }
       const token = randomBytes(32).toString('hex');
       sessions.set(token, { userId: r.user.userId, name: r.user.name, ctxToken: r.token, ctxOf: s.ctx });
       return send(res, 200, { token, user: r.user });
@@ -285,9 +285,9 @@ export async function startManager(o: ManagerOptions): Promise<Manager> {
       return send(res, 200, { ok: true });
     }
     if (m === 'GET' && p === '/api/login-users') return send(res, 200, listLoginUsers(open().ctx).filter((u) => u.role === 'owner'));
-    if (p.startsWith('/api/auth/')) throw new AppError('NOT_HERE', 'Not available in Tiffin Data Manager.', 403);
+    if (p.startsWith('/api/auth/')) throw new AppError('NOT_HERE', 'Not available in quickPOS Data Manager.', 403);
     const mutating = m !== 'GET' && m !== 'HEAD';
-    if (mutating && !EDITABLE.test(p)) throw new AppError('NOT_HERE', 'Bills, payments, shifts and printing are handled at the POS, not in Tiffin Data Manager.', 403);
+    if (mutating && !EDITABLE.test(p)) throw new AppError('NOT_HERE', 'Bills, payments, shifts and printing are handled at the POS, not in quickPOS Data Manager.', 403);
     if (mutating) await mustEdit();
     const handler = posHandler;
     if (!source || !handler) open();
@@ -303,7 +303,7 @@ export async function startManager(o: ManagerOptions): Promise<Manager> {
       if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) throw new AppError('BAD_HOST', 'Unexpected Host header.', 403);
       if (secret) {
         const got = req.headers['x-pos-secret'];
-        if (typeof got !== 'string' || got.length !== secret.length || !timingSafeEqual(Buffer.from(got), secret)) throw new AppError('BAD_LAUNCH_SECRET', 'Open Tiffin Data Manager from its desktop app.', 403);
+        if (typeof got !== 'string' || got.length !== secret.length || !timingSafeEqual(Buffer.from(got), secret)) throw new AppError('BAD_LAUNCH_SECRET', 'Open quickPOS Data Manager from its desktop app.', 403);
       }
       const url = new URL(req.url ?? '/', 'http://localhost');
       const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];

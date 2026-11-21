@@ -37,7 +37,7 @@ targets:
     info:
       path: TiffinPOS/Info.plist
       properties:
-        CFBundleDisplayName: Tiffin POS
+        CFBundleDisplayName: quickPOS
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
@@ -64,8 +64,8 @@ targets:
         # The window loads the POS from http://127.0.0.1 (this app's own backend); nothing else may use plain http.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSBluetoothAlwaysUsageDescription: Tiffin POS prints bills and kitchen tickets on Bluetooth printers near this device.
-        NSLocalNetworkUsageDescription: Tiffin POS prints bills and kitchen tickets on Wi-Fi and network printers in the shop.
+        NSBluetoothAlwaysUsageDescription: quickPOS prints bills and kitchen tickets on Bluetooth printers near this device.
+        NSLocalNetworkUsageDescription: quickPOS prints bills and kitchen tickets on Wi-Fi and network printers in the shop.
         UIFileSharingEnabled: false
         UIBackgroundModes: []
     settings:

@@ -1,6 +1,6 @@
 import UIKit
 
-/// Tiffin POS for iPhone and iPad: the same POS as on Windows and Android, running on this device (PosBackend: Node for
+/// quickPOS for iPhone and iPad: the same POS as on Windows and Android, running on this device (PosBackend: Node for
 /// iOS inside the app), shown in a web view (PosViewController). See ios/README.md.
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {

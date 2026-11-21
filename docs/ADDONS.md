@@ -6,7 +6,7 @@ The POS can load **signed add-ons**: modules that ship and install separately fr
 
 ```
 TiffinPOS-Setup-0.3.0.exe            -> %LOCALAPPDATA%\Programs\TiffinPOS        (the POS)
-TiffinPOS-ODS-Setup-1.0.1.exe -> %LOCALAPPDATA%\TiffinPOS\addons\ods\
+quickPOS-ODS-Setup-1.0.1.exe -> %LOCALAPPDATA%\TiffinPOS\addons\ods\
                                           manifest.json  backend.cjs  ui.js  uninstall.exe
 ```
 
@@ -70,11 +70,11 @@ npm install          # once
 npm test             # backend logic on a real POS database + the signed package loaded in a real POS
 npm run typecheck
 npm run build        # -> addons/dist/packages/ods (signed)
-npm run installer    # -> addons/dist/installers/TiffinPOS-ODS-Setup-<version>.exe
+npm run installer    # -> addons/dist/installers/quickPOS-ODS-Setup-<version>.exe
 ```
 
 * The add-on installer needs the POS installer to have been built once in `desktop/`, for the icon and the NSIS tool.
-* **Android:** `npm run build` also writes `addons/dist/installers/TiffinPOS-ODS-<version>.tiffinaddon` (the three signed
+* **Android:** `npm run build` also writes `addons/dist/installers/quickPOS-ODS-<version>.tiffinaddon` (the three signed
   files, zipped). In the Android app: Settings > This device > Add-ons > Install from file (owner). The app only unpacks
   it into its `pos-addons` folder and restarts the POS; the loader checks signature, fingerprints and version as on Windows.
 * **Windows and Mac app:** Settings > Add-ons > Install from file (owner) takes the same `.tiffinaddon` file

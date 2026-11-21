@@ -5,6 +5,7 @@ import type { LoginUser, LoginWith } from '../lib/api.ts';
 import { PinPad } from '../components/ui.tsx';
 import { isMobile, mobileDigits } from '../lib/pin.ts';
 import { Setup } from './Setup.tsx';
+import { BrandMark } from '../components/BrandMark.tsx';
 
 /**
  * Sign-in: mobile number and PIN. When a sign-in ended (e.g. deactivated elsewhere), the same person can use the PIN alone.
@@ -56,8 +57,8 @@ export function Login() {
 
   const header = (text: string) => (
     <>
-      <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary font-display text-2xl text-primary-foreground">T</div>
-      <h1 className="font-display text-3xl">Tiffin POS</h1>
+      <BrandMark className="mb-2 h-12 w-12" />
+      <h1 className="font-display text-3xl">quickPOS</h1>
       <p className="mb-6 text-sm text-muted-foreground">{text}</p>
     </>
   );

@@ -1,7 +1,7 @@
 import { ApiError } from '../lib/api.ts';
 import { currentToken } from '../lib/session.tsx';
 
-// Tiffin Data Manager's own routes (/mgr/...). The shared screens use the POS API (/api/...) as usual.
+// quickPOS Data Manager's own routes (/mgr/...). The shared screens use the POS API (/api/...) as usual.
 
 export interface Status {
   source: null | {
@@ -30,7 +30,7 @@ async function call<T>(method: string, path: string, body?: unknown, accept = 'a
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
   try { res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }); }
-  catch { throw new ApiError('NETWORK', 'Tiffin Data Manager is starting. Try again in a moment.', 0); }
+  catch { throw new ApiError('NETWORK', 'quickPOS Data Manager is starting. Try again in a moment.', 0); }
   const text = await res.text();
   let data: unknown = null;
   try { data = text ? JSON.parse(text) : null; } catch { /* csv */ }

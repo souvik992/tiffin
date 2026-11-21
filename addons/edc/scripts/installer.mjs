@@ -1,4 +1,4 @@
-// Builds the payment machines add-on installer: addons/dist/installers/TiffinPOS-PaymentMachines-Setup-<version>.exe
+// Builds the payment machines add-on installer: addons/dist/installers/quickPOS-PaymentMachines-Setup-<version>.exe
 // Run `npm run build` first (or `npm run installer`, which does both). Uses makensis from electron-builder's cache
 // (it is downloaded when the POS installer is built in desktop/).
 import { execFileSync } from 'node:child_process';
@@ -27,6 +27,6 @@ const makensis = process.env.MAKENSIS ?? find(cache);
 if (!makensis) { console.error('makensis.exe not found. Build the POS installer once (desktop: npm run dist), or set MAKENSIS.'); process.exit(1); }
 
 mkdirSync(outDir, { recursive: true });
-const outFile = join(outDir, `TiffinPOS-PaymentMachines-Setup-${version}.exe`);
+const outFile = join(outDir, `quickPOS-PaymentMachines-Setup-${version}.exe`);
 execFileSync(makensis, ['-V2', `-DVERSION=${version}`, `-DSRC=${src}`, `-DOUTFILE=${outFile}`, `-DICON=${icon}`, join(here, 'installer', 'edc.nsi')], { stdio: 'inherit' });
 console.log(`Installer: ${outFile}`);

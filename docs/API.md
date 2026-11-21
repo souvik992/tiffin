@@ -55,11 +55,9 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | `/api/addons/ods/config` GET (C) / PUT (O) | | ODS add-on: online mode, channels, order types, payments, accept mode |
 | `/api/addons/ods/serviceability` GET (M) / PUT (O) | | location, delivery areas, packaging fee, pickup, hours (contract/src/serviceability.ts); errors in `details.fields` |
 | GET `/api/addons/ods/tiles/:z/:x/:y.png` (none) | | map tiles through the POS; only in online mode (cached tiles work offline) |
-| GET `/api/addons/ods/geocode?q=&near=lat,lng&full=1&session=` (O) | | place suggestions `[{ label, detail, lat, lng, placeId }]`: Google Places with the owner's key, else Photon; `full=1` (Enter) may also ask Nominatim |
-| GET `/api/addons/ods/geocode/place?id=&session=` (O) | | the location of a suggestion that came without one (Google) |
-| Serviceability `maps` | | GET: `{ provider: google/osm, attribution }` |
-| GET `/api/addons/ods/api-keys`; PUT `{ google: key or null }` | O | `{ google: { set, hint } }` (never the key); null removes it |
-| POST `/api/addons/ods/api-keys/test` | O | `{ search: { ok, message }, map: { ok, message } }`; 409 in offline mode |
+| GET `/api/addons/ods/geocode?q=&near=lat,lng&full=1` (O) | | place suggestions `[{ label, detail, lat, lng, placeId }]`: Photon (free, OpenStreetMap data); `full=1` (Enter) may also ask Nominatim |
+| GET `/api/addons/ods/geocode/address?lat=&lng=` (O) | | `{ label }`: the nearest address to a map point (Photon reverse, free), for the Address field after the pin is moved; `''` when none |
+| Serviceability `maps` | | GET: `{ provider: osm, attribution }` (the free map only since ODS 1.0.15) |
 | Serviceability also carries `roadFactor` (1.00-2.00) and `feeTaxGroupId` (GST group for fees) | | |
 | GET `/api/addons/ods/menu-sync` (M); PUT `{ channel, mode: all/exclude/include, items, pricing: same/custom, markupBp, prices }` (O); POST `/menu-sync/now` (O) | | menu sync per channel; `now` sends the menu to the hub at once (409 when not paired) |
 | GET `/api/addons/ods/tax-groups` | C | GST groups to choose for delivery/packaging fees |
@@ -98,6 +96,6 @@ Roles: **C**ashier, **M**anager, **O**wner (M includes C, O includes M). "approv
 | GET `/api/backup/overview` | O | Settings > Backups: `{status, files: [{file, bytes, kind, at}], copy: {dir, lastAt, error, files}, cloud: {connected, on, url, store, everyHours, lastAt, lastFile, error, busy}, everyHoursChoices, lastRestore, canRestartItself}` |
 | PUT `/api/backup/copy` `{dir \| null}`; POST `/api/backup/copy/now`; GET `/api/backup/folder?path=` | O | offline copies: every backup is also copied (and checked) into `<dir>/TiffinPOS-backups`; `folder` lists the backups in a folder (or its TiffinPOS-backups) for restore |
 | GET `/api/sales-sync`; PATCH `/api/sales-sync` `{on}`; POST `/api/sales-sync/now` | O | sales to the owner's portal (Analytics): `{linked, on, pending, lastAt, error}`. Runs by itself once the POS is linked with the cloud (account sign-in, online orders or online backups); bills, items, payment modes and the counter name go up, never customer details; purchases (supplier name, materials, amounts) and the stock list too |
-| POST `/api/backup/cloud/pair` `{url, code}`; PATCH `/api/backup/cloud` `{on?, everyHours?}`; DELETE `/api/backup/cloud`; POST `/api/backup/cloud/now`; GET `/api/backup/cloud/list` | O | online backups to the Tiffin backup server (the order hub). https only (http only for a server on this PC); the device key stays in the backend |
+| POST `/api/backup/cloud/pair` `{url, code}`; PATCH `/api/backup/cloud` `{on?, everyHours?}`; DELETE `/api/backup/cloud`; POST `/api/backup/cloud/now`; GET `/api/backup/cloud/list` | O | online backups to the quickPOS backup server (the order hub). https only (http only for a server on this PC); the device key stays in the backend |
 | POST `/api/restore` `{source: device\|folder\|online, name, folder?, pin}`; POST `/api/restore/dismiss` | O + own PIN | checks and stages the backup, answers `{restarting}`, then the backend restarts itself on the same port and applies it (current data kept in `pre-restore-<time>/`, journal replayed). Sessions start fresh |
 | GET/PUT `/api/settings`; GET `/api/health[?deep=1]`; GET `/api/backups`; POST `/api/journal/repair`; GET `/api/audit`, `/api/audit/verify` | O | |

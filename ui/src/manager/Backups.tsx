@@ -54,7 +54,7 @@ export function Backups({ onChanged }: { onChanged: () => void }) {
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               Restoring replaces the shop's data with the backup. The data from before is kept in a "pre-restore" folder, and bills made after the backup are brought back from the bill journal.
-              {!list.canRestore && ' Close Tiffin POS first.'}
+              {!list.canRestore && ' Close quickPOS first.'}
             </p>
             <table className="table mt-4">
               <thead className="bg-secondary text-left"><tr><th className="px-3 py-2">Taken</th><th className="px-3 py-2">Kind</th><th className="px-3 py-2 text-right">Size</th><th className="px-3 py-2" /></tr></thead>
@@ -100,7 +100,7 @@ function RestoreDialog({ file, onClose, onDone }: { file: string; onClose: () =>
   return (
     <Modal title="Restore this backup?" onClose={busy ? () => {} : onClose}>
       <p className="break-all text-sm">{file}</p>
-      <p className="mt-2 text-sm text-muted-foreground">The shop's data will be replaced by this backup. Keep Tiffin POS closed until this finishes.</p>
+      <p className="mt-2 text-sm text-muted-foreground">The shop's data will be replaced by this backup. Keep quickPOS closed until this finishes.</p>
       <label className="mt-4 block text-sm font-medium">Your PIN to confirm
         <input className="field mt-1 w-full" type="password" inputMode="numeric" autoFocus maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter' && pin.length >= 4) void go(); }} />
       </label>

@@ -78,7 +78,7 @@ jobs:
         with:
           name: TiffinPOS-Windows
           path: desktop/release/*.exe
-      - name: Build Tiffin Data Manager installer
+      - name: Build quickPOS Data Manager installer
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -87,7 +87,7 @@ jobs:
           npx electron-builder --win --config electron-builder.manager.cjs --publish never
       - uses: actions/upload-artifact@v4
         with:
-          name: TiffinDataManager-Windows
+          name: quickPOS-DataManager-Windows
           path: desktop/release-manager/*.exe
           if-no-files-found: error
 
@@ -123,7 +123,7 @@ jobs:
       - name: Open the built Mac app (no licence key, so it shows the licence screen)
         working-directory: desktop
         env:
-          POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/Tiffin POS.app/Contents/MacOS/Tiffin POS
+          POS_E2E_EXE: ${{ github.workspace }}/desktop/release/mac-arm64/quickPOS.app/Contents/MacOS/quickPOS
         run: |
           set -o pipefail
           node --test test/app.e2e.test.ts 2>&1 | tee "$RUNNER_TEMP/e2e.txt"

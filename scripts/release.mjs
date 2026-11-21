@@ -1,7 +1,7 @@
 // Builds the Windows installers on this PC and uploads them to DinePOS Cloud (fine-dine cloud/hub, roadmap P8-11), which
 // offers them in the customer portal (Client area > Downloads). CI does not publish installers; they are built here.
 //
-//   npm run release                 build Tiffin POS + ODS, then upload both
+//   npm run release                 build quickPOS + ODS, then upload both
 //   npm run release -- --no-build   upload the installers already built (the newest version of each)
 //   npm run release -- --only tiffin    (or --only ods)
 //   npm run release -- --allow-dirty    build even with uncommitted changes (not recommended)
@@ -30,14 +30,14 @@ const POS_BUILD = [
   { cwd: 'desktop', cmd: 'node', args: ['scripts/build.mjs'] },
   { cwd: 'desktop', cmd: 'npx', args: ['electron-builder', '--win', '--config', 'electron-builder.config.cjs', '--publish', 'never'], env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } },
 ];
-// The ODS installer uses the icon and NSIS that a Tiffin POS build leaves behind (addons/ods/scripts/installer.mjs)
+// The ODS installer uses the icon and NSIS that a quickPOS build leaves behind (addons/ods/scripts/installer.mjs)
 const POS_ICON = path.join(repo, 'desktop', 'release', '.icon-ico', 'icon.ico');
 const ITEMS = [
-  { id: 'tiffin', name: 'Tiffin POS', dir: path.join(repo, 'desktop', 'release'), file: /^TiffinPOS-Setup-(.+)\.exe$/, build: POS_BUILD },
+  { id: 'tiffin', name: 'quickPOS', dir: path.join(repo, 'desktop', 'release'), file: /^quickPOS-Setup-(.+)\.exe$/, build: POS_BUILD },
   {
-    id: 'tiffin-ods', name: 'ODS', dir: path.join(repo, 'addons', 'dist', 'installers'), file: /^TiffinPOS-ODS-Setup-(.+)\.exe$/,
+    id: 'tiffin-ods', name: 'ODS', dir: path.join(repo, 'addons', 'dist', 'installers'), file: /^quickPOS-ODS-Setup-(.+)\.exe$/,
     build: [{ cwd: 'addons/ods', cmd: 'npm', args: ['run', 'installer'] }],
-    before: () => (existsSync(POS_ICON) ? [] : (console.warn('(Tiffin POS is built first: the ODS installer needs its icon and NSIS)'), POS_BUILD)),
+    before: () => (existsSync(POS_ICON) ? [] : (console.warn('(quickPOS is built first: the ODS installer needs its icon and NSIS)'), POS_BUILD)),
     needs: () => process.env.POS_ADDON_SIGNING_KEY ?? path.join(homedir(), '.tiffinpos', 'addon-signing', 'private.pem'),
   },
 ].filter((i) => !only || i.id === only || i.id === `tiffin-${only}`);

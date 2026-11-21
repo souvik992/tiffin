@@ -52,7 +52,7 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
     await page.waitForLoadState('domcontentloaded');
     assert.equal(page.url(), 'app://pos/index.html');
-    assert.match(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle()), /^Tiffin POS/);
+    assert.match(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle()), /^quickPOS/);
 
     // a cashier bills a coffee: commands, the print queue and the live events stream, all through app://pos/api
     await page.getByLabel('Mobile number').fill('9000000003'); // demo cashier
@@ -100,14 +100,14 @@ test('desktop app: opens the POS, talks to its backend, stays locked down, resta
     assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
 
     // backend crash: it is restarted and the window reloads
-    const pid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'Tiffin POS backend')?.pid);
+    const pid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'quickPOS backend')?.pid);
     assert.ok(pid, 'backend utility process found');
     process.kill(pid!);
     await page.waitForEvent('load', { timeout: 60_000 });
     await page.getByRole('heading', { name: 'Sales summary' }).waitFor({ timeout: 60_000 }); // still signed in, on the same screen, after the restart (sign-ins are kept); bills are safe
     assert.equal(await page.getByLabel('Mobile number').count(), 0, 'no sign-in screen after a backend restart');
     assert.equal(await page.evaluate(async () => (await fetch('/api/ping')).status), 200);
-    const newPid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'Tiffin POS backend')?.pid);
+    const newPid = await app.evaluate(({ app: a }) => a.getAppMetrics().find((m) => m.type === 'Utility' && m.name === 'quickPOS backend')?.pid);
     assert.ok(newPid && newPid !== pid);
   } finally {
     await app.close();

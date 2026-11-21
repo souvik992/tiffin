@@ -16,7 +16,7 @@ interface T { m: Manager; dir: string; home: string; pos: { running: boolean }; 
 
 const SECRET = 'test-secret-123';
 
-/** A shop with bills, menu photos and a secret setting, then Tiffin Data Manager over its data folder. */
+/** A shop with bills, menu photos and a secret setting, then quickPOS Data Manager over its data folder. */
 async function shop(o: { dir?: string } = {}): Promise<T> {
   let dir = o.dir;
   if (!dir) {

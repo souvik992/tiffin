@@ -132,7 +132,7 @@ final class BlePrinters: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         for _ in 0..<50 where c.state == .unknown || c.state == .resetting { Thread.sleep(forTimeInterval: 0.1) }
         switch c.state {
         case .poweredOn: return c
-        case .unauthorized: throw PrinterError("Allow Bluetooth for Tiffin POS: iOS Settings, Tiffin POS, Bluetooth.")
+        case .unauthorized: throw PrinterError("Allow Bluetooth for quickPOS: iOS Settings, quickPOS, Bluetooth.")
         case .poweredOff: throw PrinterError("Bluetooth is off. Turn it on in Control Centre or Settings.")
         case .unsupported: throw PrinterError("This device has no Bluetooth LE.")
         default: throw PrinterError("Bluetooth is not ready. Try again.")

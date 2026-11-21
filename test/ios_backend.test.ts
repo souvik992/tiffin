@@ -73,7 +73,7 @@ test('iOS app: the owner installs and removes add-on files through the gatekeepe
 
     const bad = await send(front.port, '/__ios/install-addon', as('owner'), Buffer.from('not a zip'));
     assert.equal(bad.status, 400);
-    assert.match(String((bad.json.error as { message: string }).message), /not a Tiffin POS add-on/);
+    assert.match(String((bad.json.error as { message: string }).message), /not a quickPOS add-on/);
 
     const ok = await send(front.port, '/__ios/install-addon', as('owner'), file);
     assert.equal(ok.status, 200);

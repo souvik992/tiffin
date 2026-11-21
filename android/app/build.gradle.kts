@@ -65,4 +65,4 @@ android {
     }
 }
 
-base.archivesName.set("TiffinPOS-$desktopVersion")
+base.archivesName.set("quickPOS-$desktopVersion")

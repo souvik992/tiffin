@@ -126,7 +126,9 @@ Built and tested only on GitHub's Mac machines (build, then the end-to-end test 
 | Live online orders on a shop PC: pair with a real hub over https, order from a phone, sound plays, Accept prints the bill and KOT on the shop printer | |
 | Internet drop for 2-10 minutes during service: orders placed meanwhile arrive once after it returns; accepts made offline reach the customer | |
 | PC restart with an accepted order not yet sent: it reaches the hub after the restart | |
-| Settings > Serviceability > Map with the owner's Google key after enabling Places API (New) and Map Tiles API: Test key all green, Google Maps, Google satellite and satellite with roads each show, switching back to the free map shows OpenStreetMap, "empire brookfield" suggests the right place, picking it moves the pin | |
+| Settings > Serviceability (ODS 1.0.15): only the free map shows, no map choice or Google key box; scrolling down, the map never covers the Save bar, the side bar or the place suggestions; "empire brookfield" suggests a place, picking it moves the pin | |
+| quickPOS 0.3.15 over an installed Tiffin POS, under test-only names (2026-11-21, this PC, `node scripts/test-installers.mjs` in desktop/): update stays in its folder, data kept, Desktop and Start menu shortcuts swapped to the new name, Apps entry and program name renamed, fresh install folder, ODS and payment machines installers find the POS (refuse without one), uninstall leaves nothing | passed (32 checks) |
+| Still to see by eye on a spare PC with a real older Tiffin POS: the real quickPOS-Setup-0.3.15.exe over it; the orange arrows icon on the Desktop, taskbar and Start menu; the shop's real bills still there | |
 | Place search screen: suggestions appear while typing, arrow keys + Enter, pasted Google Maps coordinates and link | |
 | Online-order buzzer through the shop PC's speakers (and the Android machine's): loud enough at the counter, rings on the Billing screen, Silence works | |
 | Road distances from a real OSRM server vs Google Maps for 10 shop addresses | |
@@ -208,7 +210,7 @@ Done on CI (Mac, simulator only): see the TiffinPOS-iOS-Test artifact of the iOS
 GST rates and inclusive/exclusive treatment, odd-paisa rule, discount before tax, round-off, invoice numbering
 and 16-character limit, credit-note treatment, receipt mandatory fields (GSTIN, FSSAI, HSN thresholds), record retention. Bill designs: which parts a design must keep (today: title, number, date, GSTIN, items, GST, total). Reports: GST by rate and HSN summary match what the CA files in GSTR-1 for a real month. Swiggy/Zomato bills: GST on food paid by the platform (section 9(5)), packaging charges, store-funded platform discounts, payment mode OTHER until the platform pays out.
 
-## Tiffin Data Manager (separate app)
+## quickPOS Data Manager (separate app)
 | Check | Result |
 |---|---|
 | Dev build and packaged build (win-unpacked) over a temporary shop: owner-only sign-in, dashboard, all data, bills view only, backup now; view only while a "POS" program runs (automated e2e) | Passed 2026-10-27, Windows 11 dev PC |

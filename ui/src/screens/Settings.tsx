@@ -471,10 +471,10 @@ function AndroidPicker({ kind, value, onPick }: { kind: 'usb' | 'bluetooth'; val
     <Picker title={kind === 'usb' ? 'USB printers on this device' : ios ? 'Bluetooth printers nearby' : 'Built-in and Bluetooth printers'} loading={loading} onRefresh={load} refreshLabel="Refresh">
       <p className="mb-2 text-xs text-muted-foreground">{kind === 'usb'
         ? 'Plug the printer in with a USB (OTG) cable. The first print asks you to allow it: tap OK.'
-        : ios ? 'Switch the printer on and keep it near this iPhone or iPad, then press Refresh. Do not pair it in iOS Settings; allow Bluetooth for Tiffin POS when asked. Printers that only have classic Bluetooth (no Bluetooth LE) cannot work with an iPhone: use a Wi-Fi printer instead.'
-        : 'A POS machine with a printer shows "Built-in printer". For another printer, pair it first in Android Settings, Bluetooth (PIN often 0000 or 1234), and allow Nearby devices for Tiffin POS.'}</p>
+        : ios ? 'Switch the printer on and keep it near this iPhone or iPad, then press Refresh. Do not pair it in iOS Settings; allow Bluetooth for quickPOS when asked. Printers that only have classic Bluetooth (no Bluetooth LE) cannot work with an iPhone: use a Wi-Fi printer instead.'
+        : 'A POS machine with a printer shows "Built-in printer". For another printer, pair it first in Android Settings, Bluetooth (PIN often 0000 or 1234), and allow Nearby devices for quickPOS.'}</p>
       {err && <p className="text-sm text-destructive">{err}</p>}
-      {list?.length === 0 && <p className="text-sm text-muted-foreground">{kind === 'usb' ? 'No USB printer is plugged in.' : ios ? 'No Bluetooth printer found nearby. Is it switched on, and is Bluetooth allowed for Tiffin POS (iOS Settings, Tiffin POS)?' : 'No printer found. Pair it in Android Settings, then press Refresh.'}</p>}
+      {list?.length === 0 && <p className="text-sm text-muted-foreground">{kind === 'usb' ? 'No USB printer is plugged in.' : ios ? 'No Bluetooth printer found nearby. Is it switched on, and is Bluetooth allowed for quickPOS (iOS Settings, quickPOS)?' : 'No printer found. Pair it in Android Settings, then press Refresh.'}</p>}
       <ul className="max-h-48 space-y-1 overflow-y-auto">
         {list?.map((d) => (
           <li key={d.key}><button type="button" aria-pressed={value === d.address} onClick={() => onPick(d.address, d.name)}

@@ -18,7 +18,7 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Tiffin POS"
+        android:label="quickPOS"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/PosTheme">
         <activity

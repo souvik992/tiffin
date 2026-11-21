@@ -40,7 +40,7 @@ async function defaultScan(): Promise<Scan> {
   const [usb, windows] = await Promise.all([listUsbPrinters().catch(() => []), listWindowsPrinters().catch(() => [])]);
   return { usb, windows };
 }
-/** Platforms where printers can be found: Windows, and Android, iPhone and iPad inside the Tiffin POS app. */
+/** Platforms where printers can be found: Windows, and Android, iPhone and iPad inside the quickPOS app. */
 const canScan = (platform: string) => platform === 'win32' || platform === 'android' || platform === 'ios';
 
 const guessWidth = (s: string): 58 | 80 => (/(^|\D)58(\D|$)|58\s?mm/i.test(s) ? 58 : 80);

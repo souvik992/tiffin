@@ -101,7 +101,7 @@ test('add-ons: changed files, unknown publishers, a too-old POS, crashing code a
     const reason = (id: string) => list.find((a) => a.id === id)!;
     assert.match(reason('changed').reason!, /changed after it was signed/);
     assert.match(reason('stranger').reason!, /Not signed by a trusted publisher/);
-    assert.match(reason('too-new').reason!, /Needs Tiffin POS 9\.0\.0 or newer/);
+    assert.match(reason('too-new').reason!, /Needs quickPOS 9\.0\.0 or newer/);
     assert.match(reason('crashes').reason!, /could not start: boom/);
     assert.match(reason('bad-step').reason!, /could not start/);
     assert.match(reason('escapes').reason!, /only require Node built-in modules/);

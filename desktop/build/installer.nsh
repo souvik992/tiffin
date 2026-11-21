@@ -15,7 +15,7 @@ Var pid
     ${if} $R0 == 0
     ${andIf} $R2 < 30
       ${if} $R2 == 0
-        DetailPrint "Waiting for Tiffin POS to finish closing (saving its closing backup)..."
+        DetailPrint "Waiting for quickPOS to finish closing (saving its closing backup)..."
       ${endIf}
       IntOp $R2 $R2 + 1
       Sleep 1000

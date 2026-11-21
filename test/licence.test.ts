@@ -1,4 +1,4 @@
-// P8-10 (fine-dine ADR-0007): Tiffin POS licensing. Keys from DinePOS Cloud (or the vendor's keygen), bound to this PC
+// P8-10 (fine-dine ADR-0007): quickPOS licensing. Keys from DinePOS Cloud (or the vendor's keygen), bound to this PC
 // and labelled tiffin_qsr. Without a usable licence only the licence routes answer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -161,9 +161,9 @@ test('licence: once it works, changing it needs an owner; the cloud\'s refusal i
   const cloud = fakeCloud(makeEnv());
   const api = await start({ cloud: cloud.f });
   try {
-    cloud.st.answer = { status: 409, json: { error: { code: 'TRIAL_USED', message: 'This PC has already had a free Tiffin POS trial.' } } };
+    cloud.st.answer = { status: 409, json: { error: { code: 'TRIAL_USED', message: 'This PC has already had a free quickPOS trial.' } } };
     const used = await api.call('POST', '/api/licence/activate', { body: { mode: 'trial', email: 'a@b.in', password: 'x' } });
-    assert.deepEqual([used.status, used.json.error.code, used.json.error.message], [400, 'TRIAL_USED', 'This PC has already had a free Tiffin POS trial.']);
+    assert.deepEqual([used.status, used.json.error.code, used.json.error.message], [400, 'TRIAL_USED', 'This PC has already had a free quickPOS trial.']);
     cloud.st.answer = null;
     await api.call('POST', '/api/licence/activate', { body: { mode: 'trial', email: 'a@b.in', password: 'x' } });
     // usable now: a cashier (or nobody) cannot change the licence; the owner can

@@ -47,7 +47,7 @@ export type ConnectorFactory = (t: TerminalRow, secret: string, config: Record<s
 export const defaultFactory: ConnectorFactory = (t, secret, c, host) => {
   if (t.provider === 'paytm' && t.connection === 'cloud') return new PaytmCloud(c as unknown as PaytmCloudConfig, secret);
   if (t.provider === 'paytm') {
-    if (!host.powershell) throw new host.AppError('POS_TOO_OLD', 'Paytm by cable needs Tiffin POS 0.3.8 or newer.', 409);
+    if (!host.powershell) throw new host.AppError('POS_TOO_OLD', 'Paytm by cable needs quickPOS 0.3.8 or newer.', 409);
     return new PaytmWired(c as unknown as PaytmWiredConfig, host.powershell);
   }
   if (t.connection === 'cloud') return new PineCloud(c as unknown as PineCloudConfig, secret);

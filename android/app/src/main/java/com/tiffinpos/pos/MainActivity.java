@@ -120,7 +120,7 @@ public class MainActivity extends Activity {
     private void start() {
         retry.setVisibility(View.GONE);
         status.setVisibility(View.VISIBLE);
-        statusText.setText("Starting Tiffin POS…");
+        statusText.setText("Starting quickPOS…");
         PosBackend.start(this, new PosBackend.Listener() {
             @Override public void ready(int p, String token) {
                 runOnUiThread(() -> {
@@ -191,7 +191,7 @@ public class MainActivity extends Activity {
 
     /** Restarts the POS (after installing or removing an add-on): the window shows "Starting" and reloads. */
     private void restartPos() {
-        runOnUiThread(() -> { web.setVisibility(View.INVISIBLE); status.setVisibility(View.VISIBLE); statusText.setText("Restarting Tiffin POS…"); });
+        runOnUiThread(() -> { web.setVisibility(View.INVISIBLE); status.setVisibility(View.VISIBLE); statusText.setText("Restarting quickPOS…"); });
         PosBackend.stopAndWait();
         runOnUiThread(this::start);
     }
@@ -231,7 +231,7 @@ public class MainActivity extends Activity {
         public void print(String title) {
             runOnUiThread(() -> {
                 PrintManager pm = (PrintManager) getSystemService(PRINT_SERVICE);
-                String job = title == null || title.isEmpty() ? "Tiffin POS" : title;
+                String job = title == null || title.isEmpty() ? "quickPOS" : title;
                 pm.print(job, web.createPrintDocumentAdapter(job), new PrintAttributes.Builder().build());
             });
         }

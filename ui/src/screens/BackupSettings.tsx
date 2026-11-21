@@ -104,7 +104,7 @@ export function BackupSettings() {
 
       {/* ---------------------------------------------------------------- online */}
       <section className="mt-4 max-w-3xl rounded-2xl border border-border bg-card p-4" aria-label="Online backup">
-        <h3 className="mb-1 flex items-center gap-2 font-semibold"><Cloud className="h-4 w-4 text-primary" />Online backup (Tiffin backup server)</h3>
+        <h3 className="mb-1 flex items-center gap-2 font-semibold"><Cloud className="h-4 w-4 text-primary" />Online backup (quickPOS backup server)</h3>
         {ov.cloud.connected ? (
           <>
             <p className="text-sm">Connected as <b>{ov.cloud.store}</b> to <span className="break-all">{ov.cloud.url}</span></p>
@@ -183,7 +183,7 @@ function PairCloud({ onPair, busy }: { onPair: (url: string, code: string) => Pr
   const [code, setCode] = useState('');
   return (
     <form className="mt-1" onSubmit={(e) => { e.preventDefault(); void onPair(url.trim(), code.trim()); }}>
-      <p className="text-sm text-muted-foreground">Backups are uploaded to the Tiffin backup server, so they are safe even if every device in the shop is lost. Ask Tiffin POS support for the server address and a pairing code (it works once, for 30 minutes).</p>
+      <p className="text-sm text-muted-foreground">Backups are uploaded to the quickPOS backup server, so they are safe even if every device in the shop is lost. Ask quickPOS support for the server address and a pairing code (it works once, for 30 minutes).</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_12rem]">
         <label className="text-sm">Server address<input className="field mt-1 w-full" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://backup.example.in" inputMode="url" autoComplete="off" /></label>
         <label className="text-sm">Pairing code<input className="field mt-1 w-full uppercase tracking-widest" value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-2345" autoComplete="off" /></label>

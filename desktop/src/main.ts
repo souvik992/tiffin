@@ -10,7 +10,7 @@ import { CSP, SCHEME, START_URL, forwardHeaders, isAppUrl, resolveRequest } from
 import { startUpdates } from './updates.ts';
 import { installAddon, readAddonFile, removeAddon } from './addonFile.ts';
 
-const PRODUCT = 'Tiffin POS';
+const PRODUCT = 'quickPOS';
 // Local (not roaming) AppData: the database must never sync across a domain profile. Kept on uninstall.
 // Mac: ~/Library/Application Support/TiffinPOS (kept when the app is dragged to the Bin).
 const home = process.env.POS_HOME ?? join(process.env.LOCALAPPDATA ?? app.getPath('appData'), 'TiffinPOS'); // POS_HOME: tests use a temporary folder
@@ -127,7 +127,7 @@ async function isOwner(req: Request): Promise<boolean> {
 /** Install from file: the person picks a .tiffinaddon; it is unpacked into the add-ons folder (the watcher then offers a restart). */
 async function installAddonFromFile(req: Request): Promise<Response> {
   if (!(await isOwner(req))) return fail('Only the owner can install add-ons.', 403);
-  const opts = { title: 'Choose a Tiffin POS add-on file', properties: ['openFile'] as Array<'openFile'>, filters: [{ name: 'Tiffin POS add-on', extensions: ['tiffinaddon'] }] };
+  const opts = { title: 'Choose a quickPOS add-on file', properties: ['openFile'] as Array<'openFile'>, filters: [{ name: 'quickPOS add-on', extensions: ['tiffinaddon'] }] };
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
   const file = r.canceled ? null : r.filePaths[0];
   if (!file) return Response.json({ installed: null });

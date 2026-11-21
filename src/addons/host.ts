@@ -112,7 +112,7 @@ export async function loadAddons(ctx: Ctx, o: LoadOptions): Promise<LoadedAddons
     if (m.id !== folder) { off(`The add-on folder "${folder}" does not match its name "${m.id}". Reinstall the add-on.`, m); continue; }
     if (out.list.some((a) => a.id === m.id)) { off('Installed twice. Remove the extra copy.', m); continue; }
     if (!signatureOk(m, keys)) { off('Not signed by a trusted publisher. Install it only from the official installer.', m); continue; }
-    if (!dev && !(compareVersions(o.posVersion, m.minPosVersion) >= 0)) { off(`Needs Tiffin POS ${m.minPosVersion} or newer (this is ${o.posVersion}). Update the POS first.`, m); continue; }
+    if (!dev && !(compareVersions(o.posVersion, m.minPosVersion) >= 0)) { off(`Needs quickPOS ${m.minPosVersion} or newer (this is ${o.posVersion}). Update the POS first.`, m); continue; }
     // no going back: an older (even genuinely signed) package may have a known fault
     const seen = getSetting(ctx, `addon_version:${m.id}`);
     if (seen && compareVersions(m.version, seen) < 0) { off(`This is an older version (${m.version}) than the one installed before (${seen}). Install the latest version.`, m); continue; }

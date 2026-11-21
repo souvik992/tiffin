@@ -1,4 +1,4 @@
-# Tiffin POS for iPhone and iPad (standalone)
+# quickPOS for iPhone and iPad (standalone)
 
 The full POS runs on the iPhone or iPad, like the Android app: the **same backend code as Windows** (`src/`) and the
 **same screens** (`ui/`), with the SQLite database and backups in the app's own storage. No PC needed.

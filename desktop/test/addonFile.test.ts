@@ -37,7 +37,7 @@ test('add-on file: read, installed into <addons>/<id>, an update replaces the ol
 });
 
 test('add-on file: anything that is not a plain add-on package is refused', () => {
-  const notAddon = /not a Tiffin POS add-on file/;
+  const notAddon = /not a quickPOS add-on file/;
   assert.throws(() => readAddonFile(Buffer.from('hello')), notAddon);
   assert.throws(() => readAddonFile(pkg([['backend.cjs', Buffer.from('x')]])), /no manifest/);
   assert.throws(() => readAddonFile(pkg([['manifest.json', manifest({ id: '../x' })]])), notAddon);

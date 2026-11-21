@@ -21,7 +21,7 @@ import { Backups } from './Backups.tsx';
 import { choose, mgr } from './mgr.ts';
 import type { Status } from './mgr.ts';
 
-// Tiffin Data Manager: the shop's data for the owner, from any computer with the data folder or a backup file.
+// quickPOS Data Manager: the shop's data for the owner, from any computer with the data folder or a backup file.
 // The menu, stock, staff and reports are the POS's own screens; bills are view only (the POS does billing).
 
 const NAV: NavItem[] = [
@@ -81,10 +81,10 @@ function OwnerLogin({ status }: { status: Status }) {
   return (
     <Centered>
       <Logo />
-      <h1 className="font-display text-3xl">Tiffin Data Manager</h1>
+      <h1 className="font-display text-3xl">quickPOS Data Manager</h1>
       <p className="mb-1 text-sm text-muted-foreground">{status.source?.store ?? 'Your shop'}: sign in as the owner.</p>
       <p className="mb-6 max-w-md break-all text-xs text-muted-foreground">{status.source?.path}</p>
-      {owners && owners.length === 0 ? <p className="mb-6 max-w-sm text-sm">This data has no owner who can sign in yet. Set the shop up in Tiffin POS first.</p> : (
+      {owners && owners.length === 0 ? <p className="mb-6 max-w-sm text-sm">This data has no owner who can sign in yet. Set the shop up in quickPOS first.</p> : (
         <>
           {!picked && (
             <label className="mb-5 flex w-full max-w-xs flex-col gap-1 text-left text-sm">
@@ -148,7 +148,7 @@ function Screens() {
     return (
       <Centered>
         <Logo />
-        <h1 className="font-display text-3xl">Tiffin Data Manager</h1>
+        <h1 className="font-display text-3xl">quickPOS Data Manager</h1>
         <p className="mt-2 max-w-lg text-sm text-muted-foreground">{status.error?.message ?? 'No data is open.'}</p>
         <p className="mb-6 mt-1 max-w-lg break-all text-xs text-muted-foreground">Looked in {status.dataDir}</p>
         <SourceButtons onStatus={setStatus} />

@@ -14,7 +14,7 @@ enum PosScript {
   Object.defineProperty(window, 'PosIOS', { value: true, writable: false });
   const api = {
     saveFile: (name, mime, base64) => call('saveFile', { name: String(name), mime: String(mime || ''), base64: String(base64) }),
-    print: (title) => { void call('print', { title: String(title || 'Tiffin POS') }); },
+    print: (title) => { void call('print', { title: String(title || 'quickPOS') }); },
     chooseBackupFolder: () => { void call('chooseBackupFolder'); },
     backupStatus: () => JSON.stringify(backup),
     copyBackupsNow: () => call('copyBackupsNow').then((n) => Number(n)),

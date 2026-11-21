@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyRound, Layers, MapPin, Plus, Search, Trash2 } from 'lucide-react';
+import { MapPin, Plus, Search, Trash2 } from 'lucide-react';
 import L from 'leaflet';
 import leafletCss from 'leaflet/dist/leaflet.css';
 import { BASE, host } from './host.ts';
 import { useOnlineConfig } from './online.ts';
-import { GoogleKey } from './GoogleKey.tsx';
 import type { Hours, ServiceabilityConfig, Slot, Zone } from '../../../contract/src/serviceability.ts';
 
 const { useSession, newKey, messageOf, money } = host;
@@ -17,10 +16,8 @@ const addCss = () => { if (cssAdded) return; cssAdded = true; const s = document
 
 /** Amounts are typed as rupees and stored as paise (the POS's money rules: no floating point). */
 interface ZoneForm { upToKm: string; deliveryFee: string; minOrder: string; freeDeliveryAbove: string; etaMinutes: string }
-/** The map in use: the free map unless the owner chose a Google map (which needs the owner's Google key). */
-type MapStyle = 'osm' | 'google-road' | 'google-satellite' | 'google-hybrid';
-interface MapsInfo { provider: 'google' | 'osm'; style: MapStyle; attribution: string }
-interface MapChoices { maps: MapsInfo; style: MapStyle; styles: Array<{ id: MapStyle; label: string; google: boolean; available: boolean }>; google: { set: boolean; hint: string | null } }
+/** The map: always the free OpenStreetMap map. */
+interface MapsInfo { provider: 'osm'; attribution: string }
 type Saved = ServiceabilityConfig & { feeTaxGroupId: string | null; maps: MapsInfo };
 interface TaxGroup { id: string; name: string; rateBp: number }
 interface Form {
@@ -89,11 +86,10 @@ export function Serviceability() {
       <h2 className="mb-1 font-display text-2xl">Serviceability</h2>
       <p className="mb-4 text-sm text-muted-foreground">Where this store delivers, what it charges, and when it takes online orders. Distances are road distances: measured on the road map when the order hub has it, otherwise the straight line times the road factor below.</p>
       <div className="grid gap-4 2xl:grid-cols-2">
-        <div className="space-y-4">
-          <MapCard isOwner={isOwner} onMaps={setMaps} />
-          <LocationCard key={maps?.style ?? 'none'} form={form} online={online?.enabled === true} readOnly={ro} maps={maps} onChange={(location) => set({ location })} error={errors.location} />
+        <div className="space-y-4" style={{ minWidth: 0 }}>
+          <LocationCard form={form} online={online?.enabled === true} readOnly={ro} maps={maps} onChange={(location) => set({ location })} error={errors.location} />
         </div>
-        <div className="space-y-4">
+        <div className="space-y-4" style={{ minWidth: 0 }}>
           <section className="rounded-2xl border border-border bg-card p-4" aria-label="Delivery areas">
             <div className="mb-2 flex items-center gap-2">
               <h3 className="font-semibold">Delivery areas</h3>
@@ -159,79 +155,12 @@ export function Serviceability() {
         </div>
       </div>
       {isOwner ? (
-        <div className="sticky bottom-0 mt-4 flex gap-2 border-t border-border bg-background py-3">
+        <div className="sticky bottom-0 mt-4 flex gap-2 border-t border-border bg-background py-3" style={{ zIndex: 20 }}>
           <button className="btn-primary" disabled={busy || !changed} onClick={() => void save()}>{busy ? 'Saving…' : 'Save serviceability'}</button>
           {changed && <button className="btn-ghost" onClick={() => { setForm(JSON.parse(saved) as Form); setErrors({}); }}>Undo changes</button>}
         </div>
       ) : <p className="mt-4 text-sm text-muted-foreground">Only the owner can change serviceability.</p>}
     </>
-  );
-}
-
-const MAP_NOTES: Record<MapStyle, string> = {
-  osm: 'Free, no key needed. Pictures already seen keep working without the internet. Place search uses free OpenStreetMap data.',
-  'google-road': 'Google road map and Google place search (best for finding shops). Uses your Google key; Google bills beyond its free monthly allowance.',
-  'google-satellite': 'Photos from above, to find the exact building. Uses your Google key and Google place search.',
-  'google-hybrid': 'Photos from above with road and area names. Uses your Google key and Google place search.',
-};
-
-/** Which map the location card shows: the free map, or Google road / satellite / satellite with roads (needs a key). */
-function MapCard({ isOwner, onMaps }: { isOwner: boolean; onMaps: (m: MapsInfo) => void }) {
-  const { api, notify } = useSession();
-  const [choices, setChoices] = useState<MapChoices | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [keyOpen, setKeyOpen] = useState(false);
-  const load = () => api.request<MapChoices>('GET', `${BASE}/map`).then(setChoices).catch((e) => notify('error', messageOf(e)));
-  useEffect(() => { void load(); }, [api]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const choose = async (style: MapStyle) => {
-    setBusy(true);
-    try {
-      const r = await api.request<MapChoices>('PUT', `${BASE}/map`, { style }, newKey());
-      setChoices(r); onMaps(r.maps);
-    } catch (e) { notify('error', messageOf(e)); } finally { setBusy(false); }
-  };
-  const keyChanged = async (saved: boolean) => {
-    if (saved && choices?.style === 'osm') { await choose('google-road'); return; } // a new key: show what it gives
-    const c = await api.request<MapChoices>('GET', `${BASE}/map`).catch(() => null);
-    if (!c) return;
-    setChoices(c);
-    if (c.style !== choices?.style) onMaps(c.maps); // the key was removed: back to the free map
-  };
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-4" aria-label="Map">
-      <h3 className="mb-1 flex items-center gap-2 font-semibold"><Layers className="h-4 w-4 text-primary" />Map</h3>
-      <p className="mb-3 text-xs text-muted-foreground">Which map to show below and which place search to use. The free map is always there; the Google maps need a Google Maps key.</p>
-      {!choices ? <p className="text-sm text-muted-foreground">Loading…</p> : (
-        <>
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Map choice">
-            {choices.styles.map((s) => {
-              const on = choices.style === s.id;
-              return (
-                <button key={s.id} type="button" role="radio" aria-checked={on} disabled={busy || !isOwner || !s.available}
-                  className={`flex min-h-14 flex-col items-start justify-center rounded-xl border-2 px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed ${on ? 'border-primary bg-primary/10 font-semibold' : 'border-border bg-background hover:border-primary disabled:opacity-60 disabled:hover:border-border'}`}
-                  onClick={() => { if (!on) void choose(s.id); }}>
-                  <span>{s.label}</span>
-                  <span className="text-xs font-normal text-muted-foreground">{!s.google ? 'Free' : s.available ? 'Google key' : 'Needs a Google key'}</span>
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">{MAP_NOTES[choices.style]}</p>
-          {!isOwner && <p className="mt-2 text-xs text-muted-foreground">Only the owner can change the map.</p>}
-          {isOwner && (
-            <div className="mt-3 rounded-xl border border-border">
-              <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium" aria-expanded={keyOpen} onClick={() => setKeyOpen(!keyOpen)}>
-                <KeyRound className="h-4 w-4 text-primary" />Google Maps key
-                <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-normal ${choices.google.set ? 'bg-veg/15 text-veg' : 'bg-muted text-muted-foreground'}`}>{choices.google.set ? `Saved (ends ${choices.google.hint})` : 'Not set'}</span>
-              </button>
-              {keyOpen && <div className="border-t border-border p-3"><GoogleKey onChanged={(saved) => void keyChanged(saved)} /></div>}
-            </div>
-          )}
-        </>
-      )}
-    </section>
   );
 }
 
@@ -244,14 +173,31 @@ function LocationCard({ form, online, readOnly, maps, onChange, error }: { form:
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
   const loc = form.location;
+  const [looking, setLooking] = useState(false);
+  const lookup = useRef(0);
+  // the pin was moved by hand (map click, drag, pasted numbers): show the nearest address in the address field
+  const moved = (lat: number, lng: number) => {
+    const id = ++lookup.current;
+    const at = { lat: round(lat), lng: round(lng) };
+    changeRef.current({ ...at, label: '' });
+    if (!online) return;
+    setLooking(true);
+    api.request<{ label: string }>('GET', `${BASE}/geocode/address?lat=${at.lat}&lng=${at.lng}`)
+      .then((r) => { if (id === lookup.current && r.label) changeRef.current({ ...at, label: r.label }); })
+      .catch(() => undefined) // no address: the owner can type one
+      .finally(() => { if (id === lookup.current) setLooking(false); });
+  };
+  const movedRef = useRef(moved);
+  movedRef.current = moved;
+  const setLoc = (l: NonNullable<Form['location']>) => { lookup.current++; setLooking(false); onChange(l); };
 
   // the map itself (only in online mode: tiles come from the internet through the POS)
   useEffect(() => {
     if (!online || !div.current || map.current) return;
     addCss();
     const m = L.map(div.current, { center: loc ? [loc.lat, loc.lng] : BENGALURU, zoom: loc ? 13 : 11 });
-    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png?p=${maps?.provider ?? 'osm'}`, { maxZoom: 19, attribution: maps?.attribution ?? '' }).addTo(m);
-    if (!readOnly) m.on('click', (e: L.LeafletMouseEvent) => changeRef.current({ lat: round(e.latlng.lat), lng: round(e.latlng.lng), label: '' }));
+    L.tileLayer(`/api${BASE}/tiles/{z}/{x}/{y}.png`, { maxZoom: 19, attribution: maps?.attribution ?? '&copy; OpenStreetMap contributors' }).addTo(m);
+    if (!readOnly) m.on('click', (e: L.LeafletMouseEvent) => movedRef.current(e.latlng.lat, e.latlng.lng));
     map.current = m;
     return () => { m.remove(); map.current = null; marker.current = null; circles.current = []; };
   }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -266,7 +212,7 @@ function LocationCard({ form, online, readOnly, maps, onChange, error }: { form:
     if (!marker.current) {
       const icon = L.divIcon({ className: '', html: '<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;background:#ea580c;border:3px solid #fff;transform:rotate(-45deg);box-shadow:0 1px 4px #0006"></div>', iconSize: [22, 22], iconAnchor: [11, 22] });
       marker.current = L.marker([loc.lat, loc.lng], { icon, draggable: !readOnly, title: 'Store location' }).addTo(m);
-      marker.current.on('dragend', () => { const p = marker.current!.getLatLng(); changeRef.current({ lat: round(p.lat), lng: round(p.lng), label: '' }); });
+      marker.current.on('dragend', () => { const p = marker.current!.getLatLng(); movedRef.current(p.lat, p.lng); });
     } else marker.current.setLatLng([loc.lat, loc.lng]);
     [...form.zones].reverse().forEach((z, ri) => {
       const i = form.zones.length - 1 - ri, km = Number(z.upToKm);
@@ -280,24 +226,27 @@ function LocationCard({ form, online, readOnly, maps, onChange, error }: { form:
     <section className="rounded-2xl border border-border bg-card p-4" aria-label="Store location">
       <h3 className="mb-1 flex items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-primary" />Store location
       </h3>
-      <p className="mb-3 text-xs text-muted-foreground">Type the shop name, area or road and pick a suggestion, then drag the pin to the exact door (or click the map). Not found? In Google Maps, right-click your shop, click the numbers at the top to copy them, and paste them here. Delivery distances are measured from here.</p>
+      <p className="mb-3 text-xs text-muted-foreground">Type the shop name, area or road and pick a suggestion, then drag the pin to the exact door (or click the map). Not found? In any online map, right-click your shop, copy the numbers (latitude, longitude) and paste them here. Delivery distances are measured from here.</p>
       {online ? (
         <>
-          {!readOnly && <PlaceSearch near={() => { if (loc) return loc; const c = map.current?.getCenter(); return c ? { lat: c.lat, lng: c.lng } : null; }} onPick={(p) => onChange({ lat: round(p.lat), lng: round(p.lng), label: p.label })} />}
-          <div ref={div} className="h-[380px] w-full overflow-hidden rounded-xl border border-border" aria-label="Map" />
+          {!readOnly && <PlaceSearch near={() => { if (loc) return loc; const c = map.current?.getCenter(); return c ? { lat: c.lat, lng: c.lng } : null; }} onPick={(p) => (p.label ? setLoc({ lat: round(p.lat), lng: round(p.lng), label: p.label.slice(0, 200) }) : moved(p.lat, p.lng))} />}
+          <div ref={div} className="h-[380px] w-full overflow-hidden rounded-xl border border-border" style={{ position: 'relative', zIndex: 0, isolation: 'isolate' }} aria-label="Map" />
         </>
       ) : (
         <p className="rounded-xl border border-border bg-background p-3 text-sm">The map needs the internet. Turn on <b>Online orders</b> (Settings) to see it. You can still type the location below.</p>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <label className="mt-3 block text-xs font-medium">Address
+        <input className="field mt-1 w-full" disabled={readOnly || !loc} maxLength={200} value={loc?.label ?? ''} placeholder={looking ? 'Finding the address…' : loc ? 'Shop address' : 'Pick the shop on the map first'}
+          onChange={(e) => loc && setLoc({ ...loc, label: e.target.value })} aria-label="Address" />
+      </label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="text-xs font-medium">Latitude
-          <input className="field mt-1 w-full" inputMode="decimal" disabled={readOnly} value={loc?.lat ?? ''} onChange={(e) => onChange({ lat: Number(e.target.value), lng: loc?.lng ?? 0, label: loc?.label ?? '' })} aria-label="Latitude" />
+          <input className="field mt-1 w-full" inputMode="decimal" disabled={readOnly} value={loc?.lat ?? ''} onChange={(e) => setLoc({ lat: Number(e.target.value), lng: loc?.lng ?? 0, label: loc?.label ?? '' })} aria-label="Latitude" />
         </label>
         <label className="text-xs font-medium">Longitude
-          <input className="field mt-1 w-full" inputMode="decimal" disabled={readOnly} value={loc?.lng ?? ''} onChange={(e) => onChange({ lat: loc?.lat ?? 0, lng: Number(e.target.value), label: loc?.label ?? '' })} aria-label="Longitude" />
+          <input className="field mt-1 w-full" inputMode="decimal" disabled={readOnly} value={loc?.lng ?? ''} onChange={(e) => setLoc({ lat: loc?.lat ?? 0, lng: Number(e.target.value), label: loc?.label ?? '' })} aria-label="Longitude" />
         </label>
       </div>
-      {loc?.label && <p className="mt-2 text-xs text-muted-foreground">{loc.label}</p>}
       {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
     </section>
   );
@@ -339,8 +288,8 @@ function HoursCard({ hours, readOnly, errors, onChange }: { hours: Hours; readOn
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
-interface Suggestion { label: string; detail: string; lat: number | null; lng: number | null; placeId: string | null }
-/** "12.9661, 77.7175" (Google Maps right-click) or a Google Maps link with @12.96,77.71 or ?q=12.96,77.71. */
+interface Suggestion { label: string; detail: string; lat: number | null; lng: number | null }
+/** "12.9661, 77.7175" (a map's right-click) or a map link with @12.96,77.71 or ?q=12.96,77.71. */
 function pastedPoint(t: string): { lat: number; lng: number } | null {
   const m = /^\s*(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/.exec(t) ?? /[@=](-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(t) ?? /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(t);
   if (!m) return null;
@@ -357,7 +306,6 @@ function PlaceSearch({ near: nearOf, onPick }: { near: () => { lat: number; lng:
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const seq = useRef(0);
-  const session = useRef(newKey());
   const point = pastedPoint(q);
 
   const run = async (text: string, full: boolean) => {
@@ -366,7 +314,7 @@ function PlaceSearch({ near: nearOf, onPick }: { near: () => { lat: number; lng:
     const near = nearOf();
     const nearQ = near ? `&near=${near.lat.toFixed(4)},${near.lng.toFixed(4)}` : '';
     try {
-      const out = await api.request<Suggestion[]>('GET', `${BASE}/geocode?q=${encodeURIComponent(text)}${nearQ}${full ? '&full=1' : ''}&session=${session.current}`);
+      const out = await api.request<Suggestion[]>('GET', `${BASE}/geocode?q=${encodeURIComponent(text)}${nearQ}${full ? '&full=1' : ''}`);
       if (id === seq.current) { setList(out); setActive(0); }
     } catch (e) { if (id === seq.current) { setList(null); setError(messageOf(e)); } }
     finally { if (id === seq.current) setBusy(false); }
@@ -379,19 +327,11 @@ function PlaceSearch({ near: nearOf, onPick }: { near: () => { lat: number; lng:
     return () => clearTimeout(t);
   }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pick = async (s: Suggestion) => {
+  const pick = (s: Suggestion) => {
     setError(null);
-    try {
-      let p = s.lat !== null && s.lng !== null ? { lat: s.lat, lng: s.lng, label: [s.label, s.detail].filter(Boolean).join(', ') } : null;
-      if (!p && s.placeId) {
-        const d = await api.request<{ lat: number; lng: number; label: string }>('GET', `${BASE}/geocode/place?id=${encodeURIComponent(s.placeId)}&session=${session.current}`);
-        p = { ...d, label: d.label.startsWith(s.label) ? d.label : [s.label, d.label].filter(Boolean).join(', ') };
-      }
-      if (!p) return;
-      onPick(p);
-      setQ(''); setList(null);
-      session.current = newKey(); // a new search session (Google bills per session)
-    } catch (e) { setError(messageOf(e)); }
+    if (s.lat === null || s.lng === null) return;
+    onPick({ lat: s.lat, lng: s.lng, label: [s.label, s.detail].filter(Boolean).join(', ') });
+    setQ(''); setList(null);
   };
   const usePoint = () => { if (point) { onPick({ ...point, label: '' }); setQ(''); setList(null); } };
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -401,27 +341,27 @@ function PlaceSearch({ near: nearOf, onPick }: { near: () => { lat: number; lng:
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (point) usePoint();
-      else if (list?.length) void pick(list[active]!);
+      else if (list?.length) pick(list[active]!);
       else if (q.trim().length >= 3) void run(q.trim(), true);
     }
   };
 
   return (
-    <div className="relative z-[1100] mb-2">
+    <div className="relative mb-2" style={{ zIndex: 10 }}>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input className="field w-full pl-9" placeholder="Shop name, area, road, or paste Google Maps coordinates" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey}
+        <input className="field w-full pl-9" placeholder="Shop name, area, road, or paste map coordinates" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey}
           role="combobox" aria-expanded={Boolean(list || point)} aria-controls="place-suggestions" aria-autocomplete="list" aria-label="Search place" autoComplete="off" />
         {busy && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Searching…</span>}
       </div>
       {error && <p role="alert" className="mt-1 text-sm text-destructive">{error}</p>}
       {(point || list) && (
-        <ul id="place-suggestions" role="listbox" className="absolute z-[1000] mt-1 max-h-80 w-full overflow-auto rounded-xl border border-border bg-card shadow-lg">
+        <ul id="place-suggestions" role="listbox" className="absolute mt-1 max-h-80 w-full overflow-auto rounded-xl border border-border bg-card shadow-lg">
           {point && <li role="option" aria-selected><button className="w-full p-2 text-left text-sm hover:bg-secondary" onClick={usePoint}><b>Use this point</b> <span className="text-muted-foreground">{point.lat}, {point.lng}</span></button></li>}
-          {list?.length === 0 && <li className="p-2 text-sm text-muted-foreground">No match. Press Enter for a wider search, try the area or road name, or paste the coordinates from Google Maps.</li>}
+          {list?.length === 0 && <li className="p-2 text-sm text-muted-foreground">No match. Press Enter for a wider search, try the area or road name, or paste the coordinates from a map.</li>}
           {list?.map((s, i) => (
-            <li key={`${s.placeId ?? ''}${s.lat},${s.lng},${i}`} role="option" aria-selected={i === active}>
-              <button className={`flex w-full items-start gap-2 p-2 text-left text-sm ${i === active ? 'bg-secondary' : 'hover:bg-secondary'}`} onMouseEnter={() => setActive(i)} onClick={() => void pick(s)}>
+            <li key={`${s.lat},${s.lng},${i}`} role="option" aria-selected={i === active}>
+              <button className={`flex w-full items-start gap-2 p-2 text-left text-sm ${i === active ? 'bg-secondary' : 'hover:bg-secondary'}`} onMouseEnter={() => setActive(i)} onClick={() => pick(s)}>
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <span><span className="block font-medium">{s.label}</span>{s.detail && <span className="block text-xs text-muted-foreground">{s.detail}</span>}</span>
               </button>

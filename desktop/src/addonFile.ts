@@ -13,7 +13,7 @@ const MAX_BYTES = 30 * 1024 * 1024;
 
 export interface AddonFile { id: string; name: string; version: string; files: Map<string, Buffer> }
 
-const notAddon = () => new Error('This is not a Tiffin POS add-on file.');
+const notAddon = () => new Error('This is not a quickPOS add-on file.');
 
 /** Reads a .tiffinaddon file (zip: stored or deflated entries, plain file names only). Throws with a message for the person. */
 export function readAddonFile(buf: Buffer): AddonFile {
@@ -48,7 +48,7 @@ export function readAddonFile(buf: Buffer): AddonFile {
     throw notAddon();
   }
   const m = files.get('manifest.json');
-  if (!m) throw new Error('This is not a Tiffin POS add-on file (no manifest).');
+  if (!m) throw new Error('This is not a quickPOS add-on file (no manifest).');
   let manifest: { id?: unknown; name?: unknown; version?: unknown };
   try { manifest = JSON.parse(m.toString('utf8')) as typeof manifest; } catch { throw notAddon(); }
   const id = typeof manifest.id === 'string' ? manifest.id : '';

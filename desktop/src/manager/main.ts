@@ -1,4 +1,4 @@
-// Tiffin Data Manager (a separate app and installer from the POS): the shop's data for the owner. Same lockdown as the
+// quickPOS Data Manager (a separate app and installer from the POS): the shop's data for the owner. Same lockdown as the
 // POS window (desktop/src/main.ts): no Node in the page, no navigation away, no permissions, and its only way to the
 // data is /api and /mgr on its own origin (app://manager), which this process forwards with a per-launch secret.
 import { app, BrowserWindow, dialog, Menu, protocol, session, shell, utilityProcess } from 'electron';
@@ -8,7 +8,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from 'n
 import { join } from 'node:path';
 import { CSP, SCHEME, forwardHeaders, isAppUrl, resolveRequest } from '../protocol.ts';
 
-const PRODUCT = 'Tiffin Data Manager';
+const PRODUCT = 'quickPOS Data Manager';
 const HOST = 'manager';
 const START_URL = `${SCHEME}://${HOST}/manager.html`;
 const local = process.env.LOCALAPPDATA ?? app.getPath('appData');
@@ -54,16 +54,16 @@ function startBackendProcess(): Promise<number> {
     child.stdout?.on('data', (d: Buffer) => log(`[backend] ${d.toString()}`));
     child.stderr?.on('data', (d: Buffer) => log(`[backend:err] ${d.toString()}`));
     let settled = false;
-    const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error('Tiffin Data Manager did not start within 60 seconds.')); child.kill(); } }, 60_000);
+    const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error('quickPOS Data Manager did not start within 60 seconds.')); child.kill(); } }, 60_000);
     child.on('message', (m: { type: string; port?: number; message?: string }) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      if (m.type === 'ready' && m.port) { port = m.port; resolve(m.port); } else reject(new Error(m.message ?? 'Tiffin Data Manager failed to start.'));
+      if (m.type === 'ready' && m.port) { port = m.port; resolve(m.port); } else reject(new Error(m.message ?? 'quickPOS Data Manager failed to start.'));
     });
     child.on('exit', (code) => {
       log(`backend exited with code ${code}`);
       if (backend === child) backend = null;
-      if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`Tiffin Data Manager stopped while starting (code ${code}).`)); return; }
+      if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`quickPOS Data Manager stopped while starting (code ${code}).`)); return; }
       if (!quitting) {
         // nothing is lost (it only reads, or saves each change at once): start again and reload
         void startBackendProcess().then(() => win?.webContents.reload()).catch((e) => { log(`restart failed: ${String(e)}`); app.quit(); });
@@ -75,7 +75,7 @@ function startBackendProcess(): Promise<number> {
 async function pick(kind: 'folder' | 'file'): Promise<string | null> {
   const opts: Electron.OpenDialogOptions = kind === 'folder'
     ? { title: 'Choose a folder', properties: ['openDirectory', 'createDirectory'] }
-    : { title: 'Choose a Tiffin POS backup file', properties: ['openFile'], filters: [{ name: 'Tiffin POS backup', extensions: ['db'] }] };
+    : { title: 'Choose a quickPOS backup file', properties: ['openFile'], filters: [{ name: 'quickPOS backup', extensions: ['db'] }] };
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
   return r.canceled ? null : r.filePaths[0] ?? null;
 }
@@ -88,11 +88,11 @@ async function serve(req: Request): Promise<Response> {
   }
   const toBackend = url.pathname.startsWith('/mgr/') || url.pathname === '/api' || url.pathname.startsWith('/api/');
   if (toBackend) {
-    if (!port) return Response.json({ error: { code: 'NETWORK', message: 'Tiffin Data Manager is starting. Try again in a moment.' } }, { status: 503 });
+    if (!port) return Response.json({ error: { code: 'NETWORK', message: 'quickPOS Data Manager is starting. Try again in a moment.' } }, { status: 503 });
     const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
     return fetch(`http://127.0.0.1:${port}${url.pathname}${url.search}`, {
       method: req.method, headers: forwardHeaders(req.headers, secret), body: hasBody ? await req.arrayBuffer() : undefined, redirect: 'manual',
-    }).catch(() => Response.json({ error: { code: 'NETWORK', message: 'Tiffin Data Manager is not responding.' } }, { status: 503 }));
+    }).catch(() => Response.json({ error: { code: 'NETWORK', message: 'quickPOS Data Manager is not responding.' } }, { status: 503 }));
   }
   const r = resolveRequest(req.url, uiDir, HOST);
   if (r.kind === 'file') {
@@ -140,7 +140,7 @@ async function start() {
   log(`starting ${PRODUCT} ${app.getVersion()} posData=${posDataDir}`);
   try { await startBackendProcess(); } catch (e) {
     log(`backend failed to start: ${String((e as Error).message)}`);
-    await dialog.showMessageBox({ type: 'error', title: PRODUCT, message: 'Tiffin Data Manager could not start.', detail: `${(e as Error).message}\n\nLog: ${logFile}`, buttons: ['Close'], noLink: true });
+    await dialog.showMessageBox({ type: 'error', title: PRODUCT, message: 'quickPOS Data Manager could not start.', detail: `${(e as Error).message}\n\nLog: ${logFile}`, buttons: ['Close'], noLink: true });
     app.exit(1);
     return;
   }

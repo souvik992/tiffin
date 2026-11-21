@@ -45,7 +45,7 @@ export async function startFront(o: FrontOptions): Promise<Front> {
     const deny = (status: number, text: string) => { if (!res.headersSent) { res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' }); } res.end(text); };
     const host = (req.headers.host ?? '').replace(/:\d+$/, '');
     if (host !== '127.0.0.1' && host !== 'localhost') return deny(403, 'Unexpected Host header.');
-    if (!same(cookieOf(req.headers.cookie), o.token)) return deny(403, 'Open Tiffin POS from its app.');
+    if (!same(cookieOf(req.headers.cookie), o.token)) return deny(403, 'Open quickPOS from its app.');
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (o.app?.(req, res, url)) return;
 

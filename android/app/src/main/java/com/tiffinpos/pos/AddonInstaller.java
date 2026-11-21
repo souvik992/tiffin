@@ -41,8 +41,8 @@ final class AddonInstaller {
             if (raw == null) throw new Exception("The file could not be opened.");
             for (ZipEntry e; (e = zin.getNextEntry()) != null; ) {
                 String name = e.getName();
-                if (e.isDirectory() || !NAME.matcher(name).matches() || name.contains("..")) throw new Exception("This is not a Tiffin POS add-on file.");
-                if (files.size() >= MAX_FILES) throw new Exception("This is not a Tiffin POS add-on file.");
+                if (e.isDirectory() || !NAME.matcher(name).matches() || name.contains("..")) throw new Exception("This is not a quickPOS add-on file.");
+                if (files.size() >= MAX_FILES) throw new Exception("This is not a quickPOS add-on file.");
                 ByteArrayOutputStream b = new ByteArrayOutputStream();
                 byte[] buf = new byte[64 * 1024];
                 for (int n; (n = zin.read(buf)) > 0; ) {
@@ -54,10 +54,10 @@ final class AddonInstaller {
             }
         }
         byte[] m = files.get("manifest.json");
-        if (m == null) throw new Exception("This is not a Tiffin POS add-on file (no manifest).");
+        if (m == null) throw new Exception("This is not a quickPOS add-on file (no manifest).");
         JSONObject manifest = new JSONObject(new String(m, StandardCharsets.UTF_8));
         String id = manifest.optString("id");
-        if (!ID.matcher(id).matches()) throw new Exception("This is not a Tiffin POS add-on file.");
+        if (!ID.matcher(id).matches()) throw new Exception("This is not a quickPOS add-on file.");
         File root = dir(ctx);
         if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create the add-ons folder.");
         File tmp = new File(root, "." + id + ".new"), target = new File(root, id), old = new File(root, "." + id + ".old");

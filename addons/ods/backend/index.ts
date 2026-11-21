@@ -11,7 +11,7 @@ import type { Fetcher } from './maps.ts';
 import { Connector } from './connector.ts';
 import type { ConnectorOptions } from './connector.ts';
 import { readPrintOnAccept, savePrintOnAccept } from './store.ts';
-import { MIGRATIONS, apiKeysView, mapView, readFeeTaxGroup, saveMapStyle, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveGoogleKey, saveMenuSync } from './store.ts';
+import { MIGRATIONS, readFeeTaxGroup, readMenuSync, readPublishedAt, saveFeeTaxGroup, saveMenuSync } from './store.ts';
 
 /** ODS add-on: routes under /api/addons/ods. Loaded by the POS from the signed package. */
 export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: ConnectorOptions } = {}): Connector {
@@ -33,7 +33,7 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     if (open.length && readOnlineConfig(host).enabled) throw new host.AppError('ONLINE_ORDERS_OPEN', `${open.length} online order${open.length > 1 ? 's are' : ' is'} still open (${open.slice(0, 5).map((o) => o.number).join(', ')}). Finish or reject ${open.length > 1 ? 'them' : 'it'} on the ODS first.`, 409);
     const r = saveOnlineConfig(host, c.actor, c.requestId, c.body as OnlineInput); conn.refresh(); return r;
   });
-  host.route('GET', '/serviceability', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readServiceability(host), feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution(host) }; });
+  host.route('GET', '/serviceability', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readServiceability(host), feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution() }; });
   host.route('PUT', '/serviceability', {}, (c) => {
     const b = body(c);
     const { feeTaxGroupId, maps: _maps, ...svc } = b as Record<string, unknown> & { feeTaxGroupId?: string | null };
@@ -43,7 +43,7 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
       return saveServiceability(host, c.actor, c.requestId, svc);
     });
     conn.refresh();
-    return { ...saved, feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution(host) };
+    return { ...saved, feeTaxGroupId: readFeeTaxGroup(host), maps: mapAttribution() };
   });
   // ---- menu sync per sales channel
   host.route('GET', '/menu-sync', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { channels: readMenuSync(host), publishedAt: readPublishedAt(host), hub: conn.link().paired }; });
@@ -57,19 +57,6 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
     return { publishedAt: readPublishedAt(host), items: sent?.items ?? 0, photos: sent?.photos ?? 0 };
   });
 
-  // ---- which map Serviceability shows (everyone who sees Serviceability; the owner chooses)
-  host.route('GET', '/map', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...mapView(host), maps: mapAttribution(host) }; });
-  host.route('PUT', '/map', {}, (c) => { saveMapStyle(host, c.actor, body(c).style); return { ...mapView(host), maps: mapAttribution(host) }; });
-
-  // ---- API keys (owner only, in Serviceability > Map; the keys never leave the POS backend)
-  host.route('GET', '/api-keys', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return apiKeysView(host); });
-  host.route('PUT', '/api-keys', {}, (c) => { const b = body(c); if ('google' in b) saveGoogleKey(host, c.actor, b.google); return apiKeysView(host); });
-  host.route('POST', '/api-keys/test', {}, async (c) => {
-    host.assertPerm(c.actor, 'settings.write');
-    if (!readOnlineConfig(host).enabled) throw new host.AppError('OFFLINE_MODE', 'Turn on online orders first: in offline mode the POS makes no internet connection.', 409);
-    const [search, map] = await Promise.all([places.testSearch(), maps.testTiles()]);
-    return { search, map };
-  });
   host.route('GET', '/tax-groups', {}, () => host.billing.menu(host.ctx).taxGroups);
   // printing: on accepting, and the ODS's Bill and KOT buttons
   host.route('GET', '/print-options', {}, (c) => { host.assertPerm(c.actor, 'printer.manage'); return { ...readPrintOnAccept(host), buttons: Boolean(host.printing) }; });
@@ -128,8 +115,11 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
   host.route('GET', '/geocode', {}, (c) => { // suggestions while typing; near = the shop pin, to rank nearby places first
     host.assertPerm(c.actor, 'settings.write');
     const near = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/.exec(c.query.get('near') ?? '');
-    return places.suggest(c.query.get('q') ?? '', { near: near ? { lat: Number(near[1]), lng: Number(near[2]) } : null, full: c.query.get('full') === '1', session: (c.query.get('session') ?? '').slice(0, 64) });
+    return places.suggest(c.query.get('q') ?? '', { near: near ? { lat: Number(near[1]), lng: Number(near[2]) } : null, full: c.query.get('full') === '1' });
   });
-  host.route('GET', '/geocode/place', {}, (c) => { host.assertPerm(c.actor, 'settings.write'); return places.place(c.query.get('id') ?? '', (c.query.get('session') ?? '').slice(0, 64)); });
+  host.route('GET', '/geocode/address', {}, async (c) => { // the address at the pin, after it was dragged or the map clicked
+    host.assertPerm(c.actor, 'settings.write');
+    return { label: await places.address(Number(c.query.get('lat')), Number(c.query.get('lng'))) };
+  });
   return conn;
 }

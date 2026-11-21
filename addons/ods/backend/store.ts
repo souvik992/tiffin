@@ -58,8 +58,6 @@ export const outboxFailed = (host: HostApi, id: number, error: string) => host.d
 
 // ---- small settings
 const FEE_TAX = 'ods_fee_tax_group';
-/** Settings ending in "_key" are secret: the POS never lists them (src/services/settings.ts). */
-const GOOGLE_KEY = 'ods_google_maps_key';
 export const readFeeTaxGroup = (host: HostApi): string | null => host.getSetting(FEE_TAX) || null;
 
 /** What prints when an online order is accepted (by staff or automatically): the bill, the kitchen tickets. Default: both. */
@@ -80,55 +78,6 @@ export function savePrintOnAccept(host: HostApi, actor: Actor, input: unknown): 
 export function saveFeeTaxGroup(host: HostApi, taxGroupId: string | null) {
   if (taxGroupId !== null && !host.db.get('SELECT 1 FROM tax_group WHERE id = ? AND deleted_at IS NULL', taxGroupId)) throw new host.AppError('VALIDATION', 'Choose a GST rate from the list.');
   host.setSetting(FEE_TAX, taxGroupId ?? '');
-}
-
-/** The owner's Google key (Settings > Serviceability > Map). Used only while a Google map is chosen: see googleKeyInUse. */
-export const readGoogleKey = (host: HostApi): string | null => host.getSetting(GOOGLE_KEY) || null;
-
-// ---- which map Settings > Serviceability shows (and which place search goes with it)
-export type MapStyle = 'osm' | 'google-road' | 'google-satellite' | 'google-hybrid';
-const MAP_STYLES: Array<{ id: MapStyle; label: string; google: boolean }> = [
-  { id: 'osm', label: 'Free map (OpenStreetMap)', google: false },
-  { id: 'google-road', label: 'Google Maps', google: true },
-  { id: 'google-satellite', label: 'Google satellite', google: true },
-  { id: 'google-hybrid', label: 'Google satellite with roads', google: true },
-];
-const MAP_STYLE = 'ods_map_style';
-/** The chosen map; the free map when nothing is chosen, or a Google map was chosen and the key was removed since. */
-export function readMapStyle(host: HostApi): MapStyle {
-  const s = MAP_STYLES.find((m) => m.id === host.getSetting(MAP_STYLE));
-  return s && (!s.google || readGoogleKey(host)) ? s.id : 'osm';
-}
-/** The key, while a Google map is chosen (Google map pictures and place search); null = the free map and free search. */
-export const googleKeyInUse = (host: HostApi): string | null => (readMapStyle(host) === 'osm' ? null : readGoogleKey(host));
-export interface MapView { style: MapStyle; styles: Array<{ id: MapStyle; label: string; google: boolean; available: boolean }>; google: ApiKeysView['google'] }
-export function mapView(host: HostApi): MapView {
-  const key = Boolean(readGoogleKey(host));
-  return { style: readMapStyle(host), styles: MAP_STYLES.map((m) => ({ ...m, available: !m.google || key })), google: apiKeysView(host).google };
-}
-/** Owner only. A Google map needs the key first. */
-export function saveMapStyle(host: HostApi, actor: Actor, style: unknown) {
-  host.assertPerm(actor, 'settings.write');
-  const s = MAP_STYLES.find((m) => m.id === style);
-  if (!s) throw new host.AppError('VALIDATION', 'Choose a map from the list.');
-  if (s.google && !readGoogleKey(host)) throw new host.AppError('VALIDATION', 'Save a Google Maps key first (below the map choice).');
-  host.setSetting(MAP_STYLE, s.id);
-  host.audit(host.ctx, actor.userId, 'ods.map_style', 'settings', MAP_STYLE, { style: s.id });
-}
-/** What screens see: never the key itself. */
-export interface ApiKeysView { google: { set: boolean; hint: string | null } }
-export function apiKeysView(host: HostApi): ApiKeysView {
-  const k = readGoogleKey(host);
-  return { google: { set: Boolean(k), hint: k ? `…${k.slice(-4)}` : null } };
-}
-/** Owner only. null removes the key (back to the free map). */
-export function saveGoogleKey(host: HostApi, actor: Actor, key: unknown) {
-  host.assertPerm(actor, 'settings.write');
-  if (key === null || key === '') { host.setSetting(GOOGLE_KEY, ''); host.audit(host.ctx, actor.userId, 'ods.api_key.remove', 'settings', GOOGLE_KEY); return; }
-  const k = typeof key === 'string' ? key.trim() : '';
-  if (!/^AIza[0-9A-Za-z_-]{35}$/.test(k)) throw new host.AppError('VALIDATION', 'That is not a Google API key. It is 39 characters long and starts with AIza. Copy it again from the Google Cloud console.');
-  host.setSetting(GOOGLE_KEY, k);
-  host.audit(host.ctx, actor.userId, 'ods.api_key.set', 'settings', GOOGLE_KEY, { endsWith: k.slice(-4) }); // never the key itself
 }
 
 // ---- menu sync: which menu items each sales channel lists

@@ -1,7 +1,7 @@
 # Payment machines (card machines / EDC)
 
-A separately installed add-on (`addons/edc`, id `edc`, needs POS 0.3.8): `TiffinPOS-PaymentMachines-Setup-<version>.exe` on
-Windows, `TiffinPOS-PaymentMachines-<version>.tiffinaddon` on Android. Without it the POS takes Card and UPI by hand,
+A separately installed add-on (`addons/edc`, id `edc`, needs POS 0.3.8): `quickPOS-PaymentMachines-Setup-<version>.exe` on
+Windows, `quickPOS-PaymentMachines-<version>.tiffinaddon` on Android. Without it the POS takes Card and UPI by hand,
 as before. Build: `cd addons/edc && npm run build` (signed) and `npm run installer`.
 
 Settings > Payment machines (owner). At the counter, Card and UPI payments go to the machine; the bill is saved only

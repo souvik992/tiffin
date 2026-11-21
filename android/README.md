@@ -1,4 +1,4 @@
-# Tiffin POS for Android (standalone)
+# quickPOS for Android (standalone)
 
 The full POS runs on the Android device: the **same backend code as Windows** (`src/`), on Node.js 24 for Android, with
 its SQLite database and backups in the app's private storage. No PC needed.
@@ -31,7 +31,7 @@ cd android
 gradlew.bat assembleDebug                  # Windows (set JAVA_HOME to Android Studio's jbr); ./gradlew on Linux
 ```
 
-APKs: `android/app/build/outputs/apk/debug/TiffinPOS-<version>-<abi>-debug.apk`. The version follows
+APKs: `android/app/build/outputs/apk/debug/quickPOS-<version>-<abi>-debug.apk`. The version follows
 `desktop/package.json`, so Windows and Android builds of one commit carry the same number.
 
 Every push to GitHub builds both (`.github/workflows/build.yml`): tests, the Windows installer and the APKs, as downloads
@@ -49,7 +49,7 @@ on the run's page.
   copies) opens Android's print screen, which includes Save as PDF. Screens use `ui/src/lib/android.ts`.
 * **Backup copies** on a USB stick or SD card: Settings > Backups > Choose folder (`BackupCopier.java`); new
   backup files are copied every 15 minutes while the app runs, and on "Copy now".
-* **Add-ons** (ODS): `npm run build` in `addons/ods` also writes `addons/dist/installers/TiffinPOS-ODS-<version>.tiffinaddon`
+* **Add-ons** (ODS): `npm run build` in `addons/ods` also writes `addons/dist/installers/quickPOS-ODS-<version>.tiffinaddon`
   (the signed package files, zipped). Settings > This device > Add-ons > Install from file (owner) unpacks it into the
   app's `pos-addons` folder (`AddonInstaller.java`) and restarts the POS, whose loader checks the signature, every
   file's fingerprint and the version exactly as on Windows (a changed file switches the add-on off). Remove works the same way.

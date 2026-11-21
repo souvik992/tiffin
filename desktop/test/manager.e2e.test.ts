@@ -1,4 +1,4 @@
-// Drives the real Tiffin Data Manager app (Electron window, backend utility process, app://manager) over a temporary
+// Drives the real quickPOS Data Manager app (Electron window, backend utility process, app://manager) over a temporary
 // shop's data folder. Needs `node scripts/build-manager.mjs` first (`npm run test:e2e:manager` does it).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +36,7 @@ test('Data Manager app: owner only, dashboard, all data, backup; view only while
     const page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
     assert.equal(page.url(), 'app://manager/manager.html');
-    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle()), 'Tiffin Data Manager');
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle()), 'quickPOS Data Manager');
 
     const signIn = async (mobile: string, pin: string) => {
       await page.getByLabel('Mobile number').fill(mobile);
@@ -46,7 +46,7 @@ test('Data Manager app: owner only, dashboard, all data, backup; view only while
     };
     await page.getByText('Demo Burger Hub: sign in as the owner.').waitFor();
     await signIn('9000000003', '1111');
-    await page.getByText('Only the owner can open Tiffin Data Manager.').waitFor();
+    await page.getByText('Only the owner can open quickPOS Data Manager.').waitFor();
     await signIn('9000000001', '1234');
 
     // dashboard: numbers from the backend's reports
@@ -94,7 +94,7 @@ test('Data Manager app: owner only, dashboard, all data, backup; view only while
     await page.locator('h1').click();
     await page.keyboard.type('1234');
     await page.keyboard.press('Enter');
-    await page.getByText(/View only\. Tiffin POS is open on this computer/).waitFor();
+    await page.getByText(/View only\. quickPOS is open on this computer/).waitFor();
     await page.getByRole('link', { name: 'Backups' }).click();
     assert.equal(await page.getByRole('button', { name: 'Restore from a file…' }).isDisabled(), true);
   } finally { await app.close(); }

@@ -2,7 +2,7 @@
   "name": "pos-ui",
   "version": "0.1.0",
   "private": true,
-  "description": "Billing counter UI (React) for the offline-first POS backend. Design ported from the Lovable 'Tiffin POS' prototype.",
+  "description": "Billing counter UI (React) for the offline-first POS backend. Design ported from the Lovable 'quickPOS' prototype.",
   "type": "module",
   "scripts": {
     "start": "node ../scripts/dev.ts",

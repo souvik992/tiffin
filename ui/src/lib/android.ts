@@ -43,7 +43,7 @@ export async function saveFile(name: string, blob: Blob): Promise<string> {
 }
 
 /** Print / PDF of the page: the phone's print screen (Android: with Save as PDF; iOS: AirPrint, share as PDF) in the app, the browser's print elsewhere. */
-export function printPage(title = 'Tiffin POS'): void {
+export function printPage(title = 'quickPOS'): void {
   const a = androidApp();
   if (a) a.print(title); else window.print();
 }

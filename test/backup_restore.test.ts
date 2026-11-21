@@ -145,7 +145,7 @@ test('Settings > Backups: only the owner, with the PIN again; the POS restarts i
   } finally { await p.b.shutdown('test'); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('online backup: pair with the Tiffin backup server, upload (photos too), then restore from it on a POS that lost its photos', { skip: NO_HUB }, async () => {
+test('online backup: pair with the quickPOS backup server, upload (photos too), then restore from it on a POS that lost its photos', { skip: NO_HUB }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pos-cloud-'));
   const hub = new Hub({ dbPath: join(dir, 'hub.db') });
   const hs: Server = createHubServer(hub, { adminKey: 'k' });

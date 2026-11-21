@@ -24,9 +24,9 @@ node scripts/bench.ts 100000   # performance measurements
 
 The billing UI lives in `ui/`. Install it once with `cd ui && npm install`. Then `npm run dev` in the repo root (or `npm start` in `ui/`) starts the backend and the UI together; open http://127.0.0.1:5173 and press Ctrl+C to stop both.
 
-The Windows desktop app (installer, one window, no Node.js needed on the shop PC) lives in `desktop/`: see `desktop/README.md`. `npm run dist` there builds `TiffinPOS-Setup-<version>.exe`.
+The Windows desktop app (installer, one window, no Node.js needed on the shop PC) lives in `desktop/`: see `desktop/README.md`. `npm run dist` there builds `quickPOS-Setup-<version>.exe`.
 
-**Releasing to customers:** `npm run release` (repository root) builds the Tiffin POS and ODS installers on this PC and uploads them to DinePOS Cloud, which offers them in the customer portal (fine-dine roadmap P8-11; settings in `%USERPROFILE%\.dinepos\release.json`, see `scripts/release.mjs`). CI builds installers only as test artifacts.
+**Releasing to customers:** `npm run release` (repository root) builds the quickPOS and ODS installers on this PC and uploads them to DinePOS Cloud, which offers them in the customer portal (fine-dine roadmap P8-11; settings in `%USERPROFILE%\.dinepos\release.json`, see `scripts/release.mjs`). CI builds installers only as test artifacts.
 
 For a real shop, do not run the seed. `POST /api/setup` creates the outlet, counter and owner on first run.
 
@@ -61,7 +61,7 @@ templates/receipt/  example bill designs (.tiffinreceipt)
 | Finalized documents cannot be edited | Database triggers on invoice, lines, payments | direct SQL attempts are rejected |
 | Money never drifts | Integer paise, BigInt intermediates, largest-remainder discounts, exact remainders on partial returns | 5,000 random invoices; credit notes 99.01 + 99.01 + 98.98 = 297.00 |
 | Lost database is recoverable | Verified online backups + fsynced daily journal outside the DB; `npm run restore` keeps the old database aside, restores, and replays the journal | restore backup, replay journal: identical invoices, totals, numbering continues; the restore command run as a child process |
-| Backups leave the device | Every backup is also copied (and checked again) to a USB drive or folder the owner chooses, and/or uploaded to the Tiffin backup server (gzipped, SHA-256 checked, photos included). Settings > Backups restores from any of them with the owner's PIN: the POS restarts itself, keeps the current data aside and replays later bills | copy with a pulled-out drive; upload, wrong code, damaged upload, retention; restore from this device and from online (photos come back) through the API with the in-place restart; another shop's backup does not mix journals |
+| Backups leave the device | Every backup is also copied (and checked again) to a USB drive or folder the owner chooses, and/or uploaded to the quickPOS backup server (gzipped, SHA-256 checked, photos included). Settings > Backups restores from any of them with the owner's PIN: the POS restarts itself, keeps the current data aside and replays later bills | copy with a pulled-out drive; upload, wrong code, damaged upload, retention; restore from this device and from online (photos come back) through the API with the in-place restart; another shop's backup does not mix journals |
 | Menu photos are backed up and restored | Photos stay files (never in the database). Each backup copies the photos it uses into `backups/images` (only new ones; checked against their SHA-256 name); restore copies them back | backup, prune, restore and the restore command with photos |
 | Printing never blocks or loses a receipt | Persistent queue, strict order per printer, backoff 1s/3s/10s, restart recovery | simulated offline printer; a real TCP printer socket |
 | Tampering is detectable | Hash-chained audit log | edited row detected |

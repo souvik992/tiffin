@@ -1,5 +1,5 @@
-// Tiffin POS licence (fine-dine ADR-0007, P8-10). A key from DinePOS Cloud (or the vendor's keygen) bound to this PC
-// and labelled for Tiffin POS (product "tiffin_qsr"). Without a usable licence the POS stops at its lock screen:
+// quickPOS licence (fine-dine ADR-0007, P8-10). A key from DinePOS Cloud (or the vendor's keygen) bound to this PC
+// and labelled for quickPOS (product "tiffin_qsr"). Without a usable licence the POS stops at its lock screen:
 // every API call except the licence routes is refused (LICENCE_REQUIRED). The lock screen offers: sign in with the
 // portal account (30-day trial, or the key the account has), renew (the portal's plans page), or paste a key.
 // Installs that already had bills when licensing arrived get 30 days to activate. Not enforced in development runs.
@@ -93,16 +93,16 @@ export function licenceInfo(ctx: Ctx, cfg: LicenceConfig): LicenceInfo {
   switch (s.state) {
     case 'ok': info.message = s.trial ? `Free trial until ${dateText(s.expiresAt!)} (${left(s.daysLeft!)}).` : `Licensed to ${s.licensee} until ${dateText(s.expiresAt!)}.`; break;
     case 'expiring': info.message = s.trial ? `The free trial ends on ${dateText(s.expiresAt!)} (${left(s.daysLeft!)}). Renew to keep billing.` : `The licence ends on ${dateText(s.expiresAt!)} (${left(s.daysLeft!)}). Renew it in time.`; break;
-    case 'grace': info.message = `The licence ended on ${dateText(s.expiresAt!)}. Tiffin POS stops on ${dateText(s.graceEndsAt!)} unless it is renewed.`; break;
-    case 'expired': info.message = `The licence ended on ${dateText(s.expiresAt!)}. Renew it, or enter a new key, to use Tiffin POS.`; break;
+    case 'grace': info.message = `The licence ended on ${dateText(s.expiresAt!)}. quickPOS stops on ${dateText(s.graceEndsAt!)} unless it is renewed.`; break;
+    case 'expired': info.message = `The licence ended on ${dateText(s.expiresAt!)}. Renew it, or enter a new key, to use quickPOS.`; break;
     case 'invalid': info.message = s.reason ?? 'The licence key is not valid for this PC.'; break;
-    case 'none': info.message = 'Tiffin POS needs a licence. Sign in with your account to start a 30-day free trial, or enter a licence key.'; break;
+    case 'none': info.message = 'quickPOS needs a licence. Sign in with your account to start a 30-day free trial, or enter a licence key.'; break;
   }
   // an install that had bills before licensing: 30 days to activate
   if (!s.usable && r.grace_until !== null && t < r.grace_until) {
     const days = Math.ceil((r.grace_until - t) / DAY);
     return { ...info, usable: true, state: 'activate', daysLeft: days, graceEndsAt: new Date(r.grace_until).toISOString(),
-      message: `Tiffin POS now needs a licence. Sign in with your account by ${dateText(new Date(r.grace_until).toISOString())} (${left(days)}) to keep billing.` };
+      message: `quickPOS now needs a licence. Sign in with your account by ${dateText(new Date(r.grace_until).toISOString())} (${left(days)}) to keep billing.` };
   }
   return info;
 }
@@ -137,7 +137,7 @@ export async function activate(ctx: Ctx, cfg: LicenceConfig, input: { mode: 'tri
     res = await (cfg.fetch ?? fetch)(`${cloud}/v1/activate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: input.mode, email: input.email, password: input.password, hardwareId: cfg.hardwareId, outletName: input.outletName || outlet?.name || 'Tiffin POS outlet', link: !r.device_key, product: PRODUCT }),
+      body: JSON.stringify({ mode: input.mode, email: input.email, password: input.password, hardwareId: cfg.hardwareId, outletName: input.outletName || outlet?.name || 'quickPOS outlet', link: !r.device_key, product: PRODUCT }),
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
