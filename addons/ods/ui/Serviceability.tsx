@@ -155,7 +155,7 @@ export function Serviceability() {
         </div>
       </div>
       {isOwner ? (
-        <div className="sticky bottom-0 mt-4 flex gap-2 border-t border-border bg-background py-3" style={{ zIndex: 20 }}>
+        <div className="mt-4 flex gap-2">
           <button className="btn-primary" disabled={busy || !changed} onClick={() => void save()}>{busy ? 'Saving…' : 'Save serviceability'}</button>
           {changed && <button className="btn-ghost" onClick={() => { setForm(JSON.parse(saved) as Form); setErrors({}); }}>Undo changes</button>}
         </div>
