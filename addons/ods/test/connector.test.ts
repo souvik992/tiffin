@@ -166,6 +166,58 @@ hubTest('ODS connector: one connection link from the hub admin page (address + p
   } finally { await t.close(); }
 });
 
+hubTest('ODS connector: a POS signed in to its PosiNext account connects to that hub on its own; disconnect sticks; the account or another link connects again', async () => {
+  const t = await setup();
+  try {
+    const db = t.env.ctx.db;
+    // connected by a connection link (setup); no account sign-in yet
+    assert.deepEqual([t.conn.link().source, t.conn.link().account], ['link', false]);
+    // the account sign-in (Settings > Licence) gives the POS a device key on the same cloud
+    const accountKey = t.hub.pair(t.hub.pairingCodeForSlug('sample'), 'Demo (quickPOS)').deviceKey;
+    db.prepare('INSERT OR REPLACE INTO licence (id, cloud_url, device_key, last_seen_at, created_at) VALUES (1, ?, ?, 0, 0)').run(`${t.base}/`, accountKey);
+    let l = t.conn.link();
+    assert.deepEqual([l.source, l.account, t.host.getSetting('ods_hub_key') === accountKey], ['link', true, false], 'a link the owner chose is kept');
+
+    // disconnect: stays disconnected, even though the account could connect it
+    t.conn.unpair(t.env.owner);
+    t.conn.refresh();
+    l = t.conn.link();
+    assert.deepEqual([l.paired, l.source, l.account], [false, null, true]);
+
+    // "Connect with my PosiNext account": no link needed; the hub's own store name arrives on connecting
+    l = t.conn.useAccount(t.env.owner);
+    assert.deepEqual([l.paired, l.source, l.hubUrl], [true, 'account', t.base]);
+    await until(() => t.conn.link().state === 'connected', 'connected with the account key');
+    await until(() => t.conn.link().store?.slug === 'sample', 'store name from the hub');
+    assert.equal(t.conn.link().store?.name, t.hub.store({ slug: 'sample' }).name);
+    assert.throws(() => t.conn.useAccount(t.env.owner), /already connected/);
+
+    // a new sign-in key (renewed or re-activated) is picked up on its own
+    const newKey = t.hub.pair(t.hub.pairingCodeForSlug('sample'), 'Demo again').deviceKey;
+    db.prepare('UPDATE licence SET device_key = ? WHERE id = 1').run(newKey);
+    assert.equal(t.conn.link().source, 'account');
+    assert.equal(t.host.getSetting('ods_hub_key'), newKey);
+
+    // a fresh install of the add-on on a signed-in POS (nothing saved yet): connects on its own
+    t.conn.unpair(t.env.owner);
+    t.host.setSetting('ods_hub_account_off', '');
+    t.conn.refresh();
+    l = t.conn.link();
+    assert.deepEqual([l.paired, l.source], [true, 'account']);
+    await until(() => t.conn.link().state === 'connected', 'connected again');
+
+    // after a disconnect, another hub's connection link works as before
+    t.conn.unpair(t.env.owner);
+    l = await t.conn.pair(t.env.owner, `${t.base}/connect/${t.hub.pairingCodeForSlug('sample')}`, '');
+    assert.deepEqual([l.paired, l.source, l.store?.slug], [true, 'link', 'sample']);
+    // not signed in at all: the account button is refused
+    t.conn.unpair(t.env.owner);
+    db.prepare('UPDATE licence SET device_key = NULL WHERE id = 1').run();
+    assert.equal(t.conn.link().account, false);
+    assert.throws(() => t.conn.useAccount(t.env.owner), /not signed in/);
+  } finally { await t.close(); }
+});
+
 hubTest('ODS connector: a POS that stops right after billing sends the accept on restart (F3); replayed events change nothing (F4); online orders cannot be switched off while orders are open (F15)', async () => {
   const s = await setup();
   let second: Awaited<ReturnType<typeof register>> | null = null;

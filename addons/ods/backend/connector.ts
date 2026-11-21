@@ -25,9 +25,19 @@ import type { LocalOrder } from './store.ts';
  */
 
 const KEY = 'ods_hub_key', URL_KEY = 'ods_hub_url', STORE = 'ods_hub_store', SEQ = 'ods_last_seq', MENU_HASH = 'ods_menu_hash', MENU_VER = 'ods_menu_version', IMAGES_SIG = 'ods_images_sig';
+/** How the POS was connected: 'account' = the link its PosiNext account sign-in made (licence), 'link' = a connection link. */
+const SOURCE = 'ods_hub_source';
+/** '1' after the owner disconnected: the account link is not used again on its own (the owner can choose it again). */
+const ACCOUNT_OFF = 'ods_hub_account_off';
 export type ConnState = 'off' | 'not-paired' | 'connecting' | 'connected' | 'retrying';
 export interface ConnectorOptions { fetcher?: typeof fetch; retryMs?: number[]; tickMs?: number; prepDefault?: number }
-export interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: ConnState; lastError: string | null; lastEventAt: number | null; accepting: boolean }
+export interface HubLink {
+  paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: ConnState; lastError: string | null; lastEventAt: number | null; accepting: boolean;
+  /** how it is connected (null: not connected) */
+  source: 'account' | 'link' | null;
+  /** this POS is signed in to a PosiNext account, so it can connect to that account's hub without a link */
+  account: boolean;
+}
 
 const CHANNEL: Record<Order['channel'], 'APP' | 'WEBSITE' | 'SWIGGY' | 'ZOMATO'> = { app: 'APP', website: 'WEBSITE', swiggy: 'SWIGGY', zomato: 'ZOMATO' };
 
@@ -68,11 +78,68 @@ export class Connector {
   // ---------------------------------------------------------------- pairing and status
 
   link(): HubLink {
+    if (this.adoptAccount()) this.refresh();
     const store = this.host.getSetting(STORE);
+    const paired = Boolean(this.host.getSetting(KEY));
     return {
-      paired: Boolean(this.host.getSetting(KEY)), hubUrl: this.host.getSetting(URL_KEY) || null, store: store ? JSON.parse(store) as { slug: string; name: string } : null,
+      paired, hubUrl: this.host.getSetting(URL_KEY) || null, store: store ? JSON.parse(store) as { slug: string; name: string } : null,
       state: this.state, lastError: this.lastError, lastEventAt: this.lastEventAt, accepting: this.host.billing.shiftActor(this.host.ctx) !== null,
+      source: paired ? (this.host.getSetting(SOURCE) === 'account' ? 'account' : 'link') : null, account: this.accountLink() !== null,
     };
+  }
+
+  /** The cloud link the POS got when it signed in to its PosiNext account (Settings > Licence): the same hub, already paired. */
+  private accountLink(): { url: string; key: string } | null {
+    try {
+      const r = this.host.db.get<{ cloud_url: string | null; device_key: string | null }>('SELECT cloud_url, device_key FROM licence WHERE id = 1');
+      return r?.cloud_url && r.device_key ? { url: r.cloud_url.replace(/\/+$/, ''), key: r.device_key } : null;
+    } catch { return null; } // a POS from before account sign-in
+  }
+
+  /**
+   * Connects to the account's hub on its own: when the add-on is installed (or online orders are switched on) on a POS signed
+   * in to its account, and when that sign-in is renewed with a new key. Never over a connection link the owner chose, and
+   * not again after the owner disconnected. Returns true when it changed the connection.
+   */
+  private adoptAccount(): boolean {
+    const acc = this.accountLink();
+    if (!acc) return false;
+    const key = this.host.getSetting(KEY);
+    if (key) {
+      if (this.host.getSetting(SOURCE) !== 'account' || (key === acc.key && this.host.getSetting(URL_KEY) === acc.url)) return false;
+    } else if (this.host.getSetting(ACCOUNT_OFF) === '1') return false;
+    const outlet = this.host.db.get<{ name: string }>('SELECT name FROM outlet LIMIT 1');
+    this.host.setSetting(URL_KEY, acc.url);
+    this.host.setSetting(KEY, acc.key);
+    this.host.setSetting(SOURCE, 'account');
+    this.host.setSetting(STORE, JSON.stringify({ slug: '', name: outlet?.name ?? 'This store' })); // the hub's name for it comes on connecting
+    this.host.setSetting(SEQ, '0');
+    this.host.setSetting(MENU_HASH, '');
+    this.host.setSetting(IMAGES_SIG, '');
+    this.host.audit(this.host.ctx, null, 'ods.hub.pair', 'settings', URL_KEY, { hubUrl: acc.url, source: 'account' });
+    return true;
+  }
+
+  /** The owner chose "Connect with my PosiNext account" (after disconnecting). */
+  useAccount(actor: Actor) {
+    this.host.assertPerm(actor, 'settings.write');
+    if (this.host.getSetting(KEY)) throw new this.host.AppError('VALIDATION', 'This POS is already connected to an order hub. Disconnect it first.', 409);
+    if (!this.accountLink()) throw new this.host.AppError('NOT_LINKED', 'This POS is not signed in to a PosiNext account. Sign in under Settings > Licence, or paste a connection link.', 409);
+    this.host.setSetting(ACCOUNT_OFF, '');
+    this.adoptAccount();
+    this.refresh();
+    return this.link();
+  }
+
+  /** The hub's own name for the store (a POS connected by its account never got the pairing answer). Quiet on failure. */
+  private async storeName() {
+    const s = this.host.getSetting(STORE);
+    if (s && (JSON.parse(s) as { slug: string }).slug) return;
+    try {
+      const r = await this.f(this.url('/v1/pos/store'), { headers: this.headers(), signal: AbortSignal.timeout(10_000) });
+      const j = r.ok ? await r.json() as { slug?: string; name?: string } : null;
+      if (j?.slug && this.running) this.host.setSetting(STORE, JSON.stringify({ slug: j.slug, name: j.name ?? j.slug }));
+    } catch { /* shown with the outlet's name until the next connection */ }
   }
 
   /** Pairs with the hub: a connection link from the hub admin page (<hub address>/connect/<code>), or an address and a code. */
@@ -98,6 +165,7 @@ export class Connector {
     this.host.setSetting(URL_KEY, hubUrl);
     this.host.setSetting(KEY, j.deviceKey);
     this.host.setSetting(STORE, JSON.stringify({ slug: j.slug, name: j.name }));
+    this.host.setSetting(SOURCE, 'link');
     this.host.setSetting(SEQ, '0');
     this.host.setSetting(MENU_HASH, '');
     this.host.setSetting(IMAGES_SIG, ''); // a new hub has none of the photos yet
@@ -108,7 +176,8 @@ export class Connector {
 
   unpair(actor: Actor) {
     this.host.assertPerm(actor, 'settings.write');
-    for (const k of [KEY, URL_KEY, STORE]) this.host.setSetting(k, '');
+    for (const k of [KEY, URL_KEY, STORE, SOURCE]) this.host.setSetting(k, '');
+    this.host.setSetting(ACCOUNT_OFF, '1'); // stay disconnected: the account link is not used again on its own
     this.host.audit(this.host.ctx, actor.userId, 'ods.hub.unpair', 'settings', URL_KEY);
     this.refresh();
     return this.link();
@@ -118,6 +187,7 @@ export class Connector {
 
   /** Start, stop or restart according to the settings (online orders on + paired). */
   refresh() {
+    this.adoptAccount();
     const should = readOnlineConfig(this.host).enabled && Boolean(this.host.getSetting(KEY));
     if (should && !this.running) { this.running = true; this.loopDone = this.loop().catch((e) => this.host.log.warn('order hub connection stopped', String(e))); this.startTimer(); }
     else if (!should && this.running) void this.stop();
@@ -151,6 +221,7 @@ export class Connector {
     while (this.running) {
       this.setConn('connecting');
       try {
+        await this.storeName();
         await this.publish();
         await this.flush();
         await this.stream(() => { attempt = 0; this.setConn('connected', null); });

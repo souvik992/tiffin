@@ -69,6 +69,7 @@ export function register(host: HostApi, opts: { fetcher?: Fetcher; connector?: C
   host.route('GET', '/hub', {}, () => conn.link());
   host.route('POST', '/hub/pair', {}, (c) => conn.pair(c.actor, String(body(c).hubUrl ?? ''), String(body(c).code ?? '')));
   host.route('DELETE', '/hub', {}, (c) => conn.unpair(c.actor));
+  host.route('POST', '/hub/account', {}, (c) => conn.useAccount(c.actor)); // connect to the PosiNext account's hub again, after a disconnect
 
   // ---- ODS
   const view = () => ({ link: conn.link(), orders: conn.orders().map((o) => ({ ...o, posPrice: ['SENT_TO_STORE', 'RECEIVED'].includes(o.state) && !o.billInvoiceId ? conn.posPrice(o.order) : null })) });

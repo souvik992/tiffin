@@ -171,7 +171,7 @@ export function OnlineSettings() {
   );
 }
 
-interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: 'off' | 'not-paired' | 'connecting' | 'connected' | 'retrying'; lastError: string | null; accepting: boolean }
+interface HubLink { paired: boolean; hubUrl: string | null; store: { slug: string; name: string } | null; state: 'off' | 'not-paired' | 'connecting' | 'connected' | 'retrying'; lastError: string | null; accepting: boolean; source?: 'account' | 'link' | null; account?: boolean }
 
 /** The order hub: the internet service that takes orders from the app and website and passes them to this POS. */
 function HubCard({ isOwner }: { isOwner: boolean }) {
@@ -196,6 +196,11 @@ function HubCard({ isOwner }: { isOwner: boolean }) {
     try { setLink(await api.request<HubLink>('DELETE', `${BASE}/hub`, undefined, newKey())); setConfirm(false); notify('success', 'Disconnected from the order hub. No more online orders arrive.'); }
     catch (e) { fail(e); } finally { setBusy(false); }
   };
+  const useAccount = async () => {
+    setBusy(true);
+    try { setLink(await api.request<HubLink>('POST', `${BASE}/hub/account`, {}, newKey())); notify('success', 'Connected to the order hub of your PosiNext account.'); }
+    catch (e) { fail(e); } finally { setBusy(false); }
+  };
   const status = !link ? 'Loading…' : link.state === 'connected' ? 'Connected: orders arrive live.' : link.state === 'retrying' ? `Cannot reach the hub, trying again. ${link.lastError ?? ''}` : link.state === 'connecting' ? 'Connecting…' : 'Not connected.';
   return (
     <section className="rounded-2xl border border-border bg-card p-4" aria-label="Order hub">
@@ -204,17 +209,27 @@ function HubCard({ isOwner }: { isOwner: boolean }) {
       {link?.paired ? (
         <>
           <p className="text-sm"><b>{link.store?.name}</b> on {link.hubUrl}</p>
+          {link.source === 'account' && <p className="text-xs text-muted-foreground">Connected on its own through your PosiNext account (the one this POS is signed in with).</p>}
           <p className={`text-sm ${link.state === 'connected' ? 'text-veg' : 'text-destructive'}`}>{status}</p>
           {!link.accepting && <p className="mt-1 text-xs text-muted-foreground">Customers can order only while a shift is open.</p>}
           {isOwner && (confirm
-            ? <div className="mt-3 flex gap-2"><button className="btn-primary bg-destructive" disabled={busy} onClick={() => void unpair()}>Yes, disconnect</button><button className="btn-ghost" onClick={() => setConfirm(false)}>Back</button></div>
+            ? <div className="mt-3">
+                <p className="mb-2 text-sm">Disconnect? No more online orders arrive until you connect again{link.source === 'account' ? ' (with your account or another link)' : ''}.</p>
+                <div className="flex gap-2"><button className="btn-primary bg-destructive" disabled={busy} onClick={() => void unpair()}>Yes, disconnect</button><button className="btn-ghost" onClick={() => setConfirm(false)}>Back</button></div>
+              </div>
             : <button className="btn-ghost mt-3" onClick={() => setConfirm(true)}>Disconnect</button>)}
         </>
       ) : isOwner ? (
         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          {link?.account && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 sm:col-span-2">
+              <button className="btn-primary" disabled={busy} onClick={() => void useAccount()}>Connect with my PosiNext account</button>
+              <span className="text-xs text-muted-foreground">or paste another hub's connection link below</span>
+            </div>
+          )}
           <input className="field" placeholder="Connection link, e.g. https://orders.example.in/connect/ABCD-EFGH" value={connectLink} onChange={(e) => setConnectLink(e.target.value)} aria-label="Connection link" />
-          <button className="btn-primary" disabled={busy || !/\/connect\/[A-Za-z0-9-]{8,9}\/?$/.test(connectLink.trim())} onClick={() => void pair()}>{busy ? 'Connecting…' : 'Connect'}</button>
-          <p className="text-xs text-muted-foreground sm:col-span-2">Paste the connection link you got from whoever runs your order hub. It works once, for a short time; ask for a new one if it has expired.</p>
+          <button className={link?.account ? 'btn-ghost' : 'btn-primary'} disabled={busy || !/\/connect\/[A-Za-z0-9-]{8,9}\/?$/.test(connectLink.trim())} onClick={() => void pair()}>{busy ? 'Connecting…' : 'Connect'}</button>
+          <p className="text-xs text-muted-foreground sm:col-span-2">{link?.account ? 'A connection link connects this POS to a different order hub or store.' : 'A POS signed in to its PosiNext account (Settings > Licence) connects on its own. Otherwise paste the connection link you got from whoever runs the order hub.'} A link works once, for a short time; ask for a new one if it has expired.</p>
         </div>
       ) : <p className="text-sm text-muted-foreground">Not connected. The owner connects the hub.</p>}
     </section>

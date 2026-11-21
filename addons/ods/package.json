@@ -1,6 +1,6 @@
 {
   "name": "tiffin-pos-addon-ods",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "private": true,
   "type": "module",
   "description": "ODS add-on for quickPOS: online orders settings, serviceability (map, distance bands, fees, hours) and the ODS.",

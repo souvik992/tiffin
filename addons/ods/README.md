@@ -13,7 +13,10 @@ A separately installed module for quickPOS (0.3.4 or newer). It adds:
   * up to 6 delivery areas by distance, each with delivery fee, minimum order, free-delivery amount and delivery time
   * packaging fee, pickup minimum and ready time
   * opening hours per weekday (up to 2 times a day, past midnight allowed)
-* **Order hub connection** (Settings > Online orders > Order hub): paste the connection link from the hub admin page once (`<hub address>/connect/<code>`). Orders then arrive live. See `hub/README.md`.
+* **Order hub connection** (Settings > Online orders > Order hub):
+  * **On its own (ODS 1.0.16):** a POS signed in to its PosiNext account (Settings > Licence) already has a key for that account's store on PosiNext Cloud. The add-on uses it as soon as it is installed or online orders are switched on; no link is needed. A new sign-in key is picked up on its own.
+  * **Disconnect** stays disconnected (it is not reconnected on its own). Then **Connect with my PosiNext account**, or paste another hub's connection link (`<hub address>/connect/<code>`, from the hub admin page).
+  * A connection link the owner chose is never replaced by the account's hub. Orders then arrive live. The hub is in posinext-cloud `hub/`.
 * **ODS** (order display screen) in the side menu, only while online orders are on:
   * columns New / Preparing / Ready / On the way, a sound on new orders, and the time left to accept;
   * **Accept** with a preparation time: a normal GST bill and the kitchen ticket print at once;
