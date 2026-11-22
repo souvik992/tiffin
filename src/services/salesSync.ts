@@ -4,6 +4,8 @@ import { istDay } from '../core/numbering.ts';
 import type { Ctx } from './ctx.ts';
 import { getSetting, setSetting } from './settings.ts';
 import type { InvoiceRecord, LineRecord, PaymentRecord } from './invoiceStore.ts';
+import { hubBill, shareCode, whatsappQrFor } from './whatsappBill.ts';
+import { loadInvoiceFull } from './invoiceView.ts';
 
 /**
  * Sales sync: sends each bill and each purchase up to PosiNext Cloud (POST /v1/pos/sync/batches) for the owner's portal
@@ -14,7 +16,9 @@ import type { InvoiceRecord, LineRecord, PaymentRecord } from './invoiceStore.ts
  * It can be switched off (setting sales_sync_on = 0).
  *
  * What is sent per bill: number, time, totals, tax, discount, the items with their category, the payment modes, the
- * sales channel and the billing counter's name. No customer phone, name or GSTIN. Per purchase: supplier name, bill
+ * sales channel and the billing counter's name. No customer phone, name or GSTIN. With the WhatsApp bill QR on
+ * (src/services/whatsappBill.ts) a bill also carries share = { code, receipt }: the printed bill (store details, items,
+ * taxes, payments; still no customer details) for the cloud to answer the customer's WhatsApp message with. Per purchase: supplier name, bill
  * number, materials and amounts (not the supplier's GSTIN). The stock list: each material's quantity, reorder level and
  * last cost, and what each recent day's sales used and wasted at that cost.
  *
@@ -44,7 +48,7 @@ function readState(ctx: Ctx): State {
 }
 
 /** The cloud this POS is linked with: its account link (licence), else online orders, else online backups. */
-function link(ctx: Ctx): { url: string; key: string } | null {
+export function cloudLink(ctx: Ctx): { url: string; key: string } | null {
   const lic = get<{ cloud_url: string | null; device_key: string | null }>(ctx.db, 'SELECT cloud_url, device_key FROM licence WHERE id = 1');
   if (lic?.cloud_url && lic.device_key) return { url: lic.cloud_url, key: lic.device_key };
   for (const [u, k] of [['ods_hub_url', 'ods_hub_key'], ['cloud_backup_url', 'cloud_backup_key']] as const) {
@@ -57,7 +61,7 @@ function link(ctx: Ctx): { url: string; key: string } | null {
 const pendingRows = (ctx: Ctx, cursor: number) => get<{ n: number }>(ctx.db, "SELECT count(*) AS n FROM outbox WHERE entity IN ('invoice', 'purchase') AND seq > ?", cursor)!.n;
 
 export function salesSyncStatus(ctx: Ctx): SalesSyncStatus {
-  return { linked: link(ctx) !== null, on: getSetting(ctx, ON) !== '0', pending: pendingRows(ctx, readState(ctx).cursor), lastAt: Number(getSetting(ctx, LAST)) || null, error: getSetting(ctx, ERROR) || null };
+  return { linked: cloudLink(ctx) !== null, on: getSetting(ctx, ON) !== '0', pending: pendingRows(ctx, readState(ctx).cursor), lastAt: Number(getSetting(ctx, LAST)) || null, error: getSetting(ctx, ERROR) || null };
 }
 export function setSalesSync(ctx: Ctx, on: boolean): SalesSyncStatus {
   setSetting(ctx, ON, on ? '1' : '0');
@@ -99,6 +103,8 @@ function toEvents(ctx: Ctx, row: OutboxRow): Array<Omit<Event, 'seq'>> {
       channel: CHANNEL[order?.channel ?? 'COUNTER'] ?? 'pos', terminal,
       taxPaise: iv.cgst + iv.sgst + iv.igst + iv.cess, discountPaise: iv.discountTotal,
       lines: f.lines.map((l) => ({ name: l.name, category: category(l.itemId), qtyMilli: l.qtyMilli, amountPaise: l.lineTotal })),
+      // the WhatsApp bill QR printed on it: the bill for the cloud to send when the customer asks
+      ...(whatsappQrFor(ctx) ? { share: { code: shareCode(ctx, iv.id), receipt: hubBill(loadInvoiceFull(ctx, iv.id), getSetting(ctx, 'receipt_footer')) } } : {}),
     } },
     { kind: 'bill.settled', createdAt: at, payload: { billId: iv.id, totalPaise: iv.grandTotal, tenders, changePaise: 0, businessDate } },
   ];
@@ -142,7 +148,7 @@ const running = new WeakSet<Ctx>();
 
 /** Sends every bill not sent yet. Returns how many outbox rows went up. Never throws: problems are recorded for the screen. */
 export async function syncSales(ctx: Ctx, o: SalesSyncOptions = {}): Promise<number> {
-  const to = link(ctx);
+  const to = cloudLink(ctx);
   if (!to || getSetting(ctx, ON) === '0' || running.has(ctx)) return 0;
   running.add(ctx);
   let sent = 0, restarted = false;

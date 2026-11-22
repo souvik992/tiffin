@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Ban, ChefHat, Monitor, Printer, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, Ban, ChefHat, MessageCircle, Monitor, Printer, Undo2 } from 'lucide-react';
 import { newKey } from '../lib/api.ts';
 import type { CreditOption, CreditPreview, InvoiceDetail, InvoiceSummary, Payment, PayMode } from '../lib/api.ts';
 import { useAddons } from '../lib/addons.ts';
@@ -18,6 +18,34 @@ function istDayStart(now = Date.now()): number {
 }
 const time = (ms: number) => new Date(ms).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+/** Sends a bill to the customer's WhatsApp through PosiNext Cloud (as a PDF). The customer's number is not kept on the POS. */
+function WhatsAppDialog({ detail, onClose }: { detail: InvoiceDetail; onClose: () => void }) {
+  const { api, fail, notify } = useSession();
+  const [mobile, setMobile] = useState('');
+  const [busy, setBusy] = useState(false);
+  const digits = mobile.replace(/\D/g, '');
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await api.sendBillOnWhatsApp(detail.invoice.id, mobile);
+      notify('success', `Bill ${r.invoiceNo} sent on WhatsApp to ${r.to}.`);
+      onClose();
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Send bill ${detail.invoice.invoiceNo} on WhatsApp`} onClose={onClose} width="max-w-sm">
+      <p className="mb-3 text-sm text-muted-foreground">The customer gets the bill as a PDF. Send it only when the customer asks for it.</p>
+      <form onSubmit={(e) => { e.preventDefault(); void send(); }}>
+        <input className="field w-full" autoFocus inputMode="numeric" maxLength={14} placeholder="Customer's mobile number" aria-label="Customer's mobile number" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/[^\d+ ]/g, ''))} />
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={busy || digits.length < 10}>{busy ? 'Sending…' : 'Send on WhatsApp'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Orders() {
   const { api, fail, notify, withApproval } = useSession();
   const [range, setRange] = useState<'today' | 'recent'>('today');
@@ -28,6 +56,8 @@ export function Orders() {
   const [refunding, setRefunding] = useState<InvoiceDetail | null>(null);
   const [statusKey, setStatusKey] = useState(0);
   const [correcting, setCorrecting] = useState<Payment | null>(null);
+  const [whatsappTo, setWhatsappTo] = useState<InvoiceDetail | null>(null);
+  const [canWhatsapp, setCanWhatsapp] = useState(false);
   const { addons } = useAddons();
   const { manager } = useAppMode(); // quickPOS Data Manager: bills are view only
   const panels = addons.flatMap((a) => (a.invoicePanels ?? []).map((P, i) => ({ key: `${a.id}:${i}`, P })));
@@ -37,6 +67,8 @@ export function Orders() {
     api.invoices(range === 'today' ? { fromMs: istDayStart(), limit: 200 } : { limit: 200 }).then(setRows).catch((e) => { setRows([]); fail(e); });
   }, [api, fail, range]);
   useEffect(load, [load]);
+  // the "Send on WhatsApp" button shows only when PosiNext Cloud can send bills
+  useEffect(() => { api.whatsappStatus().then((s) => setCanWhatsapp(s.bills)).catch(() => setCanWhatsapp(false)); }, [api]);
 
   const show = async (id: string) => { try { setOpen(await api.invoice(id)); } catch (e) { fail(e); } };
   const reprint = async (id: string) => {
@@ -116,6 +148,7 @@ export function Orders() {
             <button className="btn-ghost" onClick={() => setScreenPrint(open)}><Monitor className="h-4 w-4" />Print on screen</button>
             {!manager && <button className="btn-ghost" onClick={() => void reprint(open.invoice.id)}><Printer className="h-4 w-4" />Reprint</button>}
             {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost" onClick={() => void reprintKot(open.invoice.id)}><ChefHat className="h-4 w-4" />Reprint kitchen ticket</button>}
+            {!manager && canWhatsapp && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <button className="btn-ghost" onClick={() => setWhatsappTo(open)}><MessageCircle className="h-4 w-4" />Send on WhatsApp</button>}
             {!manager && open.invoice.docType === 'TAX_INVOICE' && open.invoice.status === 'ISSUED' && <>
               <button className="btn-ghost" onClick={() => setRefunding(open)}><Undo2 className="h-4 w-4" />Refund items</button>
               <button className="btn-ghost text-destructive" onClick={() => setCancelling(open)}><Ban className="h-4 w-4" />Cancel bill</button>
@@ -126,6 +159,7 @@ export function Orders() {
       {screenPrint && <ReceiptDialog invoiceId={screenPrint.invoice.id} title={`Receipt ${screenPrint.invoice.invoiceNo}`} onClose={() => setScreenPrint(null)} />}
       {cancelling && <CancelDialog detail={cancelling} onClose={() => setCancelling(null)} onDone={() => { setCancelling(null); setOpen(null); load(); }} />}
       {correcting && open && <PaymentModeDialog payment={correcting} onClose={() => setCorrecting(null)} onDone={() => { setCorrecting(null); void show(open.invoice.id); }} />}
+      {whatsappTo && <WhatsAppDialog detail={whatsappTo} onClose={() => setWhatsappTo(null)} />}
       {refunding && <RefundDialog detail={refunding} onClose={() => setRefunding(null)} onDone={() => { setRefunding(null); setOpen(null); load(); }} />}
     </PageShell>
   );

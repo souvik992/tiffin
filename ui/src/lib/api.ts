@@ -377,6 +377,9 @@ export function createApi(o: ApiOptions) {
     deleteModifierGroup: (id: string, key?: string) => change<{ ok: boolean }>('DELETE', `/modifier-groups/${enc(id)}`, {}, key),
     setItemModifierGroups: (itemId: string, groupIds: string[], key?: string) => change<{ ok: boolean }>('PUT', `/items/${enc(itemId)}/modifier-groups`, { groupIds }, key),
     reprint: (id: string, override?: Override, key?: string) => change<{ queued: number; copyNo: number }>('POST', `/invoices/${enc(id)}/reprint`, override ? { override } : {}, key),
+    /** Bills on WhatsApp through PosiNext Cloud: can the cloud send bills now, and send one to a mobile. */
+    whatsappStatus: () => get<{ linked: boolean; bills: boolean }>('/whatsapp'),
+    sendBillOnWhatsApp: (id: string, mobile: string) => change<{ sent: boolean; to: string; invoiceNo: string }>('POST', `/invoices/${enc(id)}/whatsapp`, { mobile }),
     receiptPreview: (id: string, widthMm: 58 | 80 = 80) => get<ReceiptPreview>(`/invoices/${enc(id)}/receipt?width=${widthMm}`),
     invoicePrints: (id: string) => get<InvoicePrintJob[]>(`/invoices/${enc(id)}/prints`),
     cancelInvoice: (id: string, reason: string, override?: Override, key?: string) => change<{ id: string; status: 'CANCELLED' }>('POST', `/invoices/${enc(id)}/cancel`, override ? { reason, override } : { reason }, key),

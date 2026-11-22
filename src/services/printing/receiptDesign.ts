@@ -1,3 +1,4 @@
+import { whatsappQrFor } from '../whatsappBill.ts';
 import { AppError, get, run } from '../../store/db.ts';
 import type { Actor, Ctx } from '../ctx.ts';
 import { runCommand } from '../commands.ts';
@@ -37,9 +38,9 @@ export function activeTemplate(ctx: Ctx): ReceiptTemplate | null {
   return cache.template;
 }
 
-/** Options every receipt build shares: the design and the UPI id for its QR code. */
-export function designOptions(ctx: Ctx): { template: ReceiptTemplate | null; upiId: string; logo: ReturnType<typeof storeLogo> } {
-  return { template: activeTemplate(ctx), upiId: loadSettings(ctx).upiId, logo: storeLogo(ctx) };
+/** Options every receipt build shares: the design, the UPI id for its QR code and the WhatsApp bill QR (when on). */
+export function designOptions(ctx: Ctx): { template: ReceiptTemplate | null; upiId: string; logo: ReturnType<typeof storeLogo>; whatsappQr: ReturnType<typeof whatsappQrFor> } {
+  return { template: activeTemplate(ctx), upiId: loadSettings(ctx).upiId, logo: storeLogo(ctx), whatsappQr: whatsappQrFor(ctx) };
 }
 
 export function getReceiptDesign(ctx: Ctx, actor: Actor) {

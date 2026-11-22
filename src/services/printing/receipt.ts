@@ -8,6 +8,8 @@ import { DEFAULT_TEMPLATE } from './defaultTemplate.ts';
 export interface ReceiptData {
   outlet: { name: string; address: string | null; gstin: string | null; fssaiNo: string | null; phone: string | null };
   invoice: {
+    /** the invoice id (the WhatsApp bill QR's code is made from it); absent on samples */
+    id?: string;
     invoiceNo: string; docType: 'TAX_INVOICE' | 'CREDIT_NOTE'; status: string; issuedAt: number; tokenNo: number | null;
     grossTotal: number; discountTotal: number; taxableTotal: number; cgst: number; sgst: number; igst: number; cess: number;
     roundOff: number; grandTotal: number; buyerGstin: string | null; originalInvoiceNo?: string | null;
@@ -26,13 +28,15 @@ export interface ReceiptOptions {
   template?: ReceiptTemplate | null; upiId?: string;
   /** Settings > Store logo (1-bit raster), printed by a design's "logo" block. */
   logo?: { width: number; height: number; data: Uint8Array } | null;
+  /** Bills on WhatsApp (services/whatsappBill.ts): what the QR opens for an invoice; null or absent: no QR. */
+  whatsappQr?: ((invoiceId: string) => string) | null;
 }
 
 const money = (p: number) => formatINR(p, '');
 const rate = (bp: number) => `${bp / 100}%`.replace(/(\.\d)0+%/, '$1%');
 
 export function buildReceipt(d: ReceiptData, o: ReceiptOptions): Uint8Array {
-  return renderTemplate(o.template ?? DEFAULT_TEMPLATE, d, o, { upiId: o.upiId });
+  return renderTemplate(o.template ?? DEFAULT_TEMPLATE, d, o, { upiId: o.upiId, whatsappQr: o.whatsappQr });
 }
 
 /** The layout before bill designs (kept for reference; templates/receipt/standard.tiffinreceipt reproduces it). */

@@ -22,7 +22,7 @@ export function receiptDataFrom(f: InvoiceFull): ReceiptData {
   return {
     outlet: { name: f.outlet.name, address: f.outlet.address, gstin: f.outlet.gstin, fssaiNo: f.outlet.fssaiNo, phone: f.outlet.phone },
     invoice: {
-      invoiceNo: f.invoice.invoiceNo, docType: f.invoice.docType, status: f.invoice.status, issuedAt: f.invoice.issuedAt, tokenNo: f.invoice.tokenNo,
+      id: f.invoice.id, invoiceNo: f.invoice.invoiceNo, docType: f.invoice.docType, status: f.invoice.status, issuedAt: f.invoice.issuedAt, tokenNo: f.invoice.tokenNo,
       grossTotal: f.invoice.grossTotal, discountTotal: f.invoice.discountTotal, taxableTotal: f.invoice.taxableTotal, cgst: f.invoice.cgst, sgst: f.invoice.sgst,
       igst: f.invoice.igst, cess: f.invoice.cess, roundOff: f.invoice.roundOff, grandTotal: f.invoice.grandTotal, buyerGstin: f.invoice.buyerGstin,
       originalInvoiceNo: f.invoice.originalInvoiceNo,

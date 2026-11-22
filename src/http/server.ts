@@ -21,6 +21,7 @@ import { dailySummary, invoiceRegisterCsv, itemSales, taxSummary } from '../serv
 import { REPORTS, reportCsv, runReport } from '../services/reportCatalog.ts';
 import { clearStoreLogo, getStore, logoPng, setStoreLogo, updateStore } from '../services/store.ts';
 import { clearReceiptDesign, getReceiptDesign, previewReceiptDesign, setReceiptDesign } from '../services/printing/receiptDesign.ts';
+import { sendBillOnWhatsApp, whatsappStatus } from '../services/whatsappBill.ts';
 import { createPrinter, deletePrinter, invoicePrints, listPrinters, printSample, receiptPreview, sampleReceipt, testDrawer, testPrint, updatePrinter } from '../services/printing/jobs.ts';
 import { discoverNetworkPrinters, listSerialPorts, listWindowsPrinters } from '../services/printing/devices.ts';
 import { detectPrinters, dismissDetected, listUsbDevices, quickAddPrinter } from '../services/printing/detect.ts';
@@ -210,6 +211,9 @@ export function buildRoutes(opts: { queue?: PrintQueue | null; addons?: LoadedAd
   add('POST', '/api/invoices/:id/kot-reprint', {}, (c) => { const b = body(c, obj({ override: opt(override) })); return reprintKot(c.ctx, c.actor, rid(c), { invoiceId: c.params.id! }, (perm) => requireApproval(c.ctx, c.actor, perm, b.override)); });
   add('POST', '/api/payments/:id/correct', {}, (c) => correctPaymentMode(c.ctx, c.actor, rid(c), { paymentId: c.params.id!, ...body(c, obj({ toMode: oneOf('CASH', 'UPI', 'CARD', 'WALLET', 'CREDIT', 'OTHER'), reference: opt(nullable(str({ max: 60 }))), reason: str({ min: 1, max: 200 }), override: opt(override) })) }));
   add('POST', '/api/invoices/:id/reprint', {}, (c) => reprintInvoice(c.ctx, c.actor, rid(c), { invoiceId: c.params.id!, ...body(c, obj({ override: opt(override) })) }));
+  // bills on WhatsApp through PosiNext Cloud (services/whatsappBill.ts); nothing is written here, so no request id
+  add('GET', '/api/whatsapp', {}, (c) => whatsappStatus(c.ctx, c.actor));
+  add('POST', '/api/invoices/:id/whatsapp', { idem: false }, (c) => sendBillOnWhatsApp(c.ctx, c.actor, { invoiceId: c.params.id!, ...body(c, obj({ mobile: str({ min: 1, max: 20 }) })) }));
 
   // ---- shifts ----
   add('GET', '/api/shifts/current', {}, (c) => currentShift(c.ctx));

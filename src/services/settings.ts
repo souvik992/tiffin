@@ -8,6 +8,7 @@ const DEFAULTS: Record<string, string> = {
   max_lines: '1000',
   receipt_footer: 'Thank you! Visit again.',
   upi_id: '',
+  whatsapp_bill_qr: '0', // 1: "Get this bill on WhatsApp" QR on bills while linked with PosiNext Cloud (services/whatsappBill.ts)
   min_free_disk_mb: '100',
 };
 

@@ -64,6 +64,7 @@ Legend: `[x]` built and tested here. `[~]` built, but needs a check this PC cann
 - [x] Printer settings: add, edit, test print, turn off, remove (kept if it has history); live status per printer
 - [x] Bills report what was queued to print and warn when no receipt or kitchen printer matches
 - [x] Receipt preview as text and browser printing (any printer or PDF)
+- [~] Bills on WhatsApp through PosiNext Cloud (`src/services/whatsappBill.ts`): "Get this bill on WhatsApp" QR on bills (Settings > Receipt, off by default; a design can place it with `{ "type": "qr", "data": "whatsapp" }`), the bill sent up with `bill.printed`, and "Send on WhatsApp" in Orders. Tested against the local hub; not yet with a real WhatsApp account or printed on a real printer
 
 ### Data safety and recovery
 - [x] SQLite WAL with `synchronous=FULL`; checksummed migrations

@@ -144,7 +144,7 @@ export function parseTemplate(text: string): ParseResult {
         break;
       case 'payments': if (b.change !== undefined && typeof b.change !== 'boolean') errors.push(`${w}: "change" must be true or false.`); break;
       case 'qr':
-        if (textOk(b.data, 300, w, 'data') && b.data !== 'upi') placeholders(b.data, w);
+        if (textOk(b.data, 300, w, 'data') && b.data !== 'upi' && b.data !== 'whatsapp') placeholders(b.data, w);
         if (b.size !== undefined && !(Number.isInteger(b.size) && (b.size as number) >= 3 && (b.size as number) <= 8)) errors.push(`${w}: "size" must be 3 to 8.`);
         break;
       case 'tax-table': hasGst = true; break;
@@ -208,7 +208,7 @@ const MODE: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', W
 const rateText = (bp: number) => `${bp / 100}%`.replace(/(\.\d)0+%/, '$1%');
 const rupeesPlain = (p: number) => `${Math.trunc(p / 100)}.${p2(p % 100)}`;
 
-export interface TemplateExtras { upiId?: string }
+export interface TemplateExtras { upiId?: string; whatsappQr?: ((invoiceId: string) => string) | null }
 
 export function renderTemplate(t: ReceiptTemplate, d: ReceiptData, o: ReceiptOptions, x: TemplateExtras = {}): Uint8Array {
   const p = new EscPos(o.cols).init();
@@ -242,6 +242,14 @@ export function renderTemplate(t: ReceiptTemplate, d: ReceiptData, o: ReceiptOpt
       else if (align === 'right') p.right(part);
       else p.wrapped(part);
     }
+  };
+  // Bills on WhatsApp: the QR's address (never on a refund or a cancelled bill); a sample shows where it prints
+  const whatsappUrl = x.whatsappQr && !credit && d.invoice.status !== 'CANCELLED' && (d.invoice.id || o.sample) ? x.whatsappQr(d.invoice.id ?? 'SAMPLE') : null;
+  const whatsappQr = (b: { size?: number; align?: Align }) => {
+    if (!whatsappUrl) return;
+    aligned('Get this bill on WhatsApp', b.align ?? 'center');
+    if (b.align === 'left') p.raw(0x1b, 0x61, 0); else if (b.align === 'right') p.raw(0x1b, 0x61, 2); else p.raw(0x1b, 0x61, 1);
+    p.qr(whatsappUrl, b.size ?? 5).line('').raw(0x1b, 0x61, 0);
   };
   const qtyDecimals = t.blocks.flatMap((b) => (b.type === 'items' ? b.columns : [])).find((c) => c.field === 'qty')?.decimals;
   const qty = (milli: number) => fixedQty(milli, qtyDecimals);
@@ -294,6 +302,7 @@ export function renderTemplate(t: ReceiptTemplate, d: ReceiptData, o: ReceiptOpt
       case 'qr': {
         if (b.if && !values[b.if]) break;
         let data: string;
+        if (b.data === 'whatsapp') { whatsappQr(b); break; }
         if (b.data === 'upi') {
           if (!x.upiId || credit || d.invoice.status === 'CANCELLED') break; // never ask for money on a refund or a cancelled bill
           data = `upi://pay?pa=${encodeURIComponent(x.upiId)}&pn=${encodeURIComponent(d.outlet.name).slice(0, 60)}&am=${rupeesPlain(d.invoice.grandTotal)}&cu=INR&tn=${encodeURIComponent(d.invoice.invoiceNo)}`;
@@ -309,6 +318,8 @@ export function renderTemplate(t: ReceiptTemplate, d: ReceiptData, o: ReceiptOpt
       case 'footer': if (o.footer) styled(b, () => aligned(o.footer, b.align ?? 'center')); break;
     }
   }
+  // a design without its own { "type": "qr", "data": "whatsapp" } block gets the WhatsApp QR at the bottom
+  if (!t.blocks.some((b) => b.type === 'qr' && b.data === 'whatsapp')) whatsappQr({});
   p.feed(3);
   if (o.drawer) p.drawerKick();
   p.cut();

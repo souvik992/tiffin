@@ -22,7 +22,7 @@ Read `RULES.md` first: those rules are non-negotiable. Then `README.md` (guarant
 ## Commands
 | Where | Commands |
 |---|---|
-| Root | `npm test` (235 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
+| Root | `npm test` (238 tests, 1 opt-in), `npm run typecheck`, `npm start`, `npm run seed` (demo data, mobile/PIN: Owner 9000000001/1234, Manager 9000000002/2345, Cashier 9000000003/1111), `npm run dev` (backend + UI), `npm run restore`, `npm run receipt -- <file.tiffinreceipt> [--width 58] [--credit] [--upi id]`, `node scripts/bench.ts 100000`. |
 | `ui/` | `npm run dev`, `npm test`, `npm run typecheck`, `npm run build`. |
 | `addons/ods/` | `npm test`, `npm run typecheck`, `npm run build` (signed package), `npm run installer`. Raise its `version` for each release. |
 | `ios/` | On any PC: `node ios/scripts/prepare.ts --bundle-only` then `node ios/scripts/smoke.ts` (bundle bills an order with `--jitless`). On a Mac: `node ios/scripts/prepare.ts`, `cd ios && xcodegen generate`, then Xcode; CI: `ios.yml` (simulator test, unsigned or signed .ipa). `node scripts/phone-shots.mjs` screenshots every screen at phone and tablet size. |

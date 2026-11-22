@@ -529,6 +529,7 @@ function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; 
   const isOwner = user?.role === 'owner';
   const key = useRef(newKey());
   const [footer, setFooter] = useState<string | null>(null);
+  const [waQr, setWaQr] = useState<boolean | null>(null);
   const [width, setWidth] = useState<58 | 80>(80);
   const [lines, setLines] = useState<string[] | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
@@ -548,7 +549,7 @@ function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; 
   const loadDesign = useCallback(() => { api.receiptDesign().then((d) => setDesign(d.active)).catch(() => setDesign(null)); }, [api]);
   useEffect(() => {
     loadDesign();
-    if (isOwner) api.settings().then((s) => setFooter(s.receipt_footer ?? '')).catch(fail);
+    if (isOwner) api.settings().then((s) => { setFooter(s.receipt_footer ?? ''); setWaQr(s.whatsapp_bill_qr === '1'); }).catch(fail);
     api.printers().then((p) => { const a = p.filter((x) => x.active); setPrinters(a); setTarget((t) => t || a.find((x) => x.isReceipt)?.id || a[0]?.id || ''); }).catch(() => { /* optional */ });
   }, [api, fail, isOwner, loadDesign]);
 
@@ -594,6 +595,10 @@ function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; 
     if (footer === null) return;
     setBusy(true);
     try { await api.saveSettings({ receipt_footer: footer.trim() }, key.current); key.current = newKey(); notify('success', 'Receipt footer saved. New bills use it.'); preview(); if (pending) void check(pending.fileName, pending.content, width); } catch (e) { key.current = newKey(); fail(e); } finally { setBusy(false); }
+  };
+  const saveWaQr = async (on: boolean) => {
+    setBusy(true);
+    try { await api.saveSettings({ whatsapp_bill_qr: on ? '1' : '0' }, key.current); key.current = newKey(); setWaQr(on); notify('success', on ? 'New bills print the WhatsApp QR while this POS is linked with PosiNext Cloud.' : 'New bills print without the WhatsApp QR.'); preview(); } catch (e) { key.current = newKey(); fail(e); } finally { setBusy(false); }
   };
   const printIt = async () => { if (!target) return; try { await api.printSample(target); notify('info', 'Sample bill sent to the printer.'); } catch (e) { fail(e); } };
 
@@ -666,6 +671,16 @@ function ReceiptSettings({ title = 'Invoice / KOT', before }: { title?: string; 
                 <button className="btn-primary mt-3" disabled={busy || footer === null} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
               </>
             ) : <p className="text-sm text-muted-foreground">Only the owner can change the footer.</p>}
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <h3 className="font-semibold">Bill on WhatsApp</h3>
+            <p className="mb-2 text-xs text-muted-foreground">Prints "Get this bill on WhatsApp" and a QR code at the bottom of each bill. The customer scans it, sends the message WhatsApp opens, and gets the bill as a PDF from PosiNext Cloud (free for the shop). Works while this POS is linked with PosiNext Cloud (Settings &gt; Licence: signed in to your account).</p>
+            {isOwner ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={waQr === true} disabled={busy || waQr === null} onChange={(e) => void saveWaQr(e.target.checked)} />
+                Print the WhatsApp QR on bills
+              </label>
+            ) : <p className="text-sm text-muted-foreground">Only the owner can change this.</p>}
           </div>
           <div className="rounded-2xl border border-border bg-card p-4">
             <h3 className="font-semibold">Print a sample bill</h3>
