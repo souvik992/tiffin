@@ -23,7 +23,7 @@ Then, in `desktop/`:
 | `npm test` | unit tests (URL mapping, secret header, navigation rules) |
 | `npm run test:e2e` | builds, then drives the real app: sign-in, a bill with live print status, reports, lockdown, crash restart, single copy, clean close |
 | `npm run typecheck` | strict TypeScript |
-| `npm run icon` | redraws `build/icon.png` (the orange "T") |
+| `npm run icon` | redraws `build/icon.png` (the PosiNext sign on red) |
 
 To test a packaged or installed build, set `POS_E2E_EXE` to its `TiffinPOS.exe` (Mac: `quickPOS.app/Contents/MacOS/quickPOS`) and run `node --test test/app.e2e.test.ts`: a packaged build always checks the licence, so with no key it only checks that the app opens on the licence screen and closes cleanly.
 The test uses a temporary data folder (`POS_HOME`) with virtual printers only.

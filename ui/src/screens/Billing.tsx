@@ -115,13 +115,13 @@ export function Billing() {
   };
 
   if (shift === undefined || !catalog) {
-    return <div className="flex h-screen"><Rail route="billing" /><div className="flex flex-1 items-center justify-center text-muted-foreground">Loading…</div></div>;
+    return <div className="flex h-screen max-md:flex-col"><Rail route="billing" /><div className="flex flex-1 items-center justify-center text-muted-foreground">Loading…</div></div>;
   }
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex h-screen bg-background text-foreground max-md:flex-col">
       <Rail route="billing" />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

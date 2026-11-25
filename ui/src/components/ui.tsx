@@ -28,26 +28,34 @@ export function Rail({ route }: { route: Route }) {
   const extra = addons.flatMap((a) => (a.nav ?? []).filter((n) => !n.visible || n.visible()).map((n) => ({ to: n.route, label: n.label, icon: n.icon })));
   const items = mode.nav ?? [...NAV.slice(0, -2), ...extra, ...NAV.slice(-2)]; // add-on screens before Reports and Settings
   return (
-    <nav className="relative z-30 flex w-16 shrink-0 flex-col items-center gap-2 border-r border-border bg-card py-4" aria-label="Main">
-      {mode.mark ? <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-display text-lg text-primary-foreground">{mode.mark}</div> : <BrandMark className="mb-3 h-10 w-10" />}
+    // phones: a red bar across the top (the logo, then the screens in a row that scrolls); wider screens: the side rail
+    <nav className="rail relative z-30 flex shrink-0 items-center gap-1 bg-primary px-2 py-2 max-md:overflow-x-auto md:w-16 md:flex-col md:gap-2 md:border-r md:border-border md:bg-card md:px-0 md:py-4" aria-label="Main">
+      {mode.mark ? (
+        <div className="mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary font-display text-lg text-primary-foreground max-md:bg-primary-foreground max-md:text-primary md:mb-3 md:mr-0">{mode.mark}</div>
+      ) : (
+        <>
+          <BrandMark className="mb-3 h-10 w-10 max-md:hidden" />
+          <BrandMark inverse className="mr-1 h-10 w-10 shrink-0 md:hidden" />
+        </>
+      )}
       {items.map(({ to, label, icon: Icon }) => (
         <a key={to} href={`#/${to === 'billing' && !mode.nav ? '' : to}`} aria-label={label}
-          aria-current={route === to ? 'page' : undefined} className={`rail-btn group relative ${route === to ? 'rail-btn-active' : ''}`}>
+          aria-current={route === to ? 'page' : undefined} className={`rail-btn group relative shrink-0 ${route === to ? 'rail-btn-active' : ''}`}>
           <Icon className="h-5 w-5" />
           {/* Tooltip to the right, on hover and on keyboard focus (the link's aria-label already names it for screen readers). */}
           <span aria-hidden className="rail-tip">{label}</span>
         </a>
       ))}
-      <div className="mt-auto flex flex-col items-center gap-2">{mode.nav ? null : addons.map((a) => (a.railFooter ? <a.railFooter key={a.id} /> : null))}</div>
+      <div className="flex items-center gap-2 max-md:ml-auto md:mt-auto md:flex-col">{mode.nav ? null : addons.map((a) => (a.railFooter ? <a.railFooter key={a.id} /> : null))}</div>
     </nav>
   );
 }
 
 export function PageShell({ route, title, subtitle, children }: { route: Route; title: string; subtitle: string; children: ReactNode }) {
   return (
-    <div className="flex h-full bg-background text-foreground">
+    <div className="flex h-full bg-background text-foreground max-md:flex-col">
       <Rail route={route} />
-      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
         <h1 className="font-display text-3xl">{title}</h1>
         <p className="mb-6 text-sm text-muted-foreground">{subtitle}</p>
         {children}
@@ -107,18 +115,19 @@ export function PinPad({ onSubmit, busy, label = 'Enter PIN' }: { onSubmit: (pin
   return (
     <div className="mx-auto w-full max-w-xs">
       <p className="mb-2 text-center text-sm text-muted-foreground">{label}</p>
-      <div className="mb-4 flex justify-center gap-3" aria-label={`${pin.length} digits entered`}>
+      <div className="mb-5 flex justify-center gap-3.5" aria-label={`${pin.length} digits entered`}>
         {Array.from({ length: PIN_LENGTH }, (_, i) => (
-          <span key={i} className={`h-3.5 w-3.5 rounded-full border border-primary ${i < pin.length ? 'bg-primary' : ''}`} />
+          <span key={i} className={`h-4 w-4 rounded-full border-2 ${i < pin.length ? 'border-primary bg-primary' : 'border-foreground/60'}`} />
         ))}
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      {/* big, soft keys, as on the DinePOS sign-in */}
+      <div className="grid grid-cols-3 gap-2.5">
         {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
-          <button key={d} type="button" className="qty-btn h-14 w-full text-xl" onClick={() => press(d)}>{d}</button>
+          <button key={d} type="button" className="qty-btn h-14 w-full rounded-2xl text-2xl shadow-sm sm:h-16" onClick={() => press(d)}>{d}</button>
         ))}
-        <button type="button" className="qty-btn h-14 w-full text-sm" onClick={() => setPin('')}>Clear</button>
-        <button type="button" className="qty-btn h-14 w-full text-xl" onClick={() => press('0')}>0</button>
-        <button type="button" className="h-14 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground" disabled={pin.length !== PIN_LENGTH || busy} onClick={submit}>
+        <button type="button" className="qty-btn h-14 w-full rounded-2xl text-sm shadow-sm sm:h-16" onClick={() => setPin('')}>Clear</button>
+        <button type="button" className="qty-btn h-14 w-full rounded-2xl text-2xl shadow-sm sm:h-16" onClick={() => press('0')}>0</button>
+        <button type="button" className="h-14 w-full rounded-2xl bg-primary text-xl font-semibold text-primary-foreground shadow-sm sm:h-16" disabled={pin.length !== PIN_LENGTH || busy} onClick={submit}>
           {busy ? '…' : 'OK'}
         </button>
       </div>

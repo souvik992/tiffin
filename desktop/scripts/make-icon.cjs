@@ -1,8 +1,8 @@
 // Draws the app icon at 512 px with Electron itself, so no image tools are needed.
-// quickPOS: the PosiNext mark (orange square, white and navy arrows; ui/src/components/BrandMark.tsx, the sidebar and the favicon).
+// quickPOS: the PosiNext mark (red square, white and navy arrows; ui/src/components/BrandMark.tsx, the sidebar and the favicon).
 // Usage: npx electron scripts/make-icon.cjs   -> build/icon.png (electron-builder makes the Windows .ico from it;
 // copy it to android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png for the Android app)
-// quickPOS Data Manager's icon: ICON_LETTER=D ICON_BG="oklch(35% .06 50)" ICON_OUT=manager-icon.png (npm run icon:manager)
+// quickPOS Data Manager's icon: ICON_LETTER=D ICON_BG="oklch(36% .13 24)" ICON_OUT=manager-icon.png (npm run icon:manager)
 // iPhone/iPad icon: --ios (npm run icon:ios) -> ../ios/TiffinPOS/Assets.xcassets/AppIcon.appiconset/icon-1024.png:
 // 1024 px, square and opaque with no alpha channel (iOS rounds the corners itself; the App Store refuses transparency).
 const letter = process.env.ICON_LETTER || '', bg = process.env.ICON_BG || 'oklch(66% .2 45)', out = process.env.ICON_OUT || 'icon.png';
@@ -17,9 +17,9 @@ const font = readFileSync(join(__dirname, '..', '..', 'ui', 'src', 'assets', 'fo
 const box = ios
   ? `inset: 0; border-radius: 0; font: 600 580px/1 F, Georgia, serif; padding-bottom: 44px;`
   : `inset: 16px; border-radius: 112px; font: 600 330px/1 F, Georgia, serif; padding-bottom: 24px;`;
-// the PosiNext mark (as in its favicon), filling the box; the box gives the orange and the rounded corners
+// the PosiNext mark (as in its favicon), filling the box; the box gives the red and the rounded corners
 const MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" style="width:100%;height:100%;display:block"><g transform="translate(4.48 7.36) scale(0.72)"><path d="M2 2 L12 12 L2 22 H8 L18 12 L8 2 Z" fill="#ffffff"/><path d="M14 2 L24 12 L14 22 H20 L30 12 L20 2 Z" fill="#0a1326"/></g></svg>`;
-const markBg = '#f15b00';
+const markBg = '#d42a2f'; // red since 2026-11-25 (the DinePOS palette)
 const html = `<!doctype html><html><head><style>
 @font-face { font-family: F; src: url(data:font/woff2;base64,${font}) format('woff2'); font-weight: 400 700; }
 html, body { margin: 0; width: ${size}px; height: ${size}px; background: ${ios ? (letter ? bg : markBg) : 'transparent'}; overflow: hidden; }

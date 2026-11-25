@@ -117,5 +117,14 @@ export function Login() {
 }
 
 export function Centered({ children }: { children: ReactNode }) {
-  return <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-10 text-center">{children}</div>;
+  // the logo top left, as on the DinePOS sign-in; the screen's own content centred
+  return (
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-background px-4 pb-10 pt-20 text-center">
+      <div className="absolute left-4 top-4 flex items-center gap-2 sm:left-6" aria-hidden>
+        <BrandMark className="h-9 w-9" />
+        <span className="font-display text-xl font-semibold">quick<span className="text-primary">POS</span></span>
+      </div>
+      {children}
+    </div>
+  );
 }
